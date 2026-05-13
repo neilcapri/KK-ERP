@@ -170,7 +170,6 @@ export default function Production() {
       planned_output, notes, status: 'planned', created_by_name: profile?.name
     }).select()
     if (error) { alert('Schedule save error: ' + error.message); return }
-    alert('Saved! ' + JSON.stringify(data))
     setShowScheduleModal(false)
     setSchedForm({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
     setScheduleRMWarnings([])

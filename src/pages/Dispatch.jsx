@@ -1,157 +1,238 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12 }
+const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1 }
 
-export default function Production() {
-  const { profile, isAdmin } = useAuth()
-  const [view, setView] = useState('log')
-  const [products, setProducts] = useState([])
-  const [schedule, setSchedule] = useState([])
-  const [history, setHistory] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showScheduleModal, setShowScheduleModal] = useState(false)
-  const [rmWarnings, setRmWarnings] = useState([])
-  const [scheduleRMWarnings, setScheduleRMWarnings] = useState([])
+const AI_PROMPT = `You are reading Konscious Kitchen packing slips. Each slip is a printed form with labeled rows.
+
+The form has these labeled fields at the top:
+- "Date of Packing" — the dispatch date (e.g. May 11)
+- "Customer" — the store/customer name (e.g. BC Danforth)
+- "Invoice Number" — a 4-digit number (e.g. 4664). Look carefully at the handwritten value in the "Invoice Number" row.
+
+Below those fields is a table with columns: Product Name | Date | Qty
+Each row has a product code, a DATE (this is the PRODUCTION DATE — when the product was made), and a quantity number.
+IMPORTANT: Capture the Date column for each line item — this is when that product was produced.
+
+Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPC, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB.
+Also: HPCo/HPCO = HPC, PCRT = skip, PVBBS = PVBB slice type.
+
+Rules:
+- (BULK) after code = type "bulk"; default = "pack"
+- PVBBS or "PVBB Slice" = type "slice"
+- Crossed out items = skip
+- Arrow pointing down = same slip continues below
+- Multiple separate slips = extract each separately
+
+Return ONLY valid JSON:
+{"slips":[{"date":"May 11","customer":"BC Danforth","invoice":"4664","items":[{"code":"PBB","qty":6,"type":"pack","production_date":"May 08","note":""}],"flags":[]}]}`
+
+function parseSlipDate(dateStr) {
+  if (!dateStr) return new Date().toISOString().split('T')[0]
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr
+  try {
+    const year = new Date().getFullYear()
+    const d = new Date(`${dateStr} ${year}`)
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+  } catch(e) {}
+  return new Date().toISOString().split('T')[0]
+}
+
+export default function Dispatch() {
+  const { profile } = useAuth()
+  const [view, setView] = useState('ai')
+  const [files, setFiles] = useState([])
+  const [processing, setProcessing] = useState(false)
+  const [extracted, setExtracted] = useState([])
+  const [verifiedItems, setVerifiedItems] = useState({})
   const [log, setLog] = useState([])
+  const [products, setProducts] = useState([])
+  const [dispatches, setDispatches] = useState([])
+  const [expandedId, setExpandedId] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
-
-  const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
-  const [schedForm, setSchedForm] = useState({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
+  const [manForm, setManForm] = useState({ date: new Date().toISOString().split('T')[0], customer: '', invoice: '' })
+  const [manLines, setManLines] = useState([])
+  const [manCode, setManCode] = useState('')
+  const [manQty, setManQty] = useState('')
+  const [manType, setManType] = useState('pack')
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    setLoading(true)
-    const [p, s, h] = await Promise.all([
-      supabase.from('products').select('code,name,category').order('code'),
-      supabase.from('production_schedule').select('*').order('scheduled_date').limit(50),
-      supabase.from('productions').select('*').order('created_at', { ascending: false }).limit(50),
+    const [p, d] = await Promise.all([
+      supabase.from('products').select('code,name').order('code'),
+      supabase.from('dispatches').select('*,dispatch_items(*)').order('created_at', { ascending: false }).limit(100),
     ])
     setProducts(p.data || [])
-    setSchedule(s.data || [])
-    setHistory(h.data || [])
-    setLoading(false)
+    setDispatches(d.data || [])
   }
 
-  function calcOutput(code, inputType, qty) {
-    const q = parseFloat(qty) || 0
-    if (inputType === 'trays' && TRAY_YIELD[code]) return Math.round(q * TRAY_YIELD[code])
-    if (inputType === 'logs') return Math.round(q * 11)
-    return Math.round(q)
-  }
-
-  async function checkRM(code, outputUnits) {
-    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', code)
-    if (!bom?.length) return []
-    const warns = []
-    for (const item of bom) {
-      const neededKg = (item.qty_per_unit * outputUnits) / 1000
-      const { data: rm } = await supabase.from('raw_materials').select('stock,unit').eq('name', item.rm_name).single()
-      if (rm && rm.stock < neededKg) warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3), have: rm.stock.toFixed(3) })
-    }
-    return warns
-  }
-
-  async function handleCodeChange(code) {
-    setForm(f => ({ ...f, code }))
-    if (code && form.inputQty) {
-      const out = calcOutput(code, form.inputType, form.inputQty)
-      setForm(f => ({ ...f, outputUnits: String(out) }))
-      const warns = await checkRM(code, out)
-      setRmWarnings(warns)
-    }
-  }
-
-  async function handleQtyChange(qty) {
-    setForm(f => ({ ...f, inputQty: qty }))
-    if (form.code) {
-      const out = calcOutput(form.code, form.inputType, qty)
-      setForm(f => ({ ...f, outputUnits: String(out) }))
-      if (out > 0) {
-        const warns = await checkRM(form.code, out)
-        setRmWarnings(warns)
-      }
-    }
-  }
-
-  async function handleSchedProductChange(code) {
-    setSchedForm(f => ({ ...f, product_code: code }))
-    if (code && schedForm.planned_input) {
-      const out = calcOutput(code, schedForm.input_type, schedForm.planned_input)
-      const warns = await checkRM(code, out)
-      setScheduleRMWarnings(warns)
-    }
-  }
-
-  async function handleSchedQtyChange(qty) {
-    setSchedForm(f => ({ ...f, planned_input: qty }))
-    if (schedForm.product_code) {
-      const out = calcOutput(schedForm.product_code, schedForm.input_type, qty)
-      if (out > 0) {
-        const warns = await checkRM(schedForm.product_code, out)
-        setScheduleRMWarnings(warns)
-      }
-    }
+  function calcUnits(code, qty, type) {
+    if (type === 'slice') return Math.round(qty / 3)
+    if (type === 'bulk') return qty
+    return qty * (PACK_SIZE[code] || 1)
   }
 
   function addLog(msg, type = '') {
     setLog(l => [...l, { msg, type, time: new Date().toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }])
   }
 
-  async function saveProduction() {
-    const { code, date, inputType, inputQty, outputUnits, notes } = form
-    if (!code || !inputQty || !outputUnits) { alert('Please fill in all fields.'); return }
-    const output = parseInt(outputUnits)
-    addLog(`Saving ${code} +${output} units...`)
-    const { data: prod } = await supabase.from('products').select('units,name').eq('code', code).single()
-    const newUnits = (prod?.units || 0) + output
-    await supabase.from('products').update({ units: newUnits }).eq('code', code)
-    addLog(`✓ FG stock updated: ${prod?.units} → ${newUnits}`, 'ok')
-    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', code)
-    if (bom?.length) {
-      for (const item of bom) {
-        const deductKg = (item.qty_per_unit * output) / 1000
-        const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
-        if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductKg) }).eq('name', item.rm_name)
-      }
-      addLog(`✓ ${bom.length} RMs deducted via BOM`, 'ok')
-    }
-    await supabase.from('productions').insert({
-      date, product_code: code, product_name: prod?.name || code,
-      input_qty: parseFloat(inputQty), input_type: inputType,
-      output_units: output, notes, created_by_name: profile?.name
+  async function fileToB64(f) {
+    return new Promise((res, rej) => {
+      const r = new FileReader()
+      r.onload = () => res(r.result.split(',')[1])
+      r.onerror = rej
+      r.readAsDataURL(f)
     })
-    await supabase.from('activity').insert({
-      type: 'production', title: `${code}: +${output} units`,
-      description: `${inputQty} ${inputType} · ${prod?.name}`,
-      created_by_name: profile?.name
-    })
-    addLog(`✓ Production saved successfully!`, 'ok')
-    setForm({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
-    setRmWarnings([])
-    loadData()
   }
 
-  async function deleteProduction(h) {
-    if (!window.confirm(`Delete production entry for ${h.product_code} (+${h.output_units} units) on ${h.date}?\n\nThis will reverse the stock change.`)) return
-    setDeletingId(h.id)
-    try {
-      const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
-      if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - h.output_units) }).eq('code', h.product_code)
-      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', h.product_code)
-      if (bom?.length) {
-        for (const item of bom) {
-          const restoreKg = (item.qty_per_unit * h.output_units) / 1000
-          const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
-          if (rm) await supabase.from('raw_materials').update({ stock: rm.stock + restoreKg }).eq('name', item.rm_name)
-        }
+  async function verifyProductionDates(slips) {
+    const verified = {}
+    for (const slip of slips) {
+      for (const item of slip.items || []) {
+        if (!item.production_date) continue
+        const dateStr = parseSlipDate(item.production_date)
+        const key = `${item.code}_${dateStr}`
+        const { data } = await supabase.from('productions')
+          .select('id').eq('product_code', item.code).eq('date', dateStr).limit(1)
+        verified[key] = data && data.length > 0
       }
-      await supabase.from('productions').delete().eq('id', h.id)
+    }
+    return verified
+  }
+
+  async function processSlips() {
+    if (!files.length) return
+    setProcessing(true); setLog([]); setExtracted([]); setVerifiedItems({})
+    addLog(`Processing ${files.length} file(s)...`)
+    const allSlips = []
+    for (let i = 0; i < files.length; i += 4) {
+      const batch = files.slice(i, i + 4)
+      try {
+        const content = []
+        for (const f of batch) {
+          const b64 = await fileToB64(f)
+          const isPDF = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+          content.push(isPDF
+            ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+            : { type: 'image', source: { type: 'base64', media_type: f.type || 'image/jpeg', data: b64 } }
+          )
+        }
+        content.push({ type: 'text', text: 'Extract all packing slip data. Capture the Date column for each line item as production_date. Return JSON only.' })
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': process.env.REACT_APP_ANTHROPIC_KEY,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, system: AI_PROMPT, messages: [{ role: 'user', content }] })
+        })
+        const data = await res.json()
+        if (data.error) { addLog(`Error: ${data.error.message}`, 'err'); continue }
+        const raw = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim()
+        const parsed = JSON.parse(raw)
+        ;(parsed.slips || []).forEach(slip => {
+          allSlips.push(slip)
+          addLog(`✓ ${slip.customer} — Inv #${slip.invoice || '?'} — ${slip.items?.length || 0} lines`, 'ok')
+          ;(slip.flags || []).forEach(f => addLog(`⚠ ${f}`, 'warn'))
+        })
+      } catch (err) { addLog(`Error: ${err.message}`, 'err') }
+    }
+    setExtracted(allSlips)
+    if (allSlips.length > 0) {
+      addLog('Verifying production dates...', '')
+      const verified = await verifyProductionDates(allSlips)
+      setVerifiedItems(verified)
+      const found = Object.values(verified).filter(Boolean).length
+      const total = Object.keys(verified).length
+      addLog(`✓ Production date check: ${found}/${total} verified`, 'ok')
+    }
+    addLog('Done!', 'ok')
+    setProcessing(false)
+  }
+
+  async function saveExtracted() {
+    let savedSlips = 0
+    let savedLines = 0
+    for (const slip of extracted) {
+      const dateStr = parseSlipDate(slip.date)
+      addLog(`Saving: ${slip.customer} — date: ${dateStr}`)
+      const { data: dispatch, error: dispatchErr } = await supabase
+        .from('dispatches').insert({
+          date: dateStr, customer_name: slip.customer,
+          invoice_number: slip.invoice || '',
+          created_by_name: profile?.name || 'admin'
+        }).select().single()
+      if (dispatchErr) { addLog(`❌ Dispatch save error: ${dispatchErr.message}`, 'err'); continue }
+      savedSlips++
+      for (const item of slip.items || []) {
+        const units = calcUnits(item.code, item.qty, item.type)
+        const prodDateStr = item.production_date ? parseSlipDate(item.production_date) : null
+        const key = `${item.code}_${prodDateStr}`
+        const prodVerified = prodDateStr ? verifiedItems[key] : null
+        const { error: itemErr } = await supabase.from('dispatch_items').insert({
+          dispatch_id: dispatch.id,
+          product_code: item.code,
+          product_name: products.find(p => p.code === item.code)?.name || item.code,
+          qty: item.qty, dispatch_type: item.type, units_dispatched: units,
+          production_date: prodDateStr,
+          production_verified: prodVerified
+        })
+        if (itemErr) { addLog(`❌ Item error (${item.code}): ${itemErr.message}`, 'err'); continue }
+        const { data: prod } = await supabase.from('products').select('units').eq('code', item.code).single()
+        if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', item.code)
+        savedLines++
+      }
       await supabase.from('activity').insert({
-        type: 'production', title: `Production Deleted: ${h.product_code}`,
-        description: `${h.output_units} units reversed · ${h.date}`,
+        type: 'dispatch', title: `Dispatch: ${slip.customer}`,
+        description: `${slip.items?.length} lines · Inv #${slip.invoice || '—'}`,
+        created_by_name: profile?.name || 'admin'
+      })
+    }
+    addLog(`✓ Saved ${savedSlips} slip(s), ${savedLines} lines. Stock updated.`, 'ok')
+    setExtracted([]); setFiles([]); setVerifiedItems({}); loadData()
+  }
+
+  async function saveManual() {
+    if (!manForm.customer || !manLines.length) { alert('Add customer and at least one line.'); return }
+    const { data: dispatch, error: err } = await supabase
+      .from('dispatches').insert({ date: manForm.date, customer_name: manForm.customer, invoice_number: manForm.invoice, created_by_name: profile?.name || 'admin' })
+      .select().single()
+    if (err) { alert('Save error: ' + err.message); return }
+    for (const line of manLines) {
+      const units = calcUnits(line.code, line.qty, line.type)
+      await supabase.from('dispatch_items').insert({
+        dispatch_id: dispatch.id, product_code: line.code,
+        product_name: products.find(p => p.code === line.code)?.name || line.code,
+        qty: line.qty, dispatch_type: line.type, units_dispatched: units
+      })
+      const { data: prod } = await supabase.from('products').select('units').eq('code', line.code).single()
+      if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', line.code)
+    }
+    await supabase.from('activity').insert({
+      type: 'dispatch', title: `Dispatch: ${manForm.customer}`,
+      description: `${manLines.length} lines · Inv #${manForm.invoice || '—'}`,
+      created_by_name: profile?.name || 'admin'
+    })
+    setManLines([]); setManForm({ date: new Date().toISOString().split('T')[0], customer: '', invoice: '' }); loadData()
+  }
+
+  async function deleteDispatch(dispatch) {
+    if (!window.confirm(`Delete dispatch for ${dispatch.customer_name || 'unknown'} (Inv #${dispatch.invoice_number || '—'})?\n\nThis will restore stock levels.`)) return
+    setDeletingId(dispatch.id)
+    try {
+      for (const item of dispatch.dispatch_items || []) {
+        const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
+        if (prod) await supabase.from('products').update({ units: prod.units + item.units_dispatched }).eq('code', item.product_code)
+      }
+      await supabase.from('dispatch_items').delete().eq('dispatch_id', dispatch.id)
+      await supabase.from('dispatches').delete().eq('id', dispatch.id)
+      await supabase.from('activity').insert({
+        type: 'dispatch', title: `Dispatch Deleted: ${dispatch.customer_name}`,
+        description: `Inv #${dispatch.invoice_number || '—'} — stock restored`,
         created_by_name: profile?.name || 'admin'
       })
       loadData()
@@ -159,167 +240,204 @@ export default function Production() {
     setDeletingId(null)
   }
 
-  async function saveSchedule() {
-    const { scheduled_date, product_code, planned_input, input_type, notes } = schedForm
-    if (!scheduled_date || !product_code) { alert('Please fill in date and product.'); return }
-    const { data: p } = await supabase.from('products').select('name').eq('code', product_code).single()
-    const planned_output = calcOutput(product_code, input_type, planned_input)
-    await supabase.from('production_schedule').insert({
-      scheduled_date, product_code, product_name: p?.name || product_code,
-      planned_input: parseFloat(planned_input) || 0, input_type,
-      planned_output, notes, status: 'planned', created_by_name: profile?.name
-    })
-    setShowScheduleModal(false)
-    setSchedForm({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
-    setScheduleRMWarnings([])
-    loadData()
+  const prodBadge = (verified) => {
+    if (verified === null || verified === undefined) return null
+    return verified
+      ? <span style={{ fontSize: 10, background: 'var(--green-l)', color: 'var(--green)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)' }}>✓ prod</span>
+      : <span style={{ fontSize: 10, background: 'var(--red-l)', color: 'var(--red)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)' }}>✗ prod</span>
   }
-
-  async function updateScheduleStatus(id, status) {
-    await supabase.from('production_schedule').update({ status }).eq('id', id)
-    loadData()
-  }
-
-  async function deleteSchedule(id, productCode) {
-    if (!window.confirm(`Delete this scheduled production for ${productCode}?`)) return
-    await supabase.from('production_schedule').delete().eq('id', id)
-    loadData()
-  }
-
-  const statusColors = { planned: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'red' }
 
   return (
     <>
       <div className="page-header">
-        <div><h2>PRODUCTION</h2><p>Log batches & manage schedule</p></div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowScheduleModal(true)}>+ Schedule</button>
-          <button className="btn btn-green" onClick={() => setView('log')}>+ Log Batch</button>
-        </div>
+        <div><h2>DISPATCH</h2><p>Process orders & packing slips</p></div>
       </div>
-
       <div className="page-body">
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
-          {['log','schedule','history'].map(v => (
-            <button key={v} onClick={() => setView(v)}
-              style={{ padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: view===v?'var(--ink)':'var(--ink3)', borderBottom: view===v?'2px solid var(--ink)':'2px solid transparent', marginBottom: -1 }}>
-              {v === 'log' ? '📝 Log Batch' : v === 'schedule' ? '📅 Schedule' : '📜 History'}
+          {['ai','manual','history'].map(v => (
+            <button key={v} onClick={() => setView(v)} style={{ padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: view===v?'var(--ink)':'var(--ink3)', borderBottom: view===v?'2px solid var(--ink)':'2px solid transparent', marginBottom: -1 }}>
+              {v === 'ai' ? '📸 AI Reader' : v === 'manual' ? '✏️ Manual' : '📜 History'}
             </button>
           ))}
         </div>
 
-        {view === 'log' && (
+        {view === 'ai' && (
           <div className="grid2">
-            <div className="card">
-              <div className="card-title">Log Production Batch</div>
-              <div className="field"><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} /></div>
-              <div className="field">
-                <label>Product</label>
-                <select value={form.code} onChange={e => handleCodeChange(e.target.value)}>
-                  <option value="">Select product...</option>
-                  {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
-                </select>
-              </div>
-              <div className="field-row">
-                <div className="field" style={{margin:0}}>
-                  <label>Input Type</label>
-                  <select value={form.inputType} onChange={e => { setForm(f=>({...f,inputType:e.target.value})); handleQtyChange(form.inputQty) }}>
-                    <option value="units">Units</option>
-                    <option value="trays">Trays</option>
-                    <option value="loaves">Loaves</option>
-                    <option value="logs">Logs (Biscotti)</option>
-                  </select>
+            <div>
+              <div className="card">
+                <div className="card-title">Upload Packing Slips</div>
+                <div className="upload-zone">
+                  <input type="file" accept="image/*,.pdf,application/pdf" multiple onChange={e => setFiles(Array.from(e.target.files))} />
+                  <div className="upload-icon" style={{fontSize:32}}>📋</div>
+                  <div style={{fontSize:12,color:'var(--ink2)',lineHeight:1.8}}>
+                    <strong>Tap to upload packing slips</strong><br/>
+                    📷 Camera · 🖼 Gallery · 📄 PDF · Multiple OK
+                  </div>
                 </div>
-                <div className="field" style={{margin:0}}>
-                  <label>Quantity</label>
-                  <input type="number" value={form.inputQty} onChange={e => handleQtyChange(e.target.value)} placeholder="0" />
-                </div>
-              </div>
-              {form.outputUnits && (
-                <div style={{ background: 'var(--green-l)', padding: 12, borderRadius: 3, marginBottom: 14, fontSize: 12, color: 'var(--green)' }}>
-                  <strong>Output: {form.outputUnits} units</strong>
-                </div>
-              )}
-              {rmWarnings.length > 0 && (
-                <div className="alert alert-red" style={{ flexDirection: 'column', gap: 4 }}>
-                  <strong>⚠️ Insufficient RM stock:</strong>
-                  {rmWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}kg, have {w.have}kg</div>)}
-                </div>
-              )}
-              <div className="field"><label>Notes</label><textarea value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Batch notes..." rows={2} /></div>
-              <button className="btn btn-green btn-full" onClick={saveProduction}>✓ Save & Update Stock</button>
-              {log.length > 0 && (
-                <div className="log" style={{ marginTop: 12 }}>
-                  {log.map((l,i) => <div key={i} className={l.type}>{l.time} — {l.msg}</div>)}
-                </div>
-              )}
-            </div>
-            <div className="card">
-              <div className="card-title">Tray Yields Reference</div>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Code</th><th>Product</th><th>Units/Tray</th></tr></thead>
-                  <tbody>
-                    {Object.entries(TRAY_YIELD).map(([code, yield_]) => (
-                      <tr key={code}>
-                        <td><span className="code-tag">{code}</span></td>
-                        <td style={{fontSize:11}}>{products.find(p=>p.code===code)?.name||code}</td>
-                        <td style={{fontWeight:500,color:'var(--green)'}}>{yield_}</td>
-                      </tr>
+                {files.length > 0 && (
+                  <div className="thumb-row">
+                    {files.map((f, i) => (
+                      <div key={i} className="thumb-wrap">
+                        {f.type === 'application/pdf' || f.name.endsWith('.pdf')
+                          ? <div style={{width:64,height:64,background:'var(--red-l)',border:'1px solid var(--red)',borderRadius:3,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2}}><span style={{fontSize:20}}>📄</span><span style={{fontSize:8,color:'var(--red)'}}>PDF</span></div>
+                          : <img src={URL.createObjectURL(f)} alt="" style={{width:64,height:64,objectFit:'cover',border:'1px solid var(--border)',borderRadius:3}} />
+                        }
+                        <button className="thumb-x" onClick={() => setFiles(files.filter((_,j)=>j!==i))}>×</button>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                )}
+                <button className="btn btn-primary btn-full" style={{marginTop:12}} onClick={processSlips} disabled={!files.length || processing}>
+                  {processing ? <><span className="spinner" style={{borderTopColor:'#fff',borderColor:'rgba(255,255,255,.3)'}} /> Reading...</> : 'Read Slips with AI'}
+                </button>
               </div>
+              <div className="log">
+                {log.length === 0
+                  ? <span style={{color:'var(--ink3)'}}>Ready — upload images to begin</span>
+                  : log.map((l,i) => <div key={i} className={l.type}>{l.time} — {l.msg}</div>)
+                }
+              </div>
+            </div>
+            <div>
+              {extracted.length > 0 && (
+                <div className="card">
+                  <div className="card-title">✅ Review Extracted Data</div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Customer</th><th>Inv #</th><th>Code</th><th>Qty</th><th>Type</th><th>Units</th><th>Prod Date</th></tr></thead>
+                      <tbody>
+                        {extracted.map((slip, si) => (slip.items || []).map((item, ii) => {
+                          const prodDateStr = item.production_date ? parseSlipDate(item.production_date) : null
+                          const key = `${item.code}_${prodDateStr}`
+                          const verified = prodDateStr ? verifiedItems[key] : undefined
+                          return (
+                            <tr key={`${si}-${ii}`}>
+                              <td style={{fontSize:11}}>{ii === 0 ? slip.customer : ''}</td>
+                              <td style={{fontSize:11,color:'var(--ink3)'}}>{ii === 0 ? (slip.invoice || '—') : ''}</td>
+                              <td><span className="code-tag">{item.code}</span></td>
+                              <td>{item.qty}</td>
+                              <td><span className={`badge badge-${item.type==='pack'?'amber':'blue'}`}>{item.type}</span></td>
+                              <td style={{color:'var(--green)',fontWeight:500}}>{calcUnits(item.code,item.qty,item.type)}</td>
+                              <td style={{fontSize:11}}>
+                                {item.production_date || '—'}
+                                {prodDateStr && verified !== undefined && <span style={{marginLeft:4}}>{prodBadge(verified)}</span>}
+                              </td>
+                            </tr>
+                          )
+                        }))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{display:'flex',gap:10,marginTop:12}}>
+                    <button className="btn btn-primary btn-full" onClick={saveExtracted}>Save All to Inventory</button>
+                    <button className="btn btn-secondary" onClick={() => { setExtracted([]); setVerifiedItems({}) }}>Discard</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {view === 'schedule' && (
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div className="card-title" style={{ margin: 0 }}>Production Schedule</div>
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowScheduleModal(true)}>+ Add</button>
-            </div>
-            {schedule.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 32, color: 'var(--ink3)' }}>No scheduled production. Click "+ Schedule" to add.</div>
-            ) : (
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Date</th><th>Product</th><th>Planned Input</th><th>Planned Output</th><th>RM Check</th><th>Status</th><th></th><th style={{width:60}}></th></tr></thead>
-                  <tbody>
-                    {schedule.map(s => (
-                      <ScheduleRow key={s.id} s={s} products={products} statusColors={statusColors}
-                        onStatusChange={updateScheduleStatus} onDelete={deleteSchedule} calcOutput={calcOutput} checkRM={checkRM} />
-                    ))}
-                  </tbody>
-                </table>
+        {view === 'manual' && (
+          <div className="grid2">
+            <div className="card">
+              <div className="card-title">Manual Dispatch Entry</div>
+              <div className="field"><label>Customer</label><input type="text" value={manForm.customer} onChange={e=>setManForm(f=>({...f,customer:e.target.value}))} placeholder="Customer name" /></div>
+              <div className="field-row">
+                <div className="field" style={{margin:0}}><label>Date</label><input type="date" value={manForm.date} onChange={e=>setManForm(f=>({...f,date:e.target.value}))} /></div>
+                <div className="field" style={{margin:0}}><label>Invoice #</label><input type="text" value={manForm.invoice} onChange={e=>setManForm(f=>({...f,invoice:e.target.value}))} placeholder="4601" /></div>
               </div>
-            )}
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr auto',gap:8,marginBottom:12,alignItems:'flex-end'}}>
+                <div className="field" style={{margin:0}}><label>Product</label><select value={manCode} onChange={e=>setManCode(e.target.value)}><option value="">Select...</option>{products.map(p=><option key={p.code} value={p.code}>{p.code}</option>)}</select></div>
+                <div className="field" style={{margin:0}}><label>Qty</label><input type="number" value={manQty} onChange={e=>setManQty(e.target.value)} placeholder="0" /></div>
+                <div className="field" style={{margin:0}}><label>Type</label><select value={manType} onChange={e=>setManType(e.target.value)}><option value="pack">Pack</option><option value="bulk">Bulk</option><option value="slice">Slice</option></select></div>
+                <button className="btn btn-secondary btn-sm" style={{marginBottom:0}} onClick={() => { if(manCode&&manQty){setManLines(l=>[...l,{code:manCode,qty:parseInt(manQty),type:manType}]);setManCode('');setManQty('')} }}>+</button>
+              </div>
+              {manLines.map((l,i) => (
+                <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'var(--surface2)',borderRadius:3,marginBottom:6,fontSize:12}}>
+                  <span className="code-tag">{l.code}</span>
+                  <span style={{flex:1}}>{l.qty} {l.type}</span>
+                  <span style={{color:'var(--green)',fontWeight:500}}>={calcUnits(l.code,l.qty,l.type)}u</span>
+                  <button onClick={()=>setManLines(manLines.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:16}}>×</button>
+                </div>
+              ))}
+              {manLines.length > 0 && <button className="btn btn-primary btn-full" style={{marginTop:8}} onClick={saveManual}>Save Dispatch</button>}
+            </div>
           </div>
         )}
 
         {view === 'history' && (
           <div className="card">
-            <div className="card-title">Production History</div>
+            <div className="card-title">Recent Dispatches</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Date</th><th>Product</th><th>Input</th><th>Output</th><th>By</th><th>Notes</th><th style={{width:60}}></th></tr></thead>
+                <thead>
+                  <tr>
+                    <th style={{width:20}}></th>
+                    <th>Date</th><th>Customer</th><th>Invoice</th><th>Lines</th><th>By</th>
+                    <th style={{width:60}}></th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {history.map(h => (
-                    <tr key={h.id}>
-                      <td style={{fontSize:12}}>{h.date}</td>
-                      <td><span className="code-tag">{h.product_code}</span></td>
-                      <td style={{fontSize:12}}>{h.input_qty} {h.input_type}</td>
-                      <td style={{fontWeight:600,color:'var(--green)'}}>+{h.output_units}</td>
-                      <td style={{fontSize:11,color:'var(--ink3)'}}>{h.created_by_name}</td>
-                      <td style={{fontSize:11,color:'var(--ink3)'}}>{h.notes}</td>
-                      <td>
-                        <button onClick={() => deleteProduction(h)} disabled={deletingId === h.id}
-                          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === h.id ? 0.5 : 1 }}>
-                          {deletingId === h.id ? '...' : 'Delete'}
-                        </button>
-                      </td>
-                    </tr>
+                  {dispatches.map(d => (
+                    <React.Fragment key={d.id}>
+                      <tr style={{ background: expandedId === d.id ? 'var(--surface2)' : '' }}>
+                        <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
+                          {expandedId === d.id ? '▼' : '▶'}
+                        </td>
+                        <td style={{fontSize:12,cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.date}</td>
+                        <td style={{fontWeight:500,cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.customer_name}</td>
+                        <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.invoice_number || '—'}</td>
+                        <td style={{cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.dispatch_items?.length || 0}</td>
+                        <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.created_by_name}</td>
+                        <td>
+                          <button onClick={() => deleteDispatch(d)} disabled={deletingId === d.id}
+                            style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === d.id ? 0.5 : 1 }}>
+                            {deletingId === d.id ? '...' : 'Delete'}
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedId === d.id && (
+                        <tr>
+                          <td colSpan={7} style={{padding:'0 0 12px 32px',background:'var(--surface2)'}}>
+                            <table style={{width:'100%',fontSize:12}}>
+                              <thead>
+                                <tr>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Code</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Product</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Qty</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Type</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Units</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Prod Date</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(d.dispatch_items || []).map((item, i) => (
+                                  <tr key={i} style={{borderTop:'1px solid var(--border)'}}>
+                                    <td style={{padding:'6px 8px'}}><span className="code-tag">{item.product_code}</span></td>
+                                    <td style={{padding:'6px 8px',color:'var(--ink2)'}}>{item.product_name}</td>
+                                    <td style={{padding:'6px 8px'}}>{item.qty}</td>
+                                    <td style={{padding:'6px 8px'}}><span className={`badge badge-${item.dispatch_type==='pack'?'amber':'blue'}`}>{item.dispatch_type}</span></td>
+                                    <td style={{padding:'6px 8px',color:'var(--green)',fontWeight:500}}>{item.units_dispatched}</td>
+                                    <td style={{padding:'6px 8px',fontSize:11}}>
+                                      {item.production_date || '—'}
+                                      {item.production_date && item.production_verified !== null && item.production_verified !== undefined && (
+                                        <span style={{marginLeft:4}}>
+                                          {item.production_verified
+                                            ? <span style={{color:'var(--green)'}}>✓</span>
+                                            : <span style={{color:'var(--red)'}}>✗</span>
+                                          }
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -327,99 +445,6 @@ export default function Production() {
           </div>
         )}
       </div>
-
-      {showScheduleModal && (
-        <div className="modal-bg" onClick={e => e.target===e.currentTarget && setShowScheduleModal(false)}>
-          <div className="modal">
-            <button className="modal-close" onClick={() => setShowScheduleModal(false)}>×</button>
-            <div className="modal-title">SCHEDULE PRODUCTION</div>
-            <div className="field"><label>Date</label><input type="date" value={schedForm.scheduled_date} onChange={e => setSchedForm(f=>({...f,scheduled_date:e.target.value}))} /></div>
-            <div className="field"><label>Product</label>
-              <select value={schedForm.product_code} onChange={e => handleSchedProductChange(e.target.value)}>
-                <option value="">Select...</option>
-                {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
-              </select>
-            </div>
-            <div className="field-row">
-              <div className="field" style={{margin:0}}><label>Input Type</label>
-                <select value={schedForm.input_type} onChange={e => setSchedForm(f=>({...f,input_type:e.target.value}))}>
-                  <option value="trays">Trays</option><option value="units">Units</option><option value="loaves">Loaves</option>
-                </select>
-              </div>
-              <div className="field" style={{margin:0}}><label>Planned Qty</label>
-                <input type="number" value={schedForm.planned_input} onChange={e => handleSchedQtyChange(e.target.value)} />
-              </div>
-            </div>
-            {schedForm.product_code && schedForm.planned_input && (
-              <div style={{ background: 'var(--green-l)', padding: 10, borderRadius: 3, marginBottom: 12, fontSize: 12, color: 'var(--green)' }}>
-                <strong>Expected output: {calcOutput(schedForm.product_code, schedForm.input_type, schedForm.planned_input)} units</strong>
-              </div>
-            )}
-            {scheduleRMWarnings.length > 0 && (
-              <div className="alert alert-red" style={{ flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-                <strong>⚠️ Insufficient RM stock:</strong>
-                {scheduleRMWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}kg, have {w.have}kg</div>)}
-              </div>
-            )}
-            {scheduleRMWarnings.length === 0 && schedForm.product_code && schedForm.planned_input && (
-              <div style={{ background: 'var(--green-l)', padding: 8, borderRadius: 3, marginBottom: 12, fontSize: 11, color: 'var(--green)' }}>
-                ✅ RM stock sufficient
-              </div>
-            )}
-            <div className="field"><label>Notes</label><textarea value={schedForm.notes} onChange={e => setSchedForm(f=>({...f,notes:e.target.value}))} rows={2} /></div>
-            <div style={{display:'flex',gap:10}}>
-              <button className="btn btn-primary btn-full" onClick={saveSchedule}>Save Schedule</button>
-              <button className="btn btn-secondary" onClick={() => setShowScheduleModal(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
-  )
-}
-
-// Schedule row with RM check
-function ScheduleRow({ s, products, statusColors, onStatusChange, onDelete, calcOutput, checkRM }) {
-  const [rmStatus, setRMStatus] = useState(null)
-
-  useEffect(() => {
-    async function check() {
-      const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
-      const warns = await checkRM(s.product_code, out)
-      setRMStatus(warns)
-    }
-    check()
-  }, [s.id])
-
-  return (
-    <tr>
-      <td style={{fontSize:12}}>{s.scheduled_date}</td>
-      <td><span className="code-tag">{s.product_code}</span> <span style={{fontSize:11,color:'var(--ink2)'}}>{s.product_name}</span></td>
-      <td style={{fontSize:12}}>{s.planned_input} {s.input_type}</td>
-      <td style={{fontWeight:500,color:'var(--green)'}}>{s.planned_output} units</td>
-      <td>
-        {rmStatus === null ? <span style={{fontSize:11,color:'var(--ink3)'}}>...</span>
-          : rmStatus.length === 0
-            ? <span style={{fontSize:11,color:'var(--green)'}}>✅ OK</span>
-            : <span style={{fontSize:11,color:'var(--red)'}}>⚠️ {rmStatus.length} short</span>
-        }
-      </td>
-      <td><span className={`badge badge-${statusColors[s.status]}`}>{s.status}</span></td>
-      <td>
-        <select value={s.status} onChange={e => onStatusChange(s.id, e.target.value)}
-          style={{ fontSize: 10, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 2, fontFamily: 'var(--mono)', background: 'var(--surface)' }}>
-          <option value="planned">Planned</option>
-          <option value="in_progress">In Progress</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-      </td>
-      <td>
-        <button onClick={() => onDelete(s.id, s.product_code)}
-          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}>
-          Delete
-        </button>
-      </td>
-    </tr>
   )
 }

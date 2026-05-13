@@ -15,8 +15,8 @@ export default function Production() {
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [rmWarnings, setRmWarnings] = useState([])
   const [log, setLog] = useState([])
+  const [deletingId, setDeletingId] = useState(null)
 
-  // Form state
   const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
   const [schedForm, setSchedForm] = useState({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
 
@@ -27,7 +27,7 @@ export default function Production() {
     const [p, s, h] = await Promise.all([
       supabase.from('products').select('code,name,category').order('code'),
       supabase.from('production_schedule').select('*').gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date').limit(30),
-      supabase.from('productions').select('*').order('created_at', { ascending: false }).limit(20),
+      supabase.from('productions').select('*').order('created_at', { ascending: false }).limit(50),
     ])
     setProducts(p.data || [])
     setSchedule(s.data || [])
@@ -47,12 +47,9 @@ export default function Production() {
     if (!bom?.length) return []
     const warns = []
     for (const item of bom) {
-      const neededG = item.qty_per_unit * outputUnits
-      const neededKg = neededG / 1000
+      const neededKg = (item.qty_per_unit * outputUnits) / 1000
       const { data: rm } = await supabase.from('raw_materials').select('stock,unit').eq('name', item.rm_name).single()
-      if (rm && rm.stock < neededKg) {
-        warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3), have: rm.stock.toFixed(3) })
-      }
+      if (rm && rm.stock < neededKg) warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3), have: rm.stock.toFixed(3) })
     }
     return warns
   }
@@ -88,48 +85,62 @@ export default function Production() {
     if (!code || !inputQty || !outputUnits) { alert('Please fill in all fields.'); return }
     const output = parseInt(outputUnits)
     addLog(`Saving ${code} +${output} units...`)
-
-    // Get current stock
     const { data: prod } = await supabase.from('products').select('units,name').eq('code', code).single()
     const newUnits = (prod?.units || 0) + output
-
-    // Update FG stock
     await supabase.from('products').update({ units: newUnits }).eq('code', code)
     addLog(`✓ FG stock updated: ${prod?.units} → ${newUnits}`, 'ok')
-
-    // Deduct RMs via BOM
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', code)
     if (bom?.length) {
       for (const item of bom) {
         const deductKg = (item.qty_per_unit * output) / 1000
         const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
-        if (rm) {
-          const newStock = Math.max(0, rm.stock - deductKg)
-          await supabase.from('raw_materials').update({ stock: newStock }).eq('name', item.rm_name)
-        }
+        if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductKg) }).eq('name', item.rm_name)
       }
       addLog(`✓ ${bom.length} RMs deducted via BOM`, 'ok')
     }
-
-    // Log production record
     await supabase.from('productions').insert({
       date, product_code: code, product_name: prod?.name || code,
       input_qty: parseFloat(inputQty), input_type: inputType,
       output_units: output, notes, created_by_name: profile?.name
     })
-
-    // Log activity
     await supabase.from('activity').insert({
       type: 'production', title: `${code}: +${output} units`,
       description: `${inputQty} ${inputType} · ${prod?.name}`,
       created_by_name: profile?.name
     })
-
     addLog(`✓ Production saved successfully!`, 'ok')
     setForm({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
     setRmWarnings([])
     setShowModal(false)
     loadData()
+  }
+
+  async function deleteProduction(h) {
+    if (!window.confirm(`Delete production entry for ${h.product_code} (+${h.output_units} units) on ${h.date}?\n\nThis will reverse the stock change.`)) return
+    setDeletingId(h.id)
+    try {
+      // Reverse FG stock
+      const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
+      if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - h.output_units) }).eq('code', h.product_code)
+      // Restore RMs via BOM
+      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', h.product_code)
+      if (bom?.length) {
+        for (const item of bom) {
+          const restoreKg = (item.qty_per_unit * h.output_units) / 1000
+          const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
+          if (rm) await supabase.from('raw_materials').update({ stock: rm.stock + restoreKg }).eq('name', item.rm_name)
+        }
+      }
+      // Delete the record
+      await supabase.from('productions').delete().eq('id', h.id)
+      await supabase.from('activity').insert({
+        type: 'production', title: `Production Deleted: ${h.product_code}`,
+        description: `${h.output_units} units reversed · ${h.date}`,
+        created_by_name: profile?.name || 'admin'
+      })
+      loadData()
+    } catch(err) { alert('Delete failed: ' + err.message) }
+    setDeletingId(null)
   }
 
   async function saveSchedule() {
@@ -152,6 +163,12 @@ export default function Production() {
     loadData()
   }
 
+  async function deleteSchedule(id, productCode) {
+    if (!window.confirm(`Delete this scheduled production for ${productCode}?`)) return
+    await supabase.from('production_schedule').delete().eq('id', id)
+    loadData()
+  }
+
   const statusColors = { planned: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'red' }
 
   return (
@@ -165,7 +182,6 @@ export default function Production() {
       </div>
 
       <div className="page-body">
-        {/* View Toggle */}
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
           {['log','schedule','history'].map(v => (
             <button key={v} onClick={() => setView(v)}
@@ -175,15 +191,11 @@ export default function Production() {
           ))}
         </div>
 
-        {/* QUICK LOG FORM */}
         {view === 'log' && (
           <div className="grid2">
             <div className="card">
               <div className="card-title">Log Production Batch</div>
-              <div className="field">
-                <label>Date</label>
-                <input type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} />
-              </div>
+              <div className="field"><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} /></div>
               <div className="field">
                 <label>Product</label>
                 <select value={form.code} onChange={e => handleCodeChange(e.target.value)}>
@@ -217,10 +229,7 @@ export default function Production() {
                   {rmWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}kg, have {w.have}kg</div>)}
                 </div>
               )}
-              <div className="field">
-                <label>Notes</label>
-                <textarea value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Batch notes..." rows={2} />
-              </div>
+              <div className="field"><label>Notes</label><textarea value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Batch notes..." rows={2} /></div>
               <button className="btn btn-green btn-full" onClick={saveProduction}>✓ Save & Update Stock</button>
               {log.length > 0 && (
                 <div className="log" style={{ marginTop: 12 }}>
@@ -228,7 +237,6 @@ export default function Production() {
                 </div>
               )}
             </div>
-
             <div className="card">
               <div className="card-title">Tray Yields Reference</div>
               <div className="table-wrap">
@@ -249,7 +257,6 @@ export default function Production() {
           </div>
         )}
 
-        {/* SCHEDULE */}
         {view === 'schedule' && (
           <div className="card">
             <div className="card-title">Upcoming Production Schedule</div>
@@ -258,7 +265,7 @@ export default function Production() {
             ) : (
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>Date</th><th>Product</th><th>Planned Input</th><th>Planned Output</th><th>Status</th><th></th></tr></thead>
+                  <thead><tr><th>Date</th><th>Product</th><th>Planned Input</th><th>Planned Output</th><th>Status</th><th></th><th style={{width:60}}></th></tr></thead>
                   <tbody>
                     {schedule.map(s => (
                       <tr key={s.id}>
@@ -276,6 +283,12 @@ export default function Production() {
                             <option value="cancelled">Cancelled</option>
                           </select>
                         </td>
+                        <td>
+                          <button onClick={() => deleteSchedule(s.id, s.product_code)}
+                            style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}>
+                            Delete
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -285,13 +298,12 @@ export default function Production() {
           </div>
         )}
 
-        {/* HISTORY */}
         {view === 'history' && (
           <div className="card">
-            <div className="card-title">Production History (Last 20)</div>
+            <div className="card-title">Production History</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Date</th><th>Product</th><th>Input</th><th>Output</th><th>By</th><th>Notes</th></tr></thead>
+                <thead><tr><th>Date</th><th>Product</th><th>Input</th><th>Output</th><th>By</th><th>Notes</th><th style={{width:60}}></th></tr></thead>
                 <tbody>
                   {history.map(h => (
                     <tr key={h.id}>
@@ -301,6 +313,14 @@ export default function Production() {
                       <td style={{fontWeight:600,color:'var(--green)'}}>+{h.output_units}</td>
                       <td style={{fontSize:11,color:'var(--ink3)'}}>{h.created_by_name}</td>
                       <td style={{fontSize:11,color:'var(--ink3)'}}>{h.notes}</td>
+                      <td>
+                        <button
+                          onClick={() => deleteProduction(h)}
+                          disabled={deletingId === h.id}
+                          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === h.id ? 0.5 : 1 }}>
+                          {deletingId === h.id ? '...' : 'Delete'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -310,7 +330,6 @@ export default function Production() {
         )}
       </div>
 
-      {/* Schedule Modal */}
       {showScheduleModal && (
         <div className="modal-bg" onClick={e => e.target===e.currentTarget && setShowScheduleModal(false)}>
           <div className="modal">

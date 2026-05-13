@@ -186,8 +186,8 @@ export function Activity() {
     setLoading(false)
   }
 
-  const icons = { dispatch: '📋', production: '🏭', sourcing: '📥', stock: '📦', dispatch_deleted: '🗑️', production_deleted: '🗑️' }
-  const filters = ['all', 'dispatch', 'production', 'sourcing', 'stock']
+  const icons = { dispatch: '📋', production: '🏭', sourcing: '📥', dispatch_deleted: '🗑️', production_deleted: '🗑️' }
+  const filters = ['all', 'dispatch', 'production', 'sourcing']
 
   return (
     <>

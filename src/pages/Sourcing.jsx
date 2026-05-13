@@ -9,6 +9,7 @@ export function Sourcing() {
   const [entries, setEntries] = useState([])
   const [showModal, setShowModal] = useState(false)
   const [files, setFiles] = useState([])
+  const [deletingId, setDeletingId] = useState(null)
   const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], rm_name: '', supplier: '', qty: '', unit: 'kg', batch: '', cost: '' })
 
   useEffect(() => { loadData() }, [])
@@ -16,7 +17,7 @@ export function Sourcing() {
   async function loadData() {
     const [r, e] = await Promise.all([
       supabase.from('raw_materials').select('name,category,stock,unit,min_stock,supplier').order('name'),
-      supabase.from('sourcing').select('*').order('created_at', { ascending: false }).limit(30),
+      supabase.from('sourcing').select('*').order('created_at', { ascending: false }).limit(50),
     ])
     setRMs(r.data || [])
     setEntries(e.data || [])
@@ -34,6 +35,25 @@ export function Sourcing() {
     setForm({ date: new Date().toISOString().split('T')[0], rm_name: '', supplier: '', qty: '', unit: 'kg', batch: '', cost: '' })
     setFiles([])
     loadData()
+  }
+
+  async function deleteSourcing(entry) {
+    if (!window.confirm(`Delete sourcing entry for ${entry.rm_name} (+${entry.qty_received} ${entry.unit}) on ${entry.date}?\n\nThis will reverse the stock change.`)) return
+    setDeletingId(entry.id)
+    try {
+      // Reverse RM stock
+      const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', entry.rm_name).single()
+      if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - entry.qty_received) }).eq('name', entry.rm_name)
+      // Delete record
+      await supabase.from('sourcing').delete().eq('id', entry.id)
+      await supabase.from('activity').insert({
+        type: 'sourcing', title: `Sourcing Deleted: ${entry.rm_name}`,
+        description: `${entry.qty_received} ${entry.unit} reversed · ${entry.date}`,
+        created_by_name: profile?.name || 'admin'
+      })
+      loadData()
+    } catch(err) { alert('Delete failed: ' + err.message) }
+    setDeletingId(null)
   }
 
   const zero = rms.filter(r => r.stock <= 0).length
@@ -82,7 +102,7 @@ export function Sourcing() {
             <div className="card-title">Recent Sourcing</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Date</th><th>Material</th><th>Qty</th><th>Supplier</th>{isAdmin && <th>Cost</th>}</tr></thead>
+                <thead><tr><th>Date</th><th>Material</th><th>Qty</th><th>Supplier</th>{isAdmin && <th>Cost</th>}<th style={{width:60}}></th></tr></thead>
                 <tbody>
                   {entries.map(e => (
                     <tr key={e.id}>
@@ -91,6 +111,14 @@ export function Sourcing() {
                       <td style={{ color: 'var(--green)', fontWeight: 600 }}>+{e.qty_received} {e.unit}</td>
                       <td style={{ fontSize: 11 }}>{e.supplier}</td>
                       {isAdmin && <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{e.cost ? `$${e.cost.toFixed(2)}` : '—'}</td>}
+                      <td>
+                        <button
+                          onClick={() => deleteSourcing(e)}
+                          disabled={deletingId === e.id}
+                          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === e.id ? 0.5 : 1 }}>
+                          {deletingId === e.id ? '...' : 'Delete'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -158,7 +186,7 @@ export function Activity() {
     setLoading(false)
   }
 
-  const icons = { dispatch: '📋', production: '🏭', sourcing: '📥', stock: '📦' }
+  const icons = { dispatch: '📋', production: '🏭', sourcing: '📥', stock: '📦', dispatch_deleted: '🗑️', production_deleted: '🗑️' }
   const filters = ['all', 'dispatch', 'production', 'sourcing', 'stock']
 
   return (
@@ -184,7 +212,7 @@ export function Activity() {
                 <div className="activity-body">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div className="activity-title">{a.title}</div>
-                    <span className={`badge badge-${a.type==='dispatch'?'blue':a.type==='production'?'green':a.type==='sourcing'?'amber':'purple'}`}>{a.type}</span>
+                    <span className={`badge badge-${a.type==='dispatch'||a.type==='dispatch_deleted'?'blue':a.type==='production'||a.type==='production_deleted'?'green':a.type==='sourcing'?'amber':'purple'}`}>{a.type}</span>
                   </div>
                   <div className="activity-meta">
                     {a.description} · {new Date(a.created_at).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {a.created_by_name || '—'}

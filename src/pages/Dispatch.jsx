@@ -67,7 +67,7 @@ export default function Dispatch() {
         content.push({ type: 'text', text: 'Extract all packing slip data. Return JSON only.' })
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': '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', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+          headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.REACT_APP_ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
           body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, system: AI_PROMPT, messages: [{ role: 'user', content }] })
         })
         const data = await res.json()

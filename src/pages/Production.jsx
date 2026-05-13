@@ -164,11 +164,13 @@ export default function Production() {
     if (!scheduled_date || !product_code) { alert('Please fill in date and product.'); return }
     const { data: p } = await supabase.from('products').select('name').eq('code', product_code).single()
     const planned_output = calcOutput(product_code, input_type, planned_input)
-    await supabase.from('production_schedule').insert({
+    const { data, error } = await supabase.from('production_schedule').insert({
       scheduled_date, product_code, product_name: p?.name || product_code,
       planned_input: parseFloat(planned_input) || 0, input_type,
       planned_output, notes, status: 'planned', created_by_name: profile?.name
-    })
+    }).select()
+    if (error) { alert('Schedule save error: ' + error.message); return }
+    alert('Saved! ' + JSON.stringify(data))
     setShowScheduleModal(false)
     setSchedForm({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
     setScheduleRMWarnings([])

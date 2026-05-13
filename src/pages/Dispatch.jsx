@@ -29,9 +29,7 @@ Return ONLY valid JSON, no markdown, no explanation:
 
 function parseSlipDate(dateStr) {
   if (!dateStr) return new Date().toISOString().split('T')[0]
-  // Already in YYYY-MM-DD format
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr
-  // Try parsing "May 11", "Apr 15" etc with current year
   try {
     const year = new Date().getFullYear()
     const d = new Date(`${dateStr} ${year}`)
@@ -50,6 +48,7 @@ export default function Dispatch() {
   const [products, setProducts] = useState([])
   const [dispatches, setDispatches] = useState([])
   const [expandedId, setExpandedId] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
   const [manForm, setManForm] = useState({ date: new Date().toISOString().split('T')[0], customer: '', invoice: '' })
   const [manLines, setManLines] = useState([])
   const [manCode, setManCode] = useState('')
@@ -84,6 +83,35 @@ export default function Dispatch() {
       r.onerror = rej
       r.readAsDataURL(f)
     })
+  }
+
+  async function deleteDispatch(dispatch) {
+    if (!window.confirm(`Delete dispatch for ${dispatch.customer_name || 'unknown'} (Inv #${dispatch.invoice_number || '—'})?\n\nThis will restore stock levels.`)) return
+    setDeletingId(dispatch.id)
+    try {
+      // Restore stock for each item
+      for (const item of dispatch.dispatch_items || []) {
+        const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
+        if (prod) {
+          await supabase.from('products').update({ units: prod.units + item.units_dispatched }).eq('code', item.product_code)
+        }
+      }
+      // Delete dispatch items first (cascade should handle this but being explicit)
+      await supabase.from('dispatch_items').delete().eq('dispatch_id', dispatch.id)
+      // Delete the dispatch
+      await supabase.from('dispatches').delete().eq('id', dispatch.id)
+      // Log activity
+      await supabase.from('activity').insert({
+        type: 'dispatch_deleted',
+        title: `Dispatch Deleted: ${dispatch.customer_name}`,
+        description: `Inv #${dispatch.invoice_number || '—'} — stock restored`,
+        created_by_name: profile?.name || 'admin'
+      })
+      loadData()
+    } catch(err) {
+      alert('Delete failed: ' + err.message)
+    }
+    setDeletingId(null)
   }
 
   async function processSlips() {
@@ -134,7 +162,6 @@ export default function Dispatch() {
     for (const slip of extracted) {
       const dateStr = parseSlipDate(slip.date)
       addLog(`Saving: ${slip.customer} — date: ${dateStr}`)
-
       const { data: dispatch, error: dispatchErr } = await supabase
         .from('dispatches')
         .insert({
@@ -145,49 +172,28 @@ export default function Dispatch() {
         })
         .select()
         .single()
-
-      if (dispatchErr) {
-        addLog(`❌ Dispatch save error: ${dispatchErr.message}`, 'err')
-        continue
-      }
-
+      if (dispatchErr) { addLog(`❌ Dispatch save error: ${dispatchErr.message}`, 'err'); continue }
       addLog(`✓ Dispatch saved (id: ${dispatch.id.slice(0,8)}...)`, 'ok')
       savedSlips++
-
       for (const item of slip.items || []) {
         const units = calcUnits(item.code, item.qty, item.type)
-        const { error: itemErr } = await supabase
-          .from('dispatch_items')
-          .insert({
-            dispatch_id: dispatch.id,
-            product_code: item.code,
-            product_name: products.find(p => p.code === item.code)?.name || item.code,
-            qty: item.qty,
-            dispatch_type: item.type,
-            units_dispatched: units
-          })
-
-        if (itemErr) {
-          addLog(`❌ Item error (${item.code}): ${itemErr.message}`, 'err')
-          continue
-        }
-
-        // Update stock
+        const { error: itemErr } = await supabase.from('dispatch_items').insert({
+          dispatch_id: dispatch.id,
+          product_code: item.code,
+          product_name: products.find(p => p.code === item.code)?.name || item.code,
+          qty: item.qty, dispatch_type: item.type, units_dispatched: units
+        })
+        if (itemErr) { addLog(`❌ Item error (${item.code}): ${itemErr.message}`, 'err'); continue }
         const { data: prod } = await supabase.from('products').select('units').eq('code', item.code).single()
-        if (prod) {
-          await supabase.from('products').update({ units: prod.units - units }).eq('code', item.code)
-        }
+        if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', item.code)
         savedLines++
       }
-
       await supabase.from('activity').insert({
-        type: 'dispatch',
-        title: `Dispatch: ${slip.customer}`,
+        type: 'dispatch', title: `Dispatch: ${slip.customer}`,
         description: `${slip.items?.length} lines · Inv #${slip.invoice || '—'}`,
         created_by_name: profile?.name || 'admin'
       })
     }
-
     addLog(`✓ Saved ${savedSlips} slip(s), ${savedLines} lines. Stock updated.`, 'ok')
     setExtracted([]); setFiles([]); loadData()
   }
@@ -197,14 +203,12 @@ export default function Dispatch() {
     const { data: dispatch, error: err } = await supabase
       .from('dispatches')
       .insert({ date: manForm.date, customer_name: manForm.customer, invoice_number: manForm.invoice, created_by_name: profile?.name || 'admin' })
-      .select()
-      .single()
+      .select().single()
     if (err) { alert('Save error: ' + err.message); return }
     for (const line of manLines) {
       const units = calcUnits(line.code, line.qty, line.type)
       await supabase.from('dispatch_items').insert({
-        dispatch_id: dispatch.id,
-        product_code: line.code,
+        dispatch_id: dispatch.id, product_code: line.code,
         product_name: products.find(p => p.code === line.code)?.name || line.code,
         qty: line.qty, dispatch_type: line.type, units_dispatched: units
       })
@@ -212,8 +216,7 @@ export default function Dispatch() {
       if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', line.code)
     }
     await supabase.from('activity').insert({
-      type: 'dispatch',
-      title: `Dispatch: ${manForm.customer}`,
+      type: 'dispatch', title: `Dispatch: ${manForm.customer}`,
       description: `${manLines.length} lines · Inv #${manForm.invoice || '—'}`,
       created_by_name: profile?.name || 'admin'
     })
@@ -343,27 +346,42 @@ export default function Dispatch() {
                     <th>Invoice</th>
                     <th>Lines</th>
                     <th>By</th>
+                    <th style={{width:60}}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {dispatches.map(d => (
                     <React.Fragment key={d.id}>
-                      <tr
-                        onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}
-                        style={{ cursor: 'pointer', background: expandedId === d.id ? 'var(--surface2)' : '' }}
-                      >
-                        <td style={{fontSize:11,color:'var(--ink3)'}}>
+                      <tr style={{ background: expandedId === d.id ? 'var(--surface2)' : '' }}>
+                        <td
+                          style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}}
+                          onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}
+                        >
                           {expandedId === d.id ? '▼' : '▶'}
                         </td>
-                        <td style={{fontSize:12}}>{d.date}</td>
-                        <td style={{fontWeight:500}}>{d.customer_name}</td>
-                        <td style={{fontSize:11,color:'var(--ink3)'}}>{d.invoice_number || '—'}</td>
-                        <td>{d.dispatch_items?.length || 0}</td>
-                        <td style={{fontSize:11,color:'var(--ink3)'}}>{d.created_by_name}</td>
+                        <td style={{fontSize:12,cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.date}</td>
+                        <td style={{fontWeight:500,cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.customer_name}</td>
+                        <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.invoice_number || '—'}</td>
+                        <td style={{cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.dispatch_items?.length || 0}</td>
+                        <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.created_by_name}</td>
+                        <td>
+                          <button
+                            onClick={() => deleteDispatch(d)}
+                            disabled={deletingId === d.id}
+                            style={{
+                              background: 'none', border: '1px solid var(--red)',
+                              color: 'var(--red)', borderRadius: 3, padding: '3px 8px',
+                              fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)',
+                              opacity: deletingId === d.id ? 0.5 : 1
+                            }}
+                          >
+                            {deletingId === d.id ? '...' : 'Delete'}
+                          </button>
+                        </td>
                       </tr>
                       {expandedId === d.id && (
                         <tr>
-                          <td colSpan={6} style={{padding:'0 0 12px 32px',background:'var(--surface2)'}}>
+                          <td colSpan={7} style={{padding:'0 0 12px 32px',background:'var(--surface2)'}}>
                             <table style={{width:'100%',fontSize:12}}>
                               <thead>
                                 <tr>
@@ -399,4 +417,6 @@ export default function Dispatch() {
       </div>
     </>
   )
+}
+
 }

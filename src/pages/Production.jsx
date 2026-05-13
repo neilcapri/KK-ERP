@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:36 }
+const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12 }
 
 export default function Production() {
   const { profile, isAdmin } = useAuth()
@@ -11,9 +11,9 @@ export default function Production() {
   const [schedule, setSchedule] = useState([])
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [rmWarnings, setRmWarnings] = useState([])
+  const [scheduleRMWarnings, setScheduleRMWarnings] = useState([])
   const [log, setLog] = useState([])
   const [deletingId, setDeletingId] = useState(null)
 
@@ -26,7 +26,7 @@ export default function Production() {
     setLoading(true)
     const [p, s, h] = await Promise.all([
       supabase.from('products').select('code,name,category').order('code'),
-      supabase.from('production_schedule').select('*').gte('scheduled_date', new Date().toISOString().split('T')[0]).order('scheduled_date').limit(30),
+      supabase.from('production_schedule').select('*').order('scheduled_date').limit(50),
       supabase.from('productions').select('*').order('created_at', { ascending: false }).limit(50),
     ])
     setProducts(p.data || [])
@@ -76,6 +76,26 @@ export default function Production() {
     }
   }
 
+  async function handleSchedProductChange(code) {
+    setSchedForm(f => ({ ...f, product_code: code }))
+    if (code && schedForm.planned_input) {
+      const out = calcOutput(code, schedForm.input_type, schedForm.planned_input)
+      const warns = await checkRM(code, out)
+      setScheduleRMWarnings(warns)
+    }
+  }
+
+  async function handleSchedQtyChange(qty) {
+    setSchedForm(f => ({ ...f, planned_input: qty }))
+    if (schedForm.product_code) {
+      const out = calcOutput(schedForm.product_code, schedForm.input_type, qty)
+      if (out > 0) {
+        const warns = await checkRM(schedForm.product_code, out)
+        setScheduleRMWarnings(warns)
+      }
+    }
+  }
+
   function addLog(msg, type = '') {
     setLog(l => [...l, { msg, type, time: new Date().toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }])
   }
@@ -111,7 +131,6 @@ export default function Production() {
     addLog(`✓ Production saved successfully!`, 'ok')
     setForm({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
     setRmWarnings([])
-    setShowModal(false)
     loadData()
   }
 
@@ -119,10 +138,8 @@ export default function Production() {
     if (!window.confirm(`Delete production entry for ${h.product_code} (+${h.output_units} units) on ${h.date}?\n\nThis will reverse the stock change.`)) return
     setDeletingId(h.id)
     try {
-      // Reverse FG stock
       const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
       if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - h.output_units) }).eq('code', h.product_code)
-      // Restore RMs via BOM
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', h.product_code)
       if (bom?.length) {
         for (const item of bom) {
@@ -131,7 +148,6 @@ export default function Production() {
           if (rm) await supabase.from('raw_materials').update({ stock: rm.stock + restoreKg }).eq('name', item.rm_name)
         }
       }
-      // Delete the record
       await supabase.from('productions').delete().eq('id', h.id)
       await supabase.from('activity').insert({
         type: 'production', title: `Production Deleted: ${h.product_code}`,
@@ -155,6 +171,7 @@ export default function Production() {
     })
     setShowScheduleModal(false)
     setSchedForm({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
+    setScheduleRMWarnings([])
     loadData()
   }
 
@@ -177,7 +194,7 @@ export default function Production() {
         <div><h2>PRODUCTION</h2><p>Log batches & manage schedule</p></div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowScheduleModal(true)}>+ Schedule</button>
-          <button className="btn btn-green" onClick={() => setShowModal(true)}>+ Log Batch</button>
+          <button className="btn btn-green" onClick={() => setView('log')}>+ Log Batch</button>
         </div>
       </div>
 
@@ -259,37 +276,20 @@ export default function Production() {
 
         {view === 'schedule' && (
           <div className="card">
-            <div className="card-title">Upcoming Production Schedule</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div className="card-title" style={{ margin: 0 }}>Production Schedule</div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowScheduleModal(true)}>+ Add</button>
+            </div>
             {schedule.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 32, color: 'var(--ink3)' }}>No scheduled production. Click "+ Schedule" to add.</div>
             ) : (
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>Date</th><th>Product</th><th>Planned Input</th><th>Planned Output</th><th>Status</th><th></th><th style={{width:60}}></th></tr></thead>
+                  <thead><tr><th>Date</th><th>Product</th><th>Planned Input</th><th>Planned Output</th><th>RM Check</th><th>Status</th><th></th><th style={{width:60}}></th></tr></thead>
                   <tbody>
                     {schedule.map(s => (
-                      <tr key={s.id}>
-                        <td style={{fontSize:12}}>{s.scheduled_date}</td>
-                        <td><span className="code-tag">{s.product_code}</span> <span style={{fontSize:11,color:'var(--ink2)'}}>{s.product_name}</span></td>
-                        <td style={{fontSize:12}}>{s.planned_input} {s.input_type}</td>
-                        <td style={{fontWeight:500,color:'var(--green)'}}>{s.planned_output} units</td>
-                        <td><span className={`badge badge-${statusColors[s.status]}`}>{s.status}</span></td>
-                        <td>
-                          <select value={s.status} onChange={e => updateScheduleStatus(s.id, e.target.value)}
-                            style={{ fontSize: 10, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 2, fontFamily: 'var(--mono)', background: 'var(--surface)' }}>
-                            <option value="planned">Planned</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="completed">Completed</option>
-                            <option value="cancelled">Cancelled</option>
-                          </select>
-                        </td>
-                        <td>
-                          <button onClick={() => deleteSchedule(s.id, s.product_code)}
-                            style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}>
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
+                      <ScheduleRow key={s.id} s={s} products={products} statusColors={statusColors}
+                        onStatusChange={updateScheduleStatus} onDelete={deleteSchedule} calcOutput={calcOutput} checkRM={checkRM} />
                     ))}
                   </tbody>
                 </table>
@@ -314,9 +314,7 @@ export default function Production() {
                       <td style={{fontSize:11,color:'var(--ink3)'}}>{h.created_by_name}</td>
                       <td style={{fontSize:11,color:'var(--ink3)'}}>{h.notes}</td>
                       <td>
-                        <button
-                          onClick={() => deleteProduction(h)}
-                          disabled={deletingId === h.id}
+                        <button onClick={() => deleteProduction(h)} disabled={deletingId === h.id}
                           style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === h.id ? 0.5 : 1 }}>
                           {deletingId === h.id ? '...' : 'Delete'}
                         </button>
@@ -337,7 +335,7 @@ export default function Production() {
             <div className="modal-title">SCHEDULE PRODUCTION</div>
             <div className="field"><label>Date</label><input type="date" value={schedForm.scheduled_date} onChange={e => setSchedForm(f=>({...f,scheduled_date:e.target.value}))} /></div>
             <div className="field"><label>Product</label>
-              <select value={schedForm.product_code} onChange={e => setSchedForm(f=>({...f,product_code:e.target.value}))}>
+              <select value={schedForm.product_code} onChange={e => handleSchedProductChange(e.target.value)}>
                 <option value="">Select...</option>
                 {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
               </select>
@@ -349,9 +347,25 @@ export default function Production() {
                 </select>
               </div>
               <div className="field" style={{margin:0}}><label>Planned Qty</label>
-                <input type="number" value={schedForm.planned_input} onChange={e => setSchedForm(f=>({...f,planned_input:e.target.value}))} />
+                <input type="number" value={schedForm.planned_input} onChange={e => handleSchedQtyChange(e.target.value)} />
               </div>
             </div>
+            {schedForm.product_code && schedForm.planned_input && (
+              <div style={{ background: 'var(--green-l)', padding: 10, borderRadius: 3, marginBottom: 12, fontSize: 12, color: 'var(--green)' }}>
+                <strong>Expected output: {calcOutput(schedForm.product_code, schedForm.input_type, schedForm.planned_input)} units</strong>
+              </div>
+            )}
+            {scheduleRMWarnings.length > 0 && (
+              <div className="alert alert-red" style={{ flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+                <strong>⚠️ Insufficient RM stock:</strong>
+                {scheduleRMWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}kg, have {w.have}kg</div>)}
+              </div>
+            )}
+            {scheduleRMWarnings.length === 0 && schedForm.product_code && schedForm.planned_input && (
+              <div style={{ background: 'var(--green-l)', padding: 8, borderRadius: 3, marginBottom: 12, fontSize: 11, color: 'var(--green)' }}>
+                ✅ RM stock sufficient
+              </div>
+            )}
             <div className="field"><label>Notes</label><textarea value={schedForm.notes} onChange={e => setSchedForm(f=>({...f,notes:e.target.value}))} rows={2} /></div>
             <div style={{display:'flex',gap:10}}>
               <button className="btn btn-primary btn-full" onClick={saveSchedule}>Save Schedule</button>
@@ -361,5 +375,51 @@ export default function Production() {
         </div>
       )}
     </>
+  )
+}
+
+// Schedule row with RM check
+function ScheduleRow({ s, products, statusColors, onStatusChange, onDelete, calcOutput, checkRM }) {
+  const [rmStatus, setRMStatus] = useState(null)
+
+  useEffect(() => {
+    async function check() {
+      const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
+      const warns = await checkRM(s.product_code, out)
+      setRMStatus(warns)
+    }
+    check()
+  }, [s.id])
+
+  return (
+    <tr>
+      <td style={{fontSize:12}}>{s.scheduled_date}</td>
+      <td><span className="code-tag">{s.product_code}</span> <span style={{fontSize:11,color:'var(--ink2)'}}>{s.product_name}</span></td>
+      <td style={{fontSize:12}}>{s.planned_input} {s.input_type}</td>
+      <td style={{fontWeight:500,color:'var(--green)'}}>{s.planned_output} units</td>
+      <td>
+        {rmStatus === null ? <span style={{fontSize:11,color:'var(--ink3)'}}>...</span>
+          : rmStatus.length === 0
+            ? <span style={{fontSize:11,color:'var(--green)'}}>✅ OK</span>
+            : <span style={{fontSize:11,color:'var(--red)'}}>⚠️ {rmStatus.length} short</span>
+        }
+      </td>
+      <td><span className={`badge badge-${statusColors[s.status]}`}>{s.status}</span></td>
+      <td>
+        <select value={s.status} onChange={e => onStatusChange(s.id, e.target.value)}
+          style={{ fontSize: 10, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 2, fontFamily: 'var(--mono)', background: 'var(--surface)' }}>
+          <option value="planned">Planned</option>
+          <option value="in_progress">In Progress</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </td>
+      <td>
+        <button onClick={() => onDelete(s.id, s.product_code)}
+          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}>
+          Delete
+        </button>
+      </td>
+    </tr>
   )
 }

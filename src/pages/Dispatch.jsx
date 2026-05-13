@@ -4,11 +4,28 @@ import { useAuth } from '../context/AuthContext'
 
 const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1 }
 
-const AI_PROMPT = `You are reading Konscious Kitchen handwritten packing slips. Extract ALL dispatch data.
-For each slip: Date, Customer, Invoice Number, and all line items.
-Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPC, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, KSCO.
-Rules: (BULK) after code = type "bulk"; default = "pack". PVBBS/PVBB Slice = type "slice" (divide by 3). Crossed out items = skip. Multiple slips per image = extract each separately.
-Return ONLY JSON: {"slips":[{"date":"Apr 15","customer":"Name","invoice":"4549","items":[{"code":"PVBB","qty":12,"type":"pack","note":""}],"flags":[]}]}`
+const AI_PROMPT = `You are reading Konscious Kitchen packing slips. Each slip is a printed form with labeled rows.
+
+The form has these labeled fields at the top:
+- "Date of Packing" — the dispatch date (e.g. May 11)
+- "Customer" — the store/customer name (e.g. BC Danforth)
+- "Invoice Number" — a 4-digit number (e.g. 4664). Look carefully at the handwritten value in the "Invoice Number" row — this is critical.
+
+Below those fields is a table with columns: Product Name | Date | Qty
+Each row has a product code, a date (ignore this), and a quantity number.
+
+Product codes to recognize: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPC, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, KSCO.
+Also recognize: HPCo or HPCO = HPC, PCRT = skip (unknown code), PVBBS = PVBB slice type.
+
+Rules:
+- (BULK) after code = type "bulk"; default = "pack"
+- PVBBS or "PVBB Slice" = type "slice"
+- Crossed out items = skip
+- If the slip continues on the same page (arrow pointing down to another section) = same slip, continue extracting
+- Multiple separate slips per image = extract each as separate slip object
+
+Return ONLY valid JSON, no markdown, no explanation:
+{"slips":[{"date":"May 11","customer":"BC Danforth","invoice":"4664","items":[{"code":"PBB","qty":6,"type":"pack","note":""}],"flags":[]}]}`
 
 export default function Dispatch() {
   const { profile } = useAuth()
@@ -19,6 +36,7 @@ export default function Dispatch() {
   const [log, setLog] = useState([])
   const [products, setProducts] = useState([])
   const [dispatches, setDispatches] = useState([])
+  const [expandedId, setExpandedId] = useState(null)
   const [manForm, setManForm] = useState({ date: new Date().toISOString().split('T')[0], customer: '', invoice: '' })
   const [manLines, setManLines] = useState([])
   const [manCode, setManCode] = useState(''); const [manQty, setManQty] = useState(''); const [manType, setManType] = useState('pack')
@@ -28,7 +46,7 @@ export default function Dispatch() {
   async function loadData() {
     const [p, d] = await Promise.all([
       supabase.from('products').select('code,name').order('code'),
-      supabase.from('dispatches').select('*,dispatch_items(*)').order('created_at', { ascending: false }).limit(20),
+      supabase.from('dispatches').select('*,dispatch_items(*)').order('created_at', { ascending: false }).limit(50),
     ])
     setProducts(p.data || [])
     setDispatches(d.data || [])
@@ -64,18 +82,24 @@ export default function Dispatch() {
             : { type: 'image', source: { type: 'base64', media_type: f.type || 'image/jpeg', data: b64 } }
           )
         }
-        content.push({ type: 'text', text: 'Extract all packing slip data. Return JSON only.' })
+        content.push({ type: 'text', text: 'Extract all packing slip data including the Invoice Number from the labeled Invoice Number row. Return JSON only, no markdown.' })
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.REACT_APP_ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': process.env.REACT_APP_ANTHROPIC_KEY,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
           body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, system: AI_PROMPT, messages: [{ role: 'user', content }] })
         })
         const data = await res.json()
         if (data.error) { addLog(`Error: ${data.error.message}`, 'err'); continue }
-        const parsed = JSON.parse((data.content?.[0]?.text || '').replace(/```json|```/g, '').trim())
+        const raw = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim()
+        const parsed = JSON.parse(raw)
         ;(parsed.slips || []).forEach(slip => {
           setExtracted(e => [...e, slip])
-          addLog(`✓ ${slip.customer} (${slip.invoice || '—'}) — ${slip.items?.length || 0} lines`, 'ok')
+          addLog(`✓ ${slip.customer} — Inv #${slip.invoice || '?'} — ${slip.items?.length || 0} lines`, 'ok')
           ;(slip.flags || []).forEach(f => addLog(`⚠ ${f}`, 'warn'))
         })
       } catch (err) { addLog(`Error: ${err.message}`, 'err') }
@@ -89,18 +113,31 @@ export default function Dispatch() {
     for (const slip of extracted) {
       const { data: dispatch } = await supabase.from('dispatches').insert({
         date: slip.date || new Date().toISOString().split('T')[0],
-        customer_name: slip.customer, invoice_number: slip.invoice || '',
+        customer_name: slip.customer,
+        invoice_number: slip.invoice || '',
         created_by_name: profile?.name
       }).select().single()
       if (!dispatch) continue
       for (const item of slip.items || []) {
         const units = calcUnits(item.code, item.qty, item.type)
-        await supabase.from('dispatch_items').insert({ dispatch_id: dispatch.id, product_code: item.code, product_name: products.find(p=>p.code===item.code)?.name||item.code, qty: item.qty, dispatch_type: item.type, units_dispatched: units })
+        await supabase.from('dispatch_items').insert({
+          dispatch_id: dispatch.id,
+          product_code: item.code,
+          product_name: products.find(p=>p.code===item.code)?.name || item.code,
+          qty: item.qty,
+          dispatch_type: item.type,
+          units_dispatched: units
+        })
         const { data: prod } = await supabase.from('products').select('units').eq('code', item.code).single()
         if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', item.code)
         count++
       }
-      await supabase.from('activity').insert({ type: 'dispatch', title: `Dispatch: ${slip.customer}`, description: `${slip.items?.length} lines · Inv #${slip.invoice || '—'}`, created_by_name: profile?.name })
+      await supabase.from('activity').insert({
+        type: 'dispatch',
+        title: `Dispatch: ${slip.customer}`,
+        description: `${slip.items?.length} lines · Inv #${slip.invoice || '—'}`,
+        created_by_name: profile?.name
+      })
     }
     addLog(`✓ Saved ${extracted.length} slip(s), ${count} lines. Stock updated.`, 'ok')
     setExtracted([]); setFiles([]); loadData()
@@ -108,14 +145,26 @@ export default function Dispatch() {
 
   async function saveManual() {
     if (!manForm.customer || !manLines.length) { alert('Add customer and at least one line.'); return }
-    const { data: dispatch } = await supabase.from('dispatches').insert({ date: manForm.date, customer_name: manForm.customer, invoice_number: manForm.invoice, created_by_name: profile?.name }).select().single()
+    const { data: dispatch } = await supabase.from('dispatches').insert({
+      date: manForm.date, customer_name: manForm.customer, invoice_number: manForm.invoice, created_by_name: profile?.name
+    }).select().single()
     for (const line of manLines) {
       const units = calcUnits(line.code, line.qty, line.type)
-      await supabase.from('dispatch_items').insert({ dispatch_id: dispatch.id, product_code: line.code, product_name: products.find(p=>p.code===line.code)?.name||line.code, qty: line.qty, dispatch_type: line.type, units_dispatched: units })
+      await supabase.from('dispatch_items').insert({
+        dispatch_id: dispatch.id,
+        product_code: line.code,
+        product_name: products.find(p=>p.code===line.code)?.name || line.code,
+        qty: line.qty, dispatch_type: line.type, units_dispatched: units
+      })
       const { data: prod } = await supabase.from('products').select('units').eq('code', line.code).single()
       if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', line.code)
     }
-    await supabase.from('activity').insert({ type: 'dispatch', title: `Dispatch: ${manForm.customer}`, description: `${manLines.length} lines · Inv #${manForm.invoice || '—'}`, created_by_name: profile?.name })
+    await supabase.from('activity').insert({
+      type: 'dispatch',
+      title: `Dispatch: ${manForm.customer}`,
+      description: `${manLines.length} lines · Inv #${manForm.invoice || '—'}`,
+      created_by_name: profile?.name
+    })
     setManLines([]); setManForm({ date: new Date().toISOString().split('T')[0], customer: '', invoice: '' }); loadData()
   }
 
@@ -138,7 +187,7 @@ export default function Dispatch() {
             <div>
               <div className="card">
                 <div className="card-title">Upload Packing Slips</div>
-                <div className={`upload-zone ${files.length ? '' : ''}`}>
+                <div className="upload-zone">
                   <input type="file" accept="image/*,.pdf,application/pdf" multiple onChange={e => setFiles(Array.from(e.target.files))} />
                   <div className="upload-icon" style={{fontSize:32}}>📋</div>
                   <div style={{fontSize:12,color:'var(--ink2)',lineHeight:1.8}}><strong>Tap to upload packing slips</strong><br/>📷 Camera · 🖼 Gallery · 📄 PDF · Multiple OK</div>
@@ -170,11 +219,12 @@ export default function Dispatch() {
                   <div className="card-title">✅ Review Extracted Data</div>
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Customer</th><th>Code</th><th>Qty</th><th>Type</th><th>Units</th></tr></thead>
+                      <thead><tr><th>Customer</th><th>Inv #</th><th>Code</th><th>Qty</th><th>Type</th><th>Units</th></tr></thead>
                       <tbody>
                         {extracted.map((slip, si) => (slip.items || []).map((item, ii) => (
                           <tr key={`${si}-${ii}`}>
                             <td style={{fontSize:11}}>{ii === 0 ? slip.customer : ''}</td>
+                            <td style={{fontSize:11,color:'var(--ink3)'}}>{ii === 0 ? (slip.invoice || '—') : ''}</td>
                             <td><span className="code-tag">{item.code}</span></td>
                             <td>{item.qty}</td>
                             <td><span className={`badge badge-${item.type==='pack'?'amber':'blue'}`}>{item.type}</span></td>
@@ -227,16 +277,62 @@ export default function Dispatch() {
             <div className="card-title">Recent Dispatches</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Date</th><th>Customer</th><th>Invoice</th><th>Lines</th><th>By</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Invoice</th>
+                    <th>Lines</th>
+                    <th>By</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {dispatches.map(d => (
-                    <tr key={d.id}>
-                      <td style={{fontSize:12}}>{d.date}</td>
-                      <td style={{fontWeight:500}}>{d.customer_name}</td>
-                      <td style={{fontSize:11,color:'var(--ink3)'}}>{d.invoice_number || '—'}</td>
-                      <td>{d.dispatch_items?.length || 0}</td>
-                      <td style={{fontSize:11,color:'var(--ink3)'}}>{d.created_by_name}</td>
-                    </tr>
+                    <>
+                      <tr
+                        key={d.id}
+                        onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}
+                        style={{ cursor: 'pointer', background: expandedId === d.id ? 'var(--surface2)' : '' }}
+                      >
+                        <td style={{fontSize:11,color:'var(--ink3)',width:20}}>
+                          {expandedId === d.id ? '▼' : '▶'}
+                        </td>
+                        <td style={{fontSize:12}}>{d.date}</td>
+                        <td style={{fontWeight:500}}>{d.customer_name}</td>
+                        <td style={{fontSize:11,color:'var(--ink3)'}}>{d.invoice_number || '—'}</td>
+                        <td>{d.dispatch_items?.length || 0}</td>
+                        <td style={{fontSize:11,color:'var(--ink3)'}}>{d.created_by_name}</td>
+                      </tr>
+                      {expandedId === d.id && (
+                        <tr key={`${d.id}-expanded`}>
+                          <td colSpan={6} style={{padding:'0 0 12px 32px',background:'var(--surface2)'}}>
+                            <table style={{width:'100%',fontSize:12}}>
+                              <thead>
+                                <tr>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Code</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Product</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Qty</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Type</th>
+                                  <th style={{textAlign:'left',padding:'6px 8px',color:'var(--ink3)',fontWeight:500}}>Units</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(d.dispatch_items || []).map((item, i) => (
+                                  <tr key={i} style={{borderTop:'1px solid var(--border)'}}>
+                                    <td style={{padding:'6px 8px'}}><span className="code-tag">{item.product_code}</span></td>
+                                    <td style={{padding:'6px 8px',color:'var(--ink2)'}}>{item.product_name}</td>
+                                    <td style={{padding:'6px 8px'}}>{item.qty}</td>
+                                    <td style={{padding:'6px 8px'}}><span className={`badge badge-${item.dispatch_type==='pack'?'amber':'blue'}`}>{item.dispatch_type}</span></td>
+                                    <td style={{padding:'6px 8px',color:'var(--green)',fontWeight:500}}>{item.units_dispatched}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   ))}
                 </tbody>
               </table>

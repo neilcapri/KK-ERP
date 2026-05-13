@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
@@ -27,6 +27,19 @@ Rules:
 Return ONLY valid JSON, no markdown, no explanation:
 {"slips":[{"date":"May 11","customer":"BC Danforth","invoice":"4664","items":[{"code":"PBB","qty":6,"type":"pack","note":""}],"flags":[]}]}`
 
+function parseSlipDate(dateStr) {
+  if (!dateStr) return new Date().toISOString().split('T')[0]
+  // Already in YYYY-MM-DD format
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr
+  // Try parsing "May 11", "Apr 15" etc with current year
+  try {
+    const year = new Date().getFullYear()
+    const d = new Date(`${dateStr} ${year}`)
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+  } catch(e) {}
+  return new Date().toISOString().split('T')[0]
+}
+
 export default function Dispatch() {
   const { profile } = useAuth()
   const [view, setView] = useState('ai')
@@ -39,14 +52,16 @@ export default function Dispatch() {
   const [expandedId, setExpandedId] = useState(null)
   const [manForm, setManForm] = useState({ date: new Date().toISOString().split('T')[0], customer: '', invoice: '' })
   const [manLines, setManLines] = useState([])
-  const [manCode, setManCode] = useState(''); const [manQty, setManQty] = useState(''); const [manType, setManType] = useState('pack')
+  const [manCode, setManCode] = useState('')
+  const [manQty, setManQty] = useState('')
+  const [manType, setManType] = useState('pack')
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
     const [p, d] = await Promise.all([
       supabase.from('products').select('code,name').order('code'),
-      supabase.from('dispatches').select('*,dispatch_items(*)').order('created_at', { ascending: false }).limit(50),
+      supabase.from('dispatches').select('*,dispatch_items(*)').order('created_at', { ascending: false }).limit(100),
     ])
     setProducts(p.data || [])
     setDispatches(d.data || [])
@@ -63,7 +78,12 @@ export default function Dispatch() {
   }
 
   async function fileToB64(f) {
-    return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(f) })
+    return new Promise((res, rej) => {
+      const r = new FileReader()
+      r.onload = () => res(r.result.split(',')[1])
+      r.onerror = rej
+      r.readAsDataURL(f)
+    })
   }
 
   async function processSlips() {
@@ -82,7 +102,7 @@ export default function Dispatch() {
             : { type: 'image', source: { type: 'base64', media_type: f.type || 'image/jpeg', data: b64 } }
           )
         }
-        content.push({ type: 'text', text: 'Extract all packing slip data including the Invoice Number from the labeled Invoice Number row. Return JSON only, no markdown.' })
+        content.push({ type: 'text', text: 'Extract all packing slip data including the Invoice Number. Return JSON only, no markdown.' })
         const res = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
@@ -109,51 +129,83 @@ export default function Dispatch() {
   }
 
   async function saveExtracted() {
-    let count = 0
+    let savedSlips = 0
+    let savedLines = 0
     for (const slip of extracted) {
-      const { data: dispatch } = await supabase.from('dispatches').insert({
-        date: slip.date || new Date().toISOString().split('T')[0],
-        customer_name: slip.customer,
-        invoice_number: slip.invoice || '',
-        created_by_name: profile?.name
-      }).select().single()
-      if (!dispatch) continue
+      const dateStr = parseSlipDate(slip.date)
+      addLog(`Saving: ${slip.customer} — date: ${dateStr}`)
+
+      const { data: dispatch, error: dispatchErr } = await supabase
+        .from('dispatches')
+        .insert({
+          date: dateStr,
+          customer_name: slip.customer,
+          invoice_number: slip.invoice || '',
+          created_by_name: profile?.name || 'admin'
+        })
+        .select()
+        .single()
+
+      if (dispatchErr) {
+        addLog(`❌ Dispatch save error: ${dispatchErr.message}`, 'err')
+        continue
+      }
+
+      addLog(`✓ Dispatch saved (id: ${dispatch.id.slice(0,8)}...)`, 'ok')
+      savedSlips++
+
       for (const item of slip.items || []) {
         const units = calcUnits(item.code, item.qty, item.type)
-        await supabase.from('dispatch_items').insert({
-          dispatch_id: dispatch.id,
-          product_code: item.code,
-          product_name: products.find(p=>p.code===item.code)?.name || item.code,
-          qty: item.qty,
-          dispatch_type: item.type,
-          units_dispatched: units
-        })
+        const { error: itemErr } = await supabase
+          .from('dispatch_items')
+          .insert({
+            dispatch_id: dispatch.id,
+            product_code: item.code,
+            product_name: products.find(p => p.code === item.code)?.name || item.code,
+            qty: item.qty,
+            dispatch_type: item.type,
+            units_dispatched: units
+          })
+
+        if (itemErr) {
+          addLog(`❌ Item error (${item.code}): ${itemErr.message}`, 'err')
+          continue
+        }
+
+        // Update stock
         const { data: prod } = await supabase.from('products').select('units').eq('code', item.code).single()
-        if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', item.code)
-        count++
+        if (prod) {
+          await supabase.from('products').update({ units: prod.units - units }).eq('code', item.code)
+        }
+        savedLines++
       }
+
       await supabase.from('activity').insert({
         type: 'dispatch',
         title: `Dispatch: ${slip.customer}`,
         description: `${slip.items?.length} lines · Inv #${slip.invoice || '—'}`,
-        created_by_name: profile?.name
+        created_by_name: profile?.name || 'admin'
       })
     }
-    addLog(`✓ Saved ${extracted.length} slip(s), ${count} lines. Stock updated.`, 'ok')
+
+    addLog(`✓ Saved ${savedSlips} slip(s), ${savedLines} lines. Stock updated.`, 'ok')
     setExtracted([]); setFiles([]); loadData()
   }
 
   async function saveManual() {
     if (!manForm.customer || !manLines.length) { alert('Add customer and at least one line.'); return }
-    const { data: dispatch } = await supabase.from('dispatches').insert({
-      date: manForm.date, customer_name: manForm.customer, invoice_number: manForm.invoice, created_by_name: profile?.name
-    }).select().single()
+    const { data: dispatch, error: err } = await supabase
+      .from('dispatches')
+      .insert({ date: manForm.date, customer_name: manForm.customer, invoice_number: manForm.invoice, created_by_name: profile?.name || 'admin' })
+      .select()
+      .single()
+    if (err) { alert('Save error: ' + err.message); return }
     for (const line of manLines) {
       const units = calcUnits(line.code, line.qty, line.type)
       await supabase.from('dispatch_items').insert({
         dispatch_id: dispatch.id,
         product_code: line.code,
-        product_name: products.find(p=>p.code===line.code)?.name || line.code,
+        product_name: products.find(p => p.code === line.code)?.name || line.code,
         qty: line.qty, dispatch_type: line.type, units_dispatched: units
       })
       const { data: prod } = await supabase.from('products').select('units').eq('code', line.code).single()
@@ -163,7 +215,7 @@ export default function Dispatch() {
       type: 'dispatch',
       title: `Dispatch: ${manForm.customer}`,
       description: `${manLines.length} lines · Inv #${manForm.invoice || '—'}`,
-      created_by_name: profile?.name
+      created_by_name: profile?.name || 'admin'
     })
     setManLines([]); setManForm({ date: new Date().toISOString().split('T')[0], customer: '', invoice: '' }); loadData()
   }
@@ -190,7 +242,10 @@ export default function Dispatch() {
                 <div className="upload-zone">
                   <input type="file" accept="image/*,.pdf,application/pdf" multiple onChange={e => setFiles(Array.from(e.target.files))} />
                   <div className="upload-icon" style={{fontSize:32}}>📋</div>
-                  <div style={{fontSize:12,color:'var(--ink2)',lineHeight:1.8}}><strong>Tap to upload packing slips</strong><br/>📷 Camera · 🖼 Gallery · 📄 PDF · Multiple OK</div>
+                  <div style={{fontSize:12,color:'var(--ink2)',lineHeight:1.8}}>
+                    <strong>Tap to upload packing slips</strong><br/>
+                    📷 Camera · 🖼 Gallery · 📄 PDF · Multiple OK
+                  </div>
                 </div>
                 {files.length > 0 && (
                   <div className="thumb-row">
@@ -210,7 +265,10 @@ export default function Dispatch() {
                 </button>
               </div>
               <div className="log">
-                {log.length === 0 ? <span style={{color:'var(--ink3)'}}>Ready — upload images to begin</span> : log.map((l,i) => <div key={i} className={l.type}>{l.time} — {l.msg}</div>)}
+                {log.length === 0
+                  ? <span style={{color:'var(--ink3)'}}>Ready — upload images to begin</span>
+                  : log.map((l,i) => <div key={i} className={l.type}>{l.time} — {l.msg}</div>)
+                }
               </div>
             </div>
             <div>
@@ -279,7 +337,7 @@ export default function Dispatch() {
               <table>
                 <thead>
                   <tr>
-                    <th></th>
+                    <th style={{width:20}}></th>
                     <th>Date</th>
                     <th>Customer</th>
                     <th>Invoice</th>
@@ -289,13 +347,12 @@ export default function Dispatch() {
                 </thead>
                 <tbody>
                   {dispatches.map(d => (
-                    <>
+                    <React.Fragment key={d.id}>
                       <tr
-                        key={d.id}
                         onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}
                         style={{ cursor: 'pointer', background: expandedId === d.id ? 'var(--surface2)' : '' }}
                       >
-                        <td style={{fontSize:11,color:'var(--ink3)',width:20}}>
+                        <td style={{fontSize:11,color:'var(--ink3)'}}>
                           {expandedId === d.id ? '▼' : '▶'}
                         </td>
                         <td style={{fontSize:12}}>{d.date}</td>
@@ -305,7 +362,7 @@ export default function Dispatch() {
                         <td style={{fontSize:11,color:'var(--ink3)'}}>{d.created_by_name}</td>
                       </tr>
                       {expandedId === d.id && (
-                        <tr key={`${d.id}-expanded`}>
+                        <tr>
                           <td colSpan={6} style={{padding:'0 0 12px 32px',background:'var(--surface2)'}}>
                             <table style={{width:'100%',fontSize:12}}>
                               <thead>
@@ -332,7 +389,7 @@ export default function Dispatch() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>

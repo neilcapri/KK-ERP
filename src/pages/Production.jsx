@@ -283,19 +283,47 @@ export default function Production() {
             </div>
             {schedule.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 32, color: 'var(--ink3)' }}>No scheduled production. Click "+ Schedule" to add.</div>
-            ) : (
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Date</th><th>Product</th><th>Planned Input</th><th>Planned Output</th><th>RM Check</th><th>Status</th><th></th><th style={{width:60}}></th></tr></thead>
-                  <tbody>
-                    {schedule.map(s => (
-                      <ScheduleRow key={s.id} s={s} products={products} statusColors={statusColors}
-                        onStatusChange={updateScheduleStatus} onDelete={deleteSchedule} calcOutput={calcOutput} checkRM={checkRM} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            ) : (() => {
+              const byDate = {}
+              schedule.forEach(s => {
+                if (!byDate[s.scheduled_date]) byDate[s.scheduled_date] = []
+                byDate[s.scheduled_date].push(s)
+              })
+              return (
+                <div>
+                  {Object.entries(byDate).sort(([a],[b]) => a.localeCompare(b)).map(([date, rows]) => (
+                    <div key={date} style={{ marginBottom: 24 }}>
+                      <div style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '10px 14px', background: 'var(--kk-green)',
+                        borderRadius: '6px 6px 0 0',
+                      }}>
+                        <div style={{ fontFamily: 'var(--display)', fontSize: 14, letterSpacing: 2, color: 'var(--kk-cream)' }}>
+                          {new Date(date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}
+                        </div>
+                        <DailyTotal rows={rows} products={products} />
+                      </div>
+                      <div className="table-wrap" style={{ border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Product</th><th>Planned Input</th><th>Planned Output</th>
+                              <th>Batch Value</th><th>RM Check</th><th>Status</th><th></th><th style={{width:60}}></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map(s => (
+                              <ScheduleRow key={s.id} s={s} products={products} statusColors={statusColors}
+                                onStatusChange={updateScheduleStatus} onDelete={deleteSchedule} calcOutput={calcOutput} checkRM={checkRM} />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
           </div>
         )}
 
@@ -380,24 +408,57 @@ export default function Production() {
 }
 
 // Schedule row with RM check
+// Daily total component
+function DailyTotal({ rows, products }) {
+  const [total, setTotal] = useState(null)
+
+  useEffect(() => {
+    async function calc() {
+      let sum = 0
+      for (const s of rows) {
+        const { data: p } = await supabase.from('products').select('price_per_unit').eq('code', s.product_code).single()
+        if (p?.price_per_unit) sum += (s.planned_output || 0) * p.price_per_unit
+      }
+      setTotal(sum)
+    }
+    calc()
+  }, [rows.map(r => r.id).join(',')])
+
+  if (total === null) return <span style={{ fontSize: 12, color: 'rgba(227,221,209,.5)' }}>...</span>
+  return (
+    <div style={{ textAlign: 'right' }}>
+      <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)' }}>DAY TOTAL</div>
+      <div style={{ fontFamily: 'var(--display)', fontSize: 20, color: 'var(--kk-peach)', letterSpacing: 1 }}>
+        ${total.toFixed(2)}
+      </div>
+    </div>
+  )
+}
+
 function ScheduleRow({ s, products, statusColors, onStatusChange, onDelete, calcOutput, checkRM }) {
   const [rmStatus, setRMStatus] = useState(null)
+  const [batchValue, setBatchValue] = useState(null)
 
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
       const warns = await checkRM(s.product_code, out)
       setRMStatus(warns)
+      const { data: p } = await supabase.from('products').select('price_per_unit').eq('code', s.product_code).single()
+      if (p?.price_per_unit) setBatchValue(out * p.price_per_unit)
+      else setBatchValue(0)
     }
     check()
   }, [s.id])
 
   return (
     <tr>
-      <td style={{fontSize:12}}>{s.scheduled_date}</td>
       <td><span className="code-tag">{s.product_code}</span> <span style={{fontSize:11,color:'var(--ink2)'}}>{s.product_name}</span></td>
       <td style={{fontSize:12}}>{s.planned_input} {s.input_type}</td>
       <td style={{fontWeight:500,color:'var(--green)'}}>{s.planned_output} units</td>
+      <td style={{fontWeight:600, color:'var(--kk-brown)'}}>
+        {batchValue === null ? '...' : batchValue > 0 ? `$${batchValue.toFixed(2)}` : <span style={{color:'var(--ink3)'}}>—</span>}
+      </td>
       <td>
         {rmStatus === null ? <span style={{fontSize:11,color:'var(--ink3)'}}>...</span>
           : rmStatus.length === 0
@@ -408,7 +469,7 @@ function ScheduleRow({ s, products, statusColors, onStatusChange, onDelete, calc
       <td><span className={`badge badge-${statusColors[s.status]}`}>{s.status}</span></td>
       <td>
         <select value={s.status} onChange={e => onStatusChange(s.id, e.target.value)}
-          style={{ fontSize: 10, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 2, fontFamily: 'var(--mono)', background: 'var(--surface)' }}>
+          style={{ fontSize: 10, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 2, fontFamily: 'var(--display)', background: 'var(--surface)' }}>
           <option value="planned">Planned</option>
           <option value="in_progress">In Progress</option>
           <option value="completed">Completed</option>
@@ -417,7 +478,7 @@ function ScheduleRow({ s, products, statusColors, onStatusChange, onDelete, calc
       </td>
       <td>
         <button onClick={() => onDelete(s.id, s.product_code)}
-          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}>
+          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
           Delete
         </button>
       </td>

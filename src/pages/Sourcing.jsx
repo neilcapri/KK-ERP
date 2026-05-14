@@ -228,7 +228,10 @@ export function Activity() {
 }
 
 // ── REPORTS ──────────────────────────────────────────────────
+import Financials from './Financials'
+
 export function Reports() {
+  const { isAdmin } = useAuth()
   const [products, setProducts] = useState([])
   const [rms, setRMs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -257,7 +260,7 @@ export function Reports() {
     a.click()
   }
 
-  const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1 }
+  const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,PRMC:1,CMC:1,LMC:1 }
 
   return (
     <>
@@ -266,9 +269,13 @@ export function Reports() {
       </div>
       <div className="page-body">
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
-          {['fg','rm'].map(r => (
-            <button key={r} onClick={() => setActiveReport(r)} style={{ padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: activeReport===r?'var(--ink)':'var(--ink3)', borderBottom: activeReport===r?'2px solid var(--ink)':'2px solid transparent', marginBottom: -1 }}>
-              {r === 'fg' ? '📦 Finished Goods' : '🌿 Raw Materials'}
+          {[
+            { key: 'fg', label: '📦 Finished Goods' },
+            { key: 'rm', label: '🌿 Raw Materials' },
+            ...(isAdmin ? [{ key: 'financials', label: '💰 Financials' }] : [])
+          ].map(r => (
+            <button key={r.key} onClick={() => setActiveReport(r.key)} style={{ padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--display)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: activeReport===r.key?'var(--ink)':'var(--ink3)', borderBottom: activeReport===r.key?'2px solid var(--kk-green)':'2px solid transparent', marginBottom: -1 }}>
+              {r.label}
             </button>
           ))}
         </div>
@@ -342,6 +349,9 @@ export function Reports() {
               <span style={{ color: 'var(--amber)' }}>Low: <strong>{rms.filter(r=>r.stock>0&&r.stock<=r.min_stock).length}</strong></span>
             </div>
           </div>
+        )}
+        {activeReport === 'financials' && isAdmin && (
+          <Financials />
         )}
       </div>
     </>

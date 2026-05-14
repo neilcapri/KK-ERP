@@ -41,10 +41,11 @@ export default function Login() {
         <div style={{ marginBottom: '32px' }}>
           <div style={{
             fontFamily: 'var(--display)', fontSize: '42px',
-            letterSpacing: '5px', color: 'var(--kk-green)', lineHeight: 1,
+            letterSpacing: '3px', color: 'var(--kk-green)', lineHeight: 1,
+            fontWeight: 700,
           }}>KK ERP</div>
           <div style={{
-            fontFamily: 'var(--serif)', fontStyle: 'italic',
+            fontFamily: 'var(--body)', fontStyle: 'normal',
             fontSize: '13px', color: 'var(--ink2)', marginTop: '6px',
             letterSpacing: '.5px',
           }}>Konscious Kitchen Operations</div>

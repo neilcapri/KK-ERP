@@ -313,8 +313,8 @@ export default function Production() {
                           </thead>
                           <tbody>
                             {rows.map(s => (
-                              <ScheduleRow key={s.id} s={s} products={products} statusColors={statusColors}
-                                onStatusChange={updateScheduleStatus} onDelete={deleteSchedule} calcOutput={calcOutput} checkRM={checkRM} />
+                              <ScheduleRow key={s.id} s={s} allSchedule={schedule} statusColors={statusColors}
+                                onStatusChange={updateScheduleStatus} onDelete={deleteSchedule} calcOutput={calcOutput} />
                             ))}
                           </tbody>
                         </table>
@@ -435,21 +435,64 @@ function DailyTotal({ rows, products }) {
   )
 }
 
-function ScheduleRow({ s, products, statusColors, onStatusChange, onDelete, calcOutput, checkRM }) {
-  const [rmStatus, setRMStatus] = useState(null)
+// allSchedule = full list of planned batches so we can compute running RM balance
+function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, calcOutput }) {
+  const [rmStatus, setRMStatus] = useState(null)  // array of { rm, needed, have, remaining }
   const [batchValue, setBatchValue] = useState(null)
 
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
-      const warns = await checkRM(s.product_code, out)
-      setRMStatus(warns)
+
+      // Get price
       const { data: p } = await supabase.from('products').select('price_per_unit').eq('code', s.product_code).single()
-      if (p?.price_per_unit) setBatchValue(out * p.price_per_unit)
-      else setBatchValue(0)
+      setBatchValue(p?.price_per_unit ? out * p.price_per_unit : 0)
+
+      // Get BOM for this product
+      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', s.product_code)
+      if (!bom?.length) { setRMStatus([]); return }
+
+      // Get current RM stock
+      const rmNames = bom.map(b => b.rm_name)
+      const { data: rms } = await supabase.from('raw_materials').select('name,stock').in('name', rmNames)
+      const stockMap = {}
+      ;(rms || []).forEach(r => { stockMap[r.name] = r.stock })
+
+      // Calculate how much of each RM is already committed by earlier scheduled batches
+      // "earlier" = batches that appear before this one in the sorted schedule (by date, then creation)
+      const myIndex = allSchedule.findIndex(x => x.id === s.id)
+      const priorBatches = allSchedule.slice(0, myIndex).filter(x => x.status === 'planned' || x.status === 'in_progress')
+
+      const committedMap = {}
+      for (const prior of priorBatches) {
+        const { data: priorBom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', prior.product_code)
+        const priorOut = prior.planned_output || calcOutput(prior.product_code, prior.input_type, prior.planned_input)
+        ;(priorBom || []).forEach(item => {
+          const needed = (item.qty_per_unit * priorOut) / 1000
+          committedMap[item.rm_name] = (committedMap[item.rm_name] || 0) + needed
+        })
+      }
+
+      // Check if remaining stock (after prior commits) is enough
+      const warns = []
+      for (const item of bom) {
+        const neededKg = (item.qty_per_unit * out) / 1000
+        const currentStock = stockMap[item.rm_name] || 0
+        const committed = committedMap[item.rm_name] || 0
+        const remaining = currentStock - committed
+        if (remaining < neededKg) {
+          warns.push({
+            rm: item.rm_name,
+            needed: neededKg.toFixed(3),
+            remaining: remaining.toFixed(3),
+            shortBy: (neededKg - remaining).toFixed(3)
+          })
+        }
+      }
+      setRMStatus(warns)
     }
     check()
-  }, [s.id])
+  }, [s.id, allSchedule.map(x => x.id).join(',')])
 
   return (
     <tr>
@@ -460,10 +503,19 @@ function ScheduleRow({ s, products, statusColors, onStatusChange, onDelete, calc
         {batchValue === null ? '...' : batchValue > 0 ? `$${batchValue.toFixed(2)}` : <span style={{color:'var(--ink3)'}}>—</span>}
       </td>
       <td>
-        {rmStatus === null ? <span style={{fontSize:11,color:'var(--ink3)'}}>...</span>
+        {rmStatus === null
+          ? <span style={{fontSize:11,color:'var(--ink3)'}}>...</span>
           : rmStatus.length === 0
-            ? <span style={{fontSize:11,color:'var(--green)'}}>✅ OK</span>
-            : <span style={{fontSize:11,color:'var(--red)'}}>⚠️ {rmStatus.length} short</span>
+            ? <span style={{fontSize:11,color:'var(--green)'}}>✅ All OK</span>
+            : (
+              <div>
+                {rmStatus.map((w, i) => (
+                  <div key={i} style={{fontSize:10, color:'var(--red)', lineHeight:1.6}}>
+                    ⚠️ {w.rm.split(' ').slice(0,2).join(' ')}: need {w.needed}kg, {parseFloat(w.remaining) < 0 ? 'none left' : `${w.remaining}kg left`} (short {w.shortBy}kg)
+                  </div>
+                ))}
+              </div>
+            )
         }
       </td>
       <td><span className={`badge badge-${statusColors[s.status]}`}>{s.status}</span></td>

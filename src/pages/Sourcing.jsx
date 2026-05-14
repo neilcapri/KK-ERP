@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import Financials from './Financials'
 
 export function Sourcing() {
   const { profile, isAdmin } = useAuth()

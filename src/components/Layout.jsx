@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import ChatWidget from './ChatWidget'
 
 const navItems = [
   { to: '/', icon: '⚡', label: 'Dashboard', roles: ['admin','kitchen','dispatch'] },
@@ -71,6 +72,9 @@ export default function Layout() {
           </NavLink>
         ))}
       </nav>
+
+      {/* AI Chat Widget */}
+      <ChatWidget />
     </div>
   )
 }

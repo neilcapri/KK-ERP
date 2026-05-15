@@ -3,13 +3,13 @@ import { useAuth } from '../context/AuthContext'
 import ChatWidget from './ChatWidget'
 
 const navItems = [
-  { to: '/', icon: '⚡', label: 'Dashboard', roles: ['admin','kitchen','dispatch'] },
-  { to: '/inventory', icon: '📦', label: 'Inventory', roles: ['admin','kitchen','dispatch'] },
-  { to: '/production', icon: '🏭', label: 'Production', roles: ['admin','kitchen'] },
-  { to: '/dispatch', icon: '📋', label: 'Dispatch', roles: ['admin','kitchen','dispatch'] },
-  { to: '/sourcing', icon: '📥', label: 'Sourcing', roles: ['admin','kitchen','dispatch'] },
-  { to: '/activity', icon: '🕐', label: 'Activity', roles: ['admin','kitchen','dispatch'] },
-  { to: '/reports', icon: '📊', label: 'Reports', roles: ['admin'] },
+  { to: '/', icon: '⚡', label: 'Dashboard', roles: ['admin','kitchen','analyst','dispatch'] },
+  { to: '/inventory', icon: '📦', label: 'Inventory', roles: ['admin','kitchen','analyst','dispatch'] },
+  { to: '/production', icon: '🏭', label: 'Production', roles: ['admin','analyst','kitchen'] },
+  { to: '/dispatch', icon: '📋', label: 'Dispatch', roles: ['admin','kitchen','analyst','dispatch'] },
+  { to: '/sourcing', icon: '📥', label: 'Sourcing', roles: ['admin','kitchen','analyst','dispatch'] },
+  { to: '/activity', icon: '🕐', label: 'Activity', roles: ['admin','kitchen','analyst','dispatch'] },
+  { to: '/reports', icon: '📊', label: 'Reports', roles: ['admin','analyst'] },
   { to: '/time-tracking', icon: '⏱', label: 'Time Tracking', roles: ['admin','kitchen','staff'] },
 ]
 

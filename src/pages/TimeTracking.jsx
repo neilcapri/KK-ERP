@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "./supabaseClient";
 
 // ─── Helpers ────────────────────────────────────────────────
 function fmtTime(ts) {
@@ -33,7 +33,7 @@ function weekRange(date = new Date()) {
 // ─── Main Component ─────────────────────────────────────────
 export default function TimeTracking({ user, employee }) {
   const isAdmin = employee?.role === "admin";
-  const isManager = employee?.role === "manager";
+  const isManager = employee?.role === "kitchen";
 
   const [entries, setEntries] = useState([]);
   const [allEmployees, setAllEmployees] = useState([]);
@@ -169,8 +169,8 @@ export default function TimeTracking({ user, employee }) {
     h3: { fontSize: "15px", fontWeight: "600", color: "#2d5a2d", marginBottom: "12px" },
     badge: (role) => ({
       display: "inline-block", padding: "2px 10px", borderRadius: "12px", fontSize: "11px", fontWeight: "600",
-      background: role === "admin" ? "#fff3cd" : role === "manager" ? "#d1ecf1" : "#d4edda",
-      color: role === "admin" ? "#856404" : role === "manager" ? "#0c5460" : "#155724",
+      background: role === "admin" ? "#fff3cd" : role === "kitchen" ? "#d1ecf1" : "#d4edda",
+      color: role === "admin" ? "#856404" : role === "kitchen" ? "#0c5460" : "#155724",
     }),
     clockBtn: (active) => ({
       width: "100%", padding: "16px", borderRadius: "12px", border: "none", cursor: "pointer",
@@ -252,7 +252,7 @@ export default function TimeTracking({ user, employee }) {
               <div style={{ fontSize: "11px", color: "#666", fontWeight: "600" }}>HOURS WORKED</div>
               <div style={{ fontSize: "22px", fontWeight: "700", color: "#1a3c1a", marginTop: "4px" }}>{fmtHours(myWeekHours)}</div>
             </div>
-            {/* Pay only visible if they're admin — managers/staff don't see pay */}
+            {/* Pay only visible if they're admin — kitchens/staff don't see pay */}
             {isAdmin && myWeekPay != null && (
               <div style={s.summaryCard("#e8f5e9")}>
                 <div style={{ fontSize: "11px", color: "#666", fontWeight: "600" }}>WEEK PAY (EST.)</div>

@@ -60,7 +60,7 @@ export default function Layout() {
 
       {/* Mobile Bottom Nav */}
       <nav className="bottom-nav">
-        {visibleItems.slice(0, 7).map(item => (
+        {visibleItems.slice(0, 6).map(item => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -71,6 +71,10 @@ export default function Layout() {
             {item.label}
           </NavLink>
         ))}
+        <button className="bnav-item" onClick={handleSignOut} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+    <span className="bi">🚪</span>
+    Sign Out
+  </button>
       </nav>
 
       {/* AI Chat Widget */}

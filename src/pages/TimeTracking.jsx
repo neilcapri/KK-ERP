@@ -15,17 +15,31 @@ function fmtHours(h) {
   const mins = Math.round((h - hrs) * 60);
   return `${hrs}h ${mins}m`;
 }
-function weekRange(date = new Date()) {
+function weekStart(date = new Date()) {
   const d = new Date(date);
   const day = d.getDay();
-  const diffToSat = (day >= 6) ? 0 : day + 1;
-  const sat = new Date(d);
-  sat.setDate(d.getDate() - diffToSat);
-  sat.setHours(0, 0, 0, 0);
-  const fri = new Date(sat);
-  fri.setDate(sat.getDate() + 6);
-  fri.setHours(23, 59, 59, 999);
-  return { start: sat, end: fri };
+  const diffToSat = day >= 6 ? 0 : day + 1;
+  d.setDate(d.getDate() - diffToSat);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function getRange(selectedDate, rangeType) {
+  const start = weekStart(selectedDate);
+  let end;
+  if (rangeType === "2weeks") {
+    end = new Date(start);
+    end.setDate(start.getDate() + 13);
+    end.setHours(23, 59, 59, 999);
+  } else if (rangeType === "month") {
+    end = new Date(start);
+    end.setDate(start.getDate() + 29);
+    end.setHours(23, 59, 59, 999);
+  } else {
+    end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    end.setHours(23, 59, 59, 999);
+  }
+  return { start, end };
 }
 
 // ─── Mini Calendar ───────────────────────────────────────────
@@ -33,35 +47,19 @@ function WeekCalendar({ selectedDate, onSelectWeek, onClose }) {
   const [viewDate, setViewDate] = useState(new Date(selectedDate));
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const days = ["Su","Mo","Tu","We","Th","Fr","Sa"];
-
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  function getWeekStart(date) {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diffToSat = day >= 6 ? 0 : day + 1;
-    d.setDate(d.getDate() - diffToSat);
-    d.setHours(0,0,0,0);
-    return d;
-  }
-
   function isSameWeek(date) {
-    const ws = getWeekStart(selectedDate);
-    const ds = getWeekStart(date);
-    return ws.getTime() === ds.getTime();
+    return weekStart(selectedDate).getTime() === weekStart(date).getTime();
   }
-
   function isToday(date) {
     const t = new Date();
     return date.getDate() === t.getDate() && date.getMonth() === t.getMonth() && date.getFullYear() === t.getFullYear();
   }
-
-  function isFuture(date) {
-    return date > new Date();
-  }
+  function isFuture(date) { return date > new Date(); }
 
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
@@ -69,17 +67,14 @@ function WeekCalendar({ selectedDate, onSelectWeek, onClose }) {
 
   return (
     <div style={{ position: "absolute", top: "110%", left: "50%", transform: "translateX(-50%)", background: "#fff", borderRadius: "12px", boxShadow: "0 4px 24px rgba(0,0,0,0.15)", padding: "16px", zIndex: 100, width: "280px" }}>
-      {/* Month nav */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
         <button onClick={() => setViewDate(new Date(year, month - 1, 1))} style={{ background: "none", border: "none", fontSize: "16px", cursor: "pointer", padding: "4px 8px" }}>‹</button>
         <span style={{ fontWeight: "700", color: "#1a3c1a", fontSize: "14px" }}>{months[month]} {year}</span>
         <button onClick={() => setViewDate(new Date(year, month + 1, 1))} style={{ background: "none", border: "none", fontSize: "16px", cursor: "pointer", padding: "4px 8px" }}>›</button>
       </div>
-      {/* Day headers */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: "4px" }}>
         {days.map(d => <div key={d} style={{ textAlign: "center", fontSize: "10px", fontWeight: "600", color: "#888", padding: "4px 0" }}>{d}</div>)}
       </div>
-      {/* Days grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "2px" }}>
         {cells.map((date, i) => {
           if (!date) return <div key={i} />;
@@ -87,20 +82,16 @@ function WeekCalendar({ selectedDate, onSelectWeek, onClose }) {
           const today = isToday(date);
           const future = isFuture(date);
           return (
-            <div key={i}
-              onClick={() => { if (!future) { onSelectWeek(date); onClose(); } }}
-              style={{
-                textAlign: "center", padding: "6px 2px", borderRadius: "6px", fontSize: "12px", cursor: future ? "not-allowed" : "pointer",
+            <div key={i} onClick={() => { if (!future) { onSelectWeek(date); onClose(); } }}
+              style={{ textAlign: "center", padding: "6px 2px", borderRadius: "6px", fontSize: "12px", cursor: future ? "not-allowed" : "pointer",
                 background: selected ? "#1a3c1a" : today ? "#e8f5e9" : "transparent",
                 color: selected ? "#fff" : future ? "#ccc" : today ? "#1a3c1a" : "#333",
-                fontWeight: selected || today ? "700" : "400",
-              }}>
+                fontWeight: selected || today ? "700" : "400" }}>
               {date.getDate()}
             </div>
           );
         })}
       </div>
-      {/* Today button */}
       <div style={{ marginTop: "10px", textAlign: "center" }}>
         <button onClick={() => { onSelectWeek(new Date()); onClose(); }}
           style={{ background: "#1a3c1a", color: "#fff", border: "none", borderRadius: "8px", padding: "6px 16px", fontSize: "12px", cursor: "pointer" }}>
@@ -124,22 +115,19 @@ export default function TimeTracking({ user, employee }) {
   const [editModal, setEditModal] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [rangeType, setRangeType] = useState("1week"); // admin only: "1week" | "2weeks" | "month"
   const [showCalendar, setShowCalendar] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-
-  // Admin clock-in on behalf of employee
   const [adminClockModal, setAdminClockModal] = useState(false);
   const [adminClockEmp, setAdminClockEmp] = useState("");
   const [adminClockTime, setAdminClockTime] = useState("");
   const [adminClockOut, setAdminClockOut] = useState("");
-
   const calendarRef = useRef(null);
 
-  const { start: weekStart, end: weekEnd } = weekRange(selectedDate);
-  const isCurrentWeek = weekRange(new Date()).start.getTime() === weekStart.getTime();
+  const { start: rangeStart, end: rangeEnd } = getRange(selectedDate, isAdmin ? rangeType : "1week");
+  const isCurrentWeek = weekStart(new Date()).getTime() === weekStart(selectedDate).getTime();
 
-  // Close calendar on outside click
   useEffect(() => {
     function handleClick(e) {
       if (calendarRef.current && !calendarRef.current.contains(e.target)) setShowCalendar(false);
@@ -150,8 +138,7 @@ export default function TimeTracking({ user, employee }) {
 
   useEffect(() => {
     if (!isAdmin) return;
-    supabase.from("employees").select("id, name, title, role, hourly_rate")
-      .order("name")
+    supabase.from("employees").select("id, name, title, role, hourly_rate").order("name")
       .then(({ data }) => setAllEmployees(data || []));
   }, [isAdmin]);
 
@@ -160,8 +147,8 @@ export default function TimeTracking({ user, employee }) {
     let query = supabase
       .from("time_entries")
       .select("*, employees(id, name, title, hourly_rate)")
-      .gte("clock_in", weekStart.toISOString())
-      .lte("clock_in", weekEnd.toISOString())
+      .gte("clock_in", rangeStart.toISOString())
+      .lte("clock_in", rangeEnd.toISOString())
       .order("clock_in", { ascending: false });
 
     if (isAdmin && selectedEmployee) query = query.eq("employee_id", selectedEmployee);
@@ -172,32 +159,26 @@ export default function TimeTracking({ user, employee }) {
     const open = (data || []).find(e => e.employee_id === employee?.id && !e.clock_out);
     setActiveEntry(open || null);
     setLoading(false);
-  }, [weekStart.toISOString(), weekEnd.toISOString(), selectedEmployee, employee?.id, isAdmin]);
+  }, [rangeStart.toISOString(), rangeEnd.toISOString(), selectedEmployee, employee?.id, isAdmin]);
 
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
   async function handleClockIn() {
     setClockLoading(true); setError(""); setSuccess("");
-    const { error } = await supabase.from("time_entries").insert({
-      employee_id: employee.id,
-      clock_in: new Date().toISOString(),
-    });
-    if (error) setError("Clock in failed. Try again.");
+    const { error } = await supabase.from("time_entries").insert({ employee_id: employee.id, clock_in: new Date().toISOString() });
+    if (error) setError("Clock in failed.");
     else { setSuccess("Clocked in!"); await loadEntries(); }
     setClockLoading(false);
   }
 
   async function handleClockOut() {
     setClockLoading(true); setError(""); setSuccess("");
-    const { error } = await supabase.from("time_entries")
-      .update({ clock_out: new Date().toISOString() })
-      .eq("id", activeEntry.id);
-    if (error) setError("Clock out failed. Try again.");
+    const { error } = await supabase.from("time_entries").update({ clock_out: new Date().toISOString() }).eq("id", activeEntry.id);
+    if (error) setError("Clock out failed.");
     else { setSuccess("Clocked out!"); await loadEntries(); }
     setClockLoading(false);
   }
 
-  // Admin: clock in/out on behalf of employee
   async function handleAdminClock() {
     if (!adminClockEmp || !adminClockTime) { setError("Select employee and clock-in time."); return; }
     setError("");
@@ -205,52 +186,42 @@ export default function TimeTracking({ user, employee }) {
       employee_id: adminClockEmp,
       clock_in: new Date(adminClockTime).toISOString(),
       clock_out: adminClockOut ? new Date(adminClockOut).toISOString() : null,
-      notes: "Added by admin",
-      edited_by: user.id,
-      edited_at: new Date().toISOString(),
+      notes: "Added by admin", edited_by: user.id, edited_at: new Date().toISOString(),
     });
-    if (error) { setError("Failed to save. Check times."); return; }
+    if (error) { setError("Failed. Check times."); return; }
     setAdminClockModal(false);
     setAdminClockEmp(""); setAdminClockTime(""); setAdminClockOut("");
-    setSuccess("Entry added.");
-    await loadEntries();
+    setSuccess("Entry added."); await loadEntries();
   }
 
   async function handleSaveEdit() {
     setError("");
-    const { id } = editModal.entry;
     const updates = {
       clock_in: new Date(editForm.clock_in).toISOString(),
       clock_out: editForm.clock_out ? new Date(editForm.clock_out).toISOString() : null,
-      notes: editForm.notes || null,
-      edited_by: user.id,
-      edited_at: new Date().toISOString(),
+      notes: editForm.notes || null, edited_by: user.id, edited_at: new Date().toISOString(),
     };
-    const { error } = await supabase.from("time_entries").update(updates).eq("id", id);
-    if (error) { setError("Save failed. Check dates."); return; }
-    setEditModal(null);
-    setSuccess("Entry updated.");
-    await loadEntries();
+    const { error } = await supabase.from("time_entries").update(updates).eq("id", editModal.entry.id);
+    if (error) { setError("Save failed."); return; }
+    setEditModal(null); setSuccess("Entry updated."); await loadEntries();
   }
 
   async function handleDelete(entryId) {
     if (!window.confirm("Delete this entry?")) return;
     await supabase.from("time_entries").delete().eq("id", entryId);
-    setSuccess("Entry deleted.");
-    await loadEntries();
+    setSuccess("Entry deleted."); await loadEntries();
   }
 
   function weeklyTotals(empId) {
-    const empEntries = entries.filter(e => e.employee_id === empId && e.hours_worked != null);
-    return empEntries.reduce((sum, e) => sum + parseFloat(e.hours_worked || 0), 0);
+    return entries.filter(e => e.employee_id === empId && e.hours_worked != null)
+      .reduce((sum, e) => sum + parseFloat(e.hours_worked || 0), 0);
   }
 
   function groupedEntries() {
     const map = {};
     entries.forEach(e => {
-      const eid = e.employee_id;
-      if (!map[eid]) map[eid] = { info: e.employees, entries: [] };
-      map[eid].entries.push(e);
+      if (!map[e.employee_id]) map[e.employee_id] = { info: e.employees, entries: [] };
+      map[e.employee_id].entries.push(e);
     });
     return Object.values(map);
   }
@@ -264,7 +235,6 @@ export default function TimeTracking({ user, employee }) {
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 16);
   };
-
   const nowLocalInput = () => {
     const d = new Date();
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
@@ -274,31 +244,25 @@ export default function TimeTracking({ user, employee }) {
   const s = {
     wrap: { padding: "16px", maxWidth: "900px", margin: "0 auto", fontFamily: "Arial, sans-serif" },
     card: { background: "#fff", borderRadius: "12px", padding: "20px", marginBottom: "16px", boxShadow: "0 1px 4px rgba(0,0,0,0.1)" },
-    h2: { fontSize: "18px", fontWeight: "700", color: "#1a3c1a", marginBottom: "4px" },
+    h2: { fontSize: "18px", fontWeight: "700", color: "#1a3c1a" },
     h3: { fontSize: "15px", fontWeight: "600", color: "#2d5a2d", marginBottom: "12px" },
-    badge: (role) => ({
-      display: "inline-block", padding: "2px 10px", borderRadius: "12px", fontSize: "11px", fontWeight: "600",
-      background: role === "admin" ? "#fff3cd" : role === "kitchen" ? "#d1ecf1" : "#d4edda",
-      color: role === "admin" ? "#856404" : role === "kitchen" ? "#0c5460" : "#155724",
-    }),
-    clockBtn: (active) => ({
-      width: "100%", padding: "16px", borderRadius: "12px", border: "none", cursor: "pointer",
-      fontSize: "16px", fontWeight: "700", background: active ? "#dc3545" : "#2d5a2d", color: "#fff",
-    }),
+    badge: (role) => ({ display: "inline-block", padding: "2px 10px", borderRadius: "12px", fontSize: "11px", fontWeight: "600", background: role === "admin" ? "#fff3cd" : "#d1ecf1", color: role === "admin" ? "#856404" : "#0c5460" }),
+    clockBtn: (active) => ({ width: "100%", padding: "16px", borderRadius: "12px", border: "none", cursor: "pointer", fontSize: "16px", fontWeight: "700", background: active ? "#dc3545" : "#2d5a2d", color: "#fff" }),
     table: { width: "100%", borderCollapse: "collapse", fontSize: "13px" },
     th: { background: "#f0f4f0", color: "#2d5a2d", padding: "8px 10px", textAlign: "left", fontWeight: "600", borderBottom: "2px solid #d0ddd0" },
     td: { padding: "8px 10px", borderBottom: "1px solid #eee", verticalAlign: "middle" },
     editBtn: { background: "#2d5a2d", color: "#fff", border: "none", borderRadius: "6px", padding: "4px 10px", cursor: "pointer", fontSize: "12px", marginRight: "4px" },
     delBtn: { background: "#dc3545", color: "#fff", border: "none", borderRadius: "6px", padding: "4px 10px", cursor: "pointer", fontSize: "12px" },
-    select: { padding: "8px 12px", borderRadius: "8px", border: "1px solid #ccc", fontSize: "13px", marginRight: "8px" },
     navBtn: { background: "#f0f4f0", border: "1px solid #ccc", borderRadius: "8px", padding: "6px 14px", cursor: "pointer", fontSize: "13px" },
+    select: { padding: "8px 12px", borderRadius: "8px", border: "1px solid #ccc", fontSize: "13px", marginRight: "8px" },
     modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 },
     modalBox: { background: "#fff", borderRadius: "12px", padding: "24px", width: "min(420px, 92vw)", boxShadow: "0 4px 24px rgba(0,0,0,0.2)" },
     input: { width: "100%", padding: "8px 10px", borderRadius: "8px", border: "1px solid #ccc", fontSize: "13px", marginBottom: "10px", boxSizing: "border-box" },
     label: { fontSize: "12px", fontWeight: "600", color: "#555", display: "block", marginBottom: "3px" },
     alert: (type) => ({ padding: "10px 14px", borderRadius: "8px", marginBottom: "12px", fontSize: "13px", background: type === "error" ? "#f8d7da" : "#d4edda", color: type === "error" ? "#721c24" : "#155724" }),
-    summaryCard: (color) => ({ flex: "1", minWidth: "120px", background: color, borderRadius: "10px", padding: "14px 16px" }),
   };
+
+  const rangeLabel = rangeType === "2weeks" ? "2 Weeks" : rangeType === "month" ? "Month" : "Week";
 
   return (
     <div style={s.wrap}>
@@ -312,34 +276,49 @@ export default function TimeTracking({ user, employee }) {
             </div>
           </div>
 
-          {/* Week Nav with Calendar */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", position: "relative" }} ref={calendarRef}>
-            <button style={s.navBtn} onClick={() => {
-              const d = new Date(selectedDate); d.setDate(d.getDate() - 7); setSelectedDate(d);
-            }}>‹ Prev</button>
-
-            {/* Clickable week range — opens calendar */}
-            <button onClick={() => setShowCalendar(v => !v)} style={{
-              background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)",
-              borderRadius: "8px", padding: "6px 12px", cursor: "pointer", color: "#fff",
-              fontSize: "13px", minWidth: "180px", textAlign: "center",
-            }}>
-              📅 {fmtDate(weekStart)} – {fmtDate(weekEnd)}
-            </button>
-
-            <button style={{ ...s.navBtn, opacity: isCurrentWeek ? 0.4 : 1 }}
-              disabled={isCurrentWeek}
-              onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate() + 7); setSelectedDate(d); }}>
-              Next ›
-            </button>
-
-            {showCalendar && (
-              <WeekCalendar
-                selectedDate={selectedDate}
-                onSelectWeek={(date) => setSelectedDate(date)}
-                onClose={() => setShowCalendar(false)}
-              />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "8px" }}>
+            {/* Range selector — admin only */}
+            {isAdmin && (
+              <div style={{ display: "flex", gap: "4px" }}>
+                {["1week","2weeks","month"].map(r => (
+                  <button key={r} onClick={() => setRangeType(r)} style={{
+                    padding: "4px 12px", borderRadius: "6px", border: "none", cursor: "pointer", fontSize: "11px", fontWeight: "600",
+                    background: rangeType === r ? "#fff" : "rgba(255,255,255,0.2)",
+                    color: rangeType === r ? "#1a3c1a" : "#fff",
+                  }}>
+                    {r === "1week" ? "1 Week" : r === "2weeks" ? "2 Weeks" : "Month"}
+                  </button>
+                ))}
+              </div>
             )}
+
+            {/* Week Nav with Calendar */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", position: "relative" }} ref={calendarRef}>
+              <button style={s.navBtn} onClick={() => {
+                const d = new Date(selectedDate);
+                d.setDate(d.getDate() - (rangeType === "month" ? 28 : rangeType === "2weeks" ? 14 : 7));
+                setSelectedDate(d);
+              }}>‹ Prev</button>
+
+              <button onClick={() => setShowCalendar(v => !v)} style={{
+                background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)",
+                borderRadius: "8px", padding: "6px 12px", cursor: "pointer", color: "#fff",
+                fontSize: "12px", minWidth: "200px", textAlign: "center",
+              }}>
+                📅 {fmtDate(rangeStart)} – {fmtDate(rangeEnd)}
+              </button>
+
+              <button style={{ ...s.navBtn, opacity: isCurrentWeek ? 0.4 : 1 }} disabled={isCurrentWeek}
+                onClick={() => {
+                  const d = new Date(selectedDate);
+                  d.setDate(d.getDate() + (rangeType === "month" ? 28 : rangeType === "2weeks" ? 14 : 7));
+                  setSelectedDate(d);
+                }}>Next ›</button>
+
+              {showCalendar && (
+                <WeekCalendar selectedDate={selectedDate} onSelectWeek={setSelectedDate} onClose={() => setShowCalendar(false)} />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -350,14 +329,10 @@ export default function TimeTracking({ user, employee }) {
       {/* Clock In/Out */}
       {isCurrentWeek && (
         <div style={s.card}>
-          <div style={s.h3}>
-            {activeEntry ? `🟢 Clocked in at ${fmtTime(activeEntry.clock_in)}` : "🔴 Not clocked in"}
-          </div>
+          <div style={s.h3}>{activeEntry ? `🟢 Clocked in at ${fmtTime(activeEntry.clock_in)}` : "🔴 Not clocked in"}</div>
           <button style={s.clockBtn(!!activeEntry)} onClick={activeEntry ? handleClockOut : handleClockIn} disabled={clockLoading}>
             {clockLoading ? "Please wait..." : activeEntry ? "CLOCK OUT" : "CLOCK IN"}
           </button>
-
-          {/* Admin: add entry for any employee */}
           {isAdmin && (
             <button onClick={() => { setAdminClockModal(true); setAdminClockTime(nowLocalInput()); setAdminClockOut(""); setAdminClockEmp(""); }}
               style={{ width: "100%", marginTop: "10px", padding: "10px", borderRadius: "10px", border: "1px solid #2d5a2d", background: "transparent", color: "#2d5a2d", fontSize: "13px", fontWeight: "600", cursor: "pointer" }}>
@@ -372,16 +347,14 @@ export default function TimeTracking({ user, employee }) {
         <div style={s.card}>
           <div style={s.h3}>Week Summary</div>
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "16px" }}>
-            <div style={s.summaryCard("#f0f4f0")}>
+            <div style={{ flex: "1", minWidth: "120px", background: "#f0f4f0", borderRadius: "10px", padding: "14px 16px" }}>
               <div style={{ fontSize: "11px", color: "#666", fontWeight: "600" }}>HOURS WORKED</div>
               <div style={{ fontSize: "22px", fontWeight: "700", color: "#1a3c1a", marginTop: "4px" }}>{fmtHours(myWeekHours)}</div>
             </div>
           </div>
           {loading ? <div style={{ color: "#888", fontSize: "13px" }}>Loading...</div> : (
             <table style={s.table}>
-              <thead><tr>
-                <th style={s.th}>Date</th><th style={s.th}>In</th><th style={s.th}>Out</th><th style={s.th}>Hours</th>
-              </tr></thead>
+              <thead><tr><th style={s.th}>Date</th><th style={s.th}>In</th><th style={s.th}>Out</th><th style={s.th}>Hours</th></tr></thead>
               <tbody>
                 {myEntries.length === 0 && <tr><td colSpan={4} style={{ ...s.td, color: "#888", textAlign: "center" }}>No entries this week</td></tr>}
                 {myEntries.map(e => (
@@ -402,7 +375,7 @@ export default function TimeTracking({ user, employee }) {
       {isAdmin && (
         <div style={s.card}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "8px" }}>
-            <div style={s.h3}>All Employees</div>
+            <div style={s.h3}>All Employees — {rangeLabel}</div>
             <select style={s.select} value={selectedEmployee || ""} onChange={e => setSelectedEmployee(e.target.value || null)}>
               <option value="">All Employees</option>
               {allEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
@@ -412,7 +385,7 @@ export default function TimeTracking({ user, employee }) {
           {loading ? <div style={{ color: "#888", fontSize: "13px" }}>Loading...</div> : (
             groupedEntries().map(({ info, entries: empEntries }) => {
               const totalHrs = empEntries.filter(e => e.hours_worked != null).reduce((s, e) => s + parseFloat(e.hours_worked || 0), 0);
-              const weekPay = info?.hourly_rate ? totalHrs * info.hourly_rate : null;
+              const totalPay = info?.hourly_rate ? totalHrs * info.hourly_rate : null;
               return (
                 <div key={info?.id} style={{ marginBottom: "24px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "8px" }}>
@@ -422,9 +395,9 @@ export default function TimeTracking({ user, employee }) {
                     </div>
                     <div style={{ display: "flex", gap: "12px", fontSize: "13px" }}>
                       <span style={{ background: "#f0f4f0", borderRadius: "8px", padding: "4px 12px" }}><strong>{fmtHours(totalHrs)}</strong></span>
-                      {weekPay != null && (
+                      {totalPay != null && (
                         <span style={{ background: "#e8f5e9", borderRadius: "8px", padding: "4px 12px" }}>
-                          <strong>${weekPay.toFixed(2)}</strong>
+                          <strong>${totalPay.toFixed(2)}</strong>
                           <span style={{ color: "#888", fontSize: "11px" }}> @ ${info.hourly_rate}/hr</span>
                         </span>
                       )}
@@ -448,10 +421,7 @@ export default function TimeTracking({ user, employee }) {
                             <td style={s.td}>{entryPay ? `$${entryPay}` : "—"}</td>
                             <td style={s.td}>{e.notes || "—"}</td>
                             <td style={s.td}>
-                              <button style={s.editBtn} onClick={() => {
-                                setEditModal({ entry: e, empName: info?.name });
-                                setEditForm({ clock_in: toLocalInput(e.clock_in), clock_out: toLocalInput(e.clock_out), notes: e.notes || "" });
-                              }}>Edit</button>
+                              <button style={s.editBtn} onClick={() => { setEditModal({ entry: e, empName: info?.name }); setEditForm({ clock_in: toLocalInput(e.clock_in), clock_out: toLocalInput(e.clock_out), notes: e.notes || "" }); }}>Edit</button>
                               <button style={s.delBtn} onClick={() => handleDelete(e.id)}>Del</button>
                             </td>
                           </tr>
@@ -486,7 +456,7 @@ export default function TimeTracking({ user, employee }) {
         </div>
       )}
 
-      {/* Admin: Add Entry Modal */}
+      {/* Admin Add Entry Modal */}
       {adminClockModal && (
         <div style={s.modal} onClick={() => setAdminClockModal(false)}>
           <div style={s.modalBox} onClick={e => e.stopPropagation()}>

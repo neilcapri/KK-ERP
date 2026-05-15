@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "./supabaseClient";
+import { supabase } from "../lib/supabase";
 
 // ─── Helpers ────────────────────────────────────────────────
 function fmtTime(ts) {

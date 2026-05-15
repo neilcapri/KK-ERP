@@ -1,5 +1,5 @@
 // ── SOURCING ─────────────────────────────────────────────────
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Financials from './Financials'
@@ -7,35 +7,176 @@ import Financials from './Financials'
 export function Sourcing() {
   const { profile, isAdmin } = useAuth()
   const [rms, setRMs] = useState([])
+  const [suppliers, setSuppliers] = useState([])
   const [entries, setEntries] = useState([])
   const [showModal, setShowModal] = useState(false)
-  const [files, setFiles] = useState([])
   const [deletingId, setDeletingId] = useState(null)
-  const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], rm_name: '', supplier: '', qty: '', unit: 'kg', batch: '', cost: '' })
+  const [lotPhoto, setLotPhoto] = useState(null)
+  const [lotPhotoPreview, setLotPhotoPreview] = useState(null)
+  const [lotOCR, setLotOCR] = useState('')
+  const [ocrLoading, setOcrLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const photoInputRef = useRef(null)
+
+  const [form, setForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    rm_name: '',
+    supplier: '',
+    qty_bags: '',
+    qty_kg: '',
+    unit: 'kg',
+    manual_entry: false,
+    lot_number: '',
+  })
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [r, e] = await Promise.all([
-      supabase.from('raw_materials').select('name,category,stock,unit,min_stock,supplier').order('name'),
+    const [r, e, s] = await Promise.all([
+      supabase.from('raw_materials')
+        .select('name,category,stock,unit,min_stock,supplier,package_size,package_unit,package_label')
+        .not('category', 'eq', 'Packaging')
+        .not('category', 'eq', 'WIP')
+        .order('name'),
       supabase.from('sourcing').select('*').order('created_at', { ascending: false }).limit(50),
+      supabase.from('suppliers').select('name').order('name'),
     ])
     setRMs(r.data || [])
     setEntries(e.data || [])
+    setSuppliers(s.data || [])
+  }
+
+  function handleRMChange(name) {
+    const rm = rms.find(r => r.name === name)
+    const defaultSupplier = rm?.supplier && rm.supplier !== 'TBD' ? rm.supplier : ''
+    setForm(f => ({
+      ...f,
+      rm_name: name,
+      supplier: defaultSupplier,
+      unit: rm?.unit || 'kg',
+      qty_bags: '',
+      qty_kg: '',
+    }))
+  }
+
+  function handleBagsChange(bags) {
+    const rm = rms.find(r => r.name === form.rm_name)
+    const qty_kg = rm?.package_size ? (parseFloat(bags) * rm.package_size).toFixed(3) : ''
+    setForm(f => ({ ...f, qty_bags: bags, qty_kg }))
+  }
+
+  function handleManualQtyChange(qty) {
+    setForm(f => ({ ...f, qty_kg: qty, qty_bags: '' }))
+  }
+
+  async function handleLotPhoto(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLotPhoto(file)
+    const preview = URL.createObjectURL(file)
+    setLotPhotoPreview(preview)
+    setOcrLoading(true)
+    setLotOCR('')
+
+    try {
+      // Convert to base64
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader()
+        reader.onload = () => res(reader.result.split(',')[1])
+        reader.onerror = rej
+        reader.readAsDataURL(file)
+      })
+
+      // Use Claude vision to read lot number
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 200,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: file.type, data: base64 }
+              },
+              {
+                type: 'text',
+                text: 'Look at this food ingredient package label. Extract ONLY the lot number, batch number, or lot code. Return just the lot number value with no explanation, no label, no punctuation. If you cannot find a lot number, return the word NOTFOUND.'
+              }
+            ]
+          }]
+        })
+      })
+      const data = await response.json()
+      const text = data.content?.[0]?.text?.trim()
+      if (text && text !== 'NOTFOUND') {
+        setLotOCR(text)
+        setForm(f => ({ ...f, lot_number: text }))
+      } else {
+        setLotOCR('')
+      }
+    } catch (err) {
+      console.error('OCR failed', err)
+    }
+    setOcrLoading(false)
+    photoInputRef.current.value = ''
   }
 
   async function saveSourcing() {
-    const { date, rm_name, supplier, qty, unit, batch, cost } = form
-    if (!rm_name || !qty) { alert('Fill in raw material and quantity.'); return }
-    const q = parseFloat(qty)
-    const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', rm_name).single()
-    if (rm) await supabase.from('raw_materials').update({ stock: (rm.stock || 0) + q }).eq('name', rm_name)
-    await supabase.from('sourcing').insert({ date, rm_name, supplier, qty_received: q, unit, batch_number: batch, cost: parseFloat(cost) || 0, image_urls: [], created_by_name: profile?.name })
-    await supabase.from('activity').insert({ type: 'sourcing', title: `${rm_name} received`, description: `${q} ${unit} from ${supplier}`, created_by_name: profile?.name })
-    setShowModal(false)
-    setForm({ date: new Date().toISOString().split('T')[0], rm_name: '', supplier: '', qty: '', unit: 'kg', batch: '', cost: '' })
-    setFiles([])
-    loadData()
+    const { date, rm_name, supplier, qty_kg, unit, lot_number } = form
+    if (!rm_name || !qty_kg) { alert('Fill in raw material and quantity.'); return }
+    setSaving(true)
+
+    try {
+      // Upload lot photo if present
+      let lot_photo_url = null
+      if (lotPhoto) {
+        const ext = lotPhoto.name.split('.').pop()
+        const path = `lot-photos/${Date.now()}-${rm_name.replace(/\s+/g, '-')}.${ext}`
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('sourcing-photos')
+          .upload(path, lotPhoto, { contentType: lotPhoto.type })
+        if (!uploadError) {
+          const { data: { publicUrl } } = supabase.storage.from('sourcing-photos').getPublicUrl(path)
+          lot_photo_url = publicUrl
+        }
+      }
+
+      const q = parseFloat(qty_kg)
+      const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', rm_name).single()
+      if (rm) await supabase.from('raw_materials').update({ stock: (rm.stock || 0) + q }).eq('name', rm_name)
+
+      await supabase.from('sourcing').insert({
+        date, rm_name, supplier,
+        qty_received: q, unit,
+        batch_number: lot_number,
+        lot_photo_url,
+        lot_number,
+        cost: 0,
+        image_urls: lot_photo_url ? [lot_photo_url] : [],
+        created_by_name: profile?.name
+      })
+
+      await supabase.from('activity').insert({
+        type: 'sourcing',
+        title: `${rm_name} received`,
+        description: `${q} ${unit} from ${supplier}${lot_number ? ` · Lot: ${lot_number}` : ''}`,
+        created_by_name: profile?.name
+      })
+
+      // Reset
+      setShowModal(false)
+      setForm({ date: new Date().toISOString().split('T')[0], rm_name: '', supplier: '', qty_bags: '', qty_kg: '', unit: 'kg', manual_entry: false, lot_number: '' })
+      setLotPhoto(null)
+      setLotPhotoPreview(null)
+      setLotOCR('')
+      loadData()
+    } catch (err) {
+      alert('Save failed: ' + err.message)
+    }
+    setSaving(false)
   }
 
   async function deleteSourcing(entry) {
@@ -55,8 +196,11 @@ export function Sourcing() {
     setDeletingId(null)
   }
 
+  const selectedRM = rms.find(r => r.name === form.rm_name)
   const zero = rms.filter(r => r.stock <= 0).length
   const low = rms.filter(r => r.stock > 0 && r.stock <= r.min_stock).length
+
+  const selectStyle = { width: '100%', padding: '12px 14px', fontSize: '14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--ink)', fontFamily: 'var(--mono)', height: '48px' }
 
   return (
     <>
@@ -101,7 +245,7 @@ export function Sourcing() {
             <div className="card-title">Recent Sourcing</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Date</th><th>Material</th><th>Qty</th><th>Supplier</th>{isAdmin && <th>Cost</th>}<th style={{width:60}}></th></tr></thead>
+                <thead><tr><th>Date</th><th>Material</th><th>Qty</th><th>Supplier</th><th>Lot #</th><th style={{width:60}}></th></tr></thead>
                 <tbody>
                   {entries.map(e => (
                     <tr key={e.id}>
@@ -109,12 +253,15 @@ export function Sourcing() {
                       <td style={{ fontWeight: 500, fontSize: 12 }}>{e.rm_name}</td>
                       <td style={{ color: 'var(--green)', fontWeight: 600 }}>+{e.qty_received} {e.unit}</td>
                       <td style={{ fontSize: 11 }}>{e.supplier}</td>
-                      {isAdmin && <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{e.cost ? `$${e.cost.toFixed(2)}` : '—'}</td>}
+                      <td style={{ fontSize: 11, color: 'var(--ink3)' }}>
+                        {e.lot_number || e.batch_number || '—'}
+                        {e.lot_photo_url && (
+                          <a href={e.lot_photo_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 4, fontSize: 10, color: 'var(--kk-green)' }}>📷</a>
+                        )}
+                      </td>
                       <td>
-                        <button
-                          onClick={() => deleteSourcing(e)}
-                          disabled={deletingId === e.id}
-                          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === e.id ? 0.5 : 1 }}>
+                        <button onClick={() => deleteSourcing(e)} disabled={deletingId === e.id}
+                          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', opacity: deletingId === e.id ? 0.5 : 1 }}>
                           {deletingId === e.id ? '...' : 'Delete'}
                         </button>
                       </td>
@@ -131,34 +278,109 @@ export function Sourcing() {
         <div className="modal-bg" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
           <div className="modal">
             <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
-            <div className="modal-title">LOG SOURCING</div>
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div className="card-title">📸 Upload Receipt / Invoice</div>
-              <div className="upload-zone" style={{ padding: 20 }}>
-                <input type="file" accept="image/*,.pdf" multiple onChange={e => setFiles(Array.from(e.target.files))} />
-                <div>🧾</div>
-                <div style={{ fontSize: 12, color: 'var(--ink2)' }}>Tap to upload receipt (optional)</div>
-              </div>
-              {files.length > 0 && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 8 }}>✓ {files.length} file(s) selected</div>}
+            <div className="modal-title">LOG RM RECEIPT</div>
+
+            {/* Date */}
+            <div className="field">
+              <label>Date</label>
+              <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </div>
-            <div className="field-row">
-              <div className="field" style={{ margin: 0 }}><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
-              <div className="field" style={{ margin: 0 }}><label>Batch/Lot #</label><input type="text" value={form.batch} onChange={e => setForm(f => ({ ...f, batch: e.target.value }))} placeholder="Optional" /></div>
-            </div>
-            <div className="field"><label>Supplier</label><input type="text" value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} placeholder="Supplier name" /></div>
-            <div className="field"><label>Raw Material</label>
-              <select value={form.rm_name} onChange={e => { const rm = rms.find(r=>r.name===e.target.value); setForm(f=>({...f,rm_name:e.target.value,unit:rm?.unit||'kg'})) }}>
-                <option value="">Select...</option>
-                {rms.map(r => <option key={r.name} value={r.name}>{r.name}</option>)}
+
+            {/* RM Dropdown */}
+            <div className="field">
+              <label>Raw Material</label>
+              <select style={selectStyle} value={form.rm_name} onChange={e => handleRMChange(e.target.value)}>
+                <option value="">Select RM...</option>
+                {rms.map(r => (
+                  <option key={r.name} value={r.name}>
+                    {r.name}{r.package_label ? ` (${r.package_label})` : ''}
+                  </option>
+                ))}
               </select>
             </div>
-            <div className="field-row">
-              <div className="field" style={{ margin: 0 }}><label>Qty Received</label><input type="number" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: e.target.value }))} placeholder="0" step="0.001" /></div>
-              <div className="field" style={{ margin: 0 }}><label>Unit</label><select value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}><option>kg</option><option>g</option><option>L</option><option>ml</option><option>units</option><option>ea</option><option>lbs</option></select></div>
+
+            {/* Supplier Dropdown */}
+            <div className="field">
+              <label>Supplier</label>
+              <select style={selectStyle} value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))}>
+                <option value="">Select supplier...</option>
+                {suppliers.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+              </select>
             </div>
-            {isAdmin && <div className="field"><label>Total Cost ($)</label><input type="number" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: e.target.value }))} placeholder="0.00" step="0.01" /></div>}
+
+            {/* Qty — package count or manual */}
+            {selectedRM?.package_size && !form.manual_entry ? (
+              <div>
+                <div className="field">
+                  <label>Number of {selectedRM.package_label || 'packages'}</label>
+                  <input type="number" value={form.qty_bags} onChange={e => handleBagsChange(e.target.value)} placeholder="0" min="0" step="1" style={{ fontSize: 16, padding: '12px 14px' }} />
+                </div>
+                {form.qty_bags && form.qty_kg && (
+                  <div style={{ background: 'var(--green-l)', padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 13, color: 'var(--green)' }}>
+                    <strong>Total: {form.qty_kg} {selectedRM.unit}</strong>
+                    <span style={{ fontSize: 11, color: 'var(--ink3)', marginLeft: 8 }}>
+                      ({form.qty_bags} × {selectedRM.package_size}{selectedRM.package_unit})
+                    </span>
+                  </div>
+                )}
+                <div style={{ marginBottom: 12 }}>
+                  <button style={{ background: 'none', border: 'none', color: 'var(--ink3)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+                    onClick={() => setForm(f => ({ ...f, manual_entry: true, qty_bags: '' }))}>
+                    Enter qty manually instead
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="field-row">
+                  <div className="field" style={{ margin: 0 }}>
+                    <label>Qty Received</label>
+                    <input type="number" value={form.qty_kg} onChange={e => handleManualQtyChange(e.target.value)} placeholder="0" step="0.001" style={{ fontSize: 16, padding: '12px 14px' }} />
+                  </div>
+                  <div className="field" style={{ margin: 0 }}>
+                    <label>Unit</label>
+                    <select style={selectStyle} value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}>
+                      <option>kg</option><option>g</option><option>L</option><option>ml</option><option>units</option><option>ea</option><option>lbs</option>
+                    </select>
+                  </div>
+                </div>
+                {selectedRM?.package_size && (
+                  <div style={{ marginBottom: 12 }}>
+                    <button style={{ background: 'none', border: 'none', color: 'var(--ink3)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+                      onClick={() => setForm(f => ({ ...f, manual_entry: false, qty_kg: '' }))}>
+                      ← Back to package count
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Lot # Photo */}
+            <div className="field">
+              <label>📷 Lot # Photo</label>
+              <input ref={photoInputRef} type="file" accept="image/*" capture="environment"
+                onChange={handleLotPhoto} style={{ display: 'none' }} />
+              <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginBottom: 8 }}
+                onClick={() => photoInputRef.current.click()}>
+                {lotPhotoPreview ? '📷 Retake Photo' : '📷 Take Photo of Lot #'}
+              </button>
+              {lotPhotoPreview && (
+                <img src={lotPhotoPreview} alt="Lot label" style={{ width: '100%', borderRadius: 8, maxHeight: 150, objectFit: 'contain', background: '#f5f5f5', marginBottom: 8 }} />
+              )}
+              {ocrLoading && <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 8 }}>⏳ Reading lot number...</div>}
+              {lotOCR && <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 8 }}>✅ Lot # detected: <strong>{lotOCR}</strong></div>}
+            </div>
+
+            {/* Lot # field (auto-filled or manual) */}
+            <div className="field">
+              <label>Lot # {lotOCR ? '(auto-filled — edit if needed)' : '(type manually)'}</label>
+              <input type="text" value={form.lot_number} onChange={e => setForm(f => ({ ...f, lot_number: e.target.value }))} placeholder="e.g. LOT2024-001" />
+            </div>
+
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-amber btn-full" onClick={saveSourcing}>Save Entry</button>
+              <button className="btn btn-amber btn-full" onClick={saveSourcing} disabled={saving}>
+                {saving ? 'Saving...' : 'Save Entry'}
+              </button>
               <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
             </div>
           </div>
@@ -228,7 +450,7 @@ export function Activity() {
 
 // ── REPORTS ──────────────────────────────────────────────────
 export function Reports() {
-  const { isAdmin } = useAuth()
+  const { profile, isAdmin } = useAuth()
   const [products, setProducts] = useState([])
   const [rms, setRMs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -269,7 +491,7 @@ export function Reports() {
           {[
             { key: 'fg', label: '📦 Finished Goods' },
             { key: 'rm', label: '🌿 Raw Materials' },
-            ...(isAdmin ? [{ key: 'financials', label: '💰 Financials' }] : [])
+            ...(isAdmin || profile?.role === 'analyst' ? [{ key: 'financials', label: '💰 Financials' }] : [])
           ].map(r => (
             <button key={r.key} onClick={() => setActiveReport(r.key)} style={{ padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--display)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: activeReport===r.key?'var(--ink)':'var(--ink3)', borderBottom: activeReport===r.key?'2px solid var(--kk-green)':'2px solid transparent', marginBottom: -1 }}>
               {r.label}
@@ -348,7 +570,7 @@ export function Reports() {
           </div>
         )}
 
-        {activeReport === 'financials' && isAdmin && (
+        {activeReport === 'financials' && (isAdmin || profile?.role === 'analyst') && (
           <Financials />
         )}
       </div>

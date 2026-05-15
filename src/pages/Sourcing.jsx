@@ -42,10 +42,8 @@ export function Sourcing() {
     if (!window.confirm(`Delete sourcing entry for ${entry.rm_name} (+${entry.qty_received} ${entry.unit}) on ${entry.date}?\n\nThis will reverse the stock change.`)) return
     setDeletingId(entry.id)
     try {
-      // Reverse RM stock
       const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', entry.rm_name).single()
       if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - entry.qty_received) }).eq('name', entry.rm_name)
-      // Delete record
       await supabase.from('sourcing').delete().eq('id', entry.id)
       await supabase.from('activity').insert({
         type: 'sourcing', title: `Sourcing Deleted: ${entry.rm_name}`,
@@ -229,8 +227,6 @@ export function Activity() {
 }
 
 // ── REPORTS ──────────────────────────────────────────────────
-import Financials from './Financials'
-
 export function Reports() {
   const { isAdmin } = useAuth()
   const [products, setProducts] = useState([])
@@ -351,6 +347,7 @@ export function Reports() {
             </div>
           </div>
         )}
+
         {activeReport === 'financials' && isAdmin && (
           <Financials />
         )}

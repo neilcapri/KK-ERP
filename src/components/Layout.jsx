@@ -60,7 +60,7 @@ export default function Layout() {
 
       {/* Mobile Bottom Nav */}
       <nav className="bottom-nav">
-        {visibleItems.slice(0, 5).map(item => (
+        {visibleItems.slice(0, 7).map(item => (
           <NavLink
             key={item.to}
             to={item.to}

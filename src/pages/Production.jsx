@@ -12,13 +12,17 @@ export default function Production() {
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingSchedule, setEditingSchedule] = useState(null)
   const [rmWarnings, setRmWarnings] = useState([])
   const [scheduleRMWarnings, setScheduleRMWarnings] = useState([])
+  const [editRMWarnings, setEditRMWarnings] = useState([])
   const [log, setLog] = useState([])
   const [deletingId, setDeletingId] = useState(null)
 
   const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
   const [schedForm, setSchedForm] = useState({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
+  const [editForm, setEditForm] = useState({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
 
   useEffect(() => { loadData() }, [])
 
@@ -96,6 +100,60 @@ export default function Production() {
     }
   }
 
+  async function handleEditProductChange(code) {
+    setEditForm(f => ({ ...f, product_code: code }))
+    if (code && editForm.planned_input) {
+      const out = calcOutput(code, editForm.input_type, editForm.planned_input)
+      const warns = await checkRM(code, out)
+      setEditRMWarnings(warns)
+    }
+  }
+
+  async function handleEditQtyChange(qty) {
+    setEditForm(f => ({ ...f, planned_input: qty }))
+    if (editForm.product_code) {
+      const out = calcOutput(editForm.product_code, editForm.input_type, qty)
+      if (out > 0) {
+        const warns = await checkRM(editForm.product_code, out)
+        setEditRMWarnings(warns)
+      }
+    }
+  }
+
+  function openEditModal(s) {
+    setEditingSchedule(s)
+    setEditForm({
+      scheduled_date: s.scheduled_date,
+      product_code: s.product_code,
+      planned_input: String(s.planned_input),
+      input_type: s.input_type,
+      notes: s.notes || ''
+    })
+    setEditRMWarnings([])
+    setShowEditModal(true)
+  }
+
+  async function saveEdit() {
+    const { scheduled_date, product_code, planned_input, input_type, notes } = editForm
+    if (!scheduled_date || !product_code) { alert('Please fill in date and product.'); return }
+    const { data: p } = await supabase.from('products').select('name').eq('code', product_code).single()
+    const planned_output = calcOutput(product_code, input_type, planned_input)
+    const { error } = await supabase.from('production_schedule').update({
+      scheduled_date,
+      product_code,
+      product_name: p?.name || product_code,
+      planned_input: parseFloat(planned_input) || 0,
+      input_type,
+      planned_output,
+      notes,
+    }).eq('id', editingSchedule.id)
+    if (error) { alert('Update failed: ' + error.message); return }
+    setShowEditModal(false)
+    setEditingSchedule(null)
+    setEditRMWarnings([])
+    loadData()
+  }
+
   function addLog(msg, type = '') {
     setLog(l => [...l, { msg, type, time: new Date().toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }])
   }
@@ -164,7 +222,7 @@ export default function Production() {
     if (!scheduled_date || !product_code) { alert('Please fill in date and product.'); return }
     const { data: p } = await supabase.from('products').select('name').eq('code', product_code).single()
     const planned_output = calcOutput(product_code, input_type, planned_input)
-    const { data, error } = await supabase.from('production_schedule').insert({
+    const { error } = await supabase.from('production_schedule').insert({
       scheduled_date, product_code, product_name: p?.name || product_code,
       planned_input: parseFloat(planned_input) || 0, input_type,
       planned_output, notes, status: 'planned', created_by_name: profile?.name
@@ -188,6 +246,20 @@ export default function Production() {
   }
 
   const statusColors = { planned: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'red' }
+
+  // Shared large select style
+  const selectStyle = {
+    width: '100%',
+    padding: '12px 14px',
+    fontSize: '14px',
+    borderRadius: '6px',
+    border: '1px solid var(--border)',
+    background: 'var(--surface)',
+    color: 'var(--ink)',
+    fontFamily: 'var(--mono)',
+    cursor: 'pointer',
+    height: '48px',
+  }
 
   return (
     <>
@@ -216,7 +288,7 @@ export default function Production() {
               <div className="field"><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} /></div>
               <div className="field">
                 <label>Product</label>
-                <select value={form.code} onChange={e => handleCodeChange(e.target.value)}>
+                <select style={selectStyle} value={form.code} onChange={e => handleCodeChange(e.target.value)}>
                   <option value="">Select product...</option>
                   {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
                 </select>
@@ -224,7 +296,7 @@ export default function Production() {
               <div className="field-row">
                 <div className="field" style={{margin:0}}>
                   <label>Input Type</label>
-                  <select value={form.inputType} onChange={e => { setForm(f=>({...f,inputType:e.target.value})); handleQtyChange(form.inputQty) }}>
+                  <select style={selectStyle} value={form.inputType} onChange={e => { setForm(f=>({...f,inputType:e.target.value})); handleQtyChange(form.inputQty) }}>
                     <option value="units">Units</option>
                     <option value="trays">Trays</option>
                     <option value="loaves">Loaves</option>
@@ -308,13 +380,14 @@ export default function Production() {
                           <thead>
                             <tr>
                               <th>Product</th><th>Planned Input</th><th>Planned Output</th>
-                              <th>Batch Value</th><th>RM Check</th><th>Status</th><th></th><th style={{width:60}}></th>
+                              <th>Batch Value</th><th>RM Check</th><th>Status</th><th></th><th style={{width:100}}></th>
                             </tr>
                           </thead>
                           <tbody>
                             {rows.map(s => (
                               <ScheduleRow key={s.id} s={s} allSchedule={schedule} statusColors={statusColors}
-                                onStatusChange={updateScheduleStatus} onDelete={deleteSchedule} calcOutput={calcOutput} />
+                                onStatusChange={updateScheduleStatus} onDelete={deleteSchedule}
+                                onEdit={openEditModal} calcOutput={calcOutput} />
                             ))}
                           </tbody>
                         </table>
@@ -357,21 +430,24 @@ export default function Production() {
         )}
       </div>
 
+      {/* ── ADD SCHEDULE MODAL ── */}
       {showScheduleModal && (
         <div className="modal-bg" onClick={e => e.target===e.currentTarget && setShowScheduleModal(false)}>
           <div className="modal">
             <button className="modal-close" onClick={() => setShowScheduleModal(false)}>×</button>
             <div className="modal-title">SCHEDULE PRODUCTION</div>
             <div className="field"><label>Date</label><input type="date" value={schedForm.scheduled_date} onChange={e => setSchedForm(f=>({...f,scheduled_date:e.target.value}))} /></div>
-            <div className="field"><label>Product</label>
-              <select value={schedForm.product_code} onChange={e => handleSchedProductChange(e.target.value)}>
+            <div className="field">
+              <label>Product</label>
+              <select style={selectStyle} value={schedForm.product_code} onChange={e => handleSchedProductChange(e.target.value)}>
                 <option value="">Select...</option>
                 {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
               </select>
             </div>
             <div className="field-row">
-              <div className="field" style={{margin:0}}><label>Input Type</label>
-                <select value={schedForm.input_type} onChange={e => setSchedForm(f=>({...f,input_type:e.target.value}))}>
+              <div className="field" style={{margin:0}}>
+                <label>Input Type</label>
+                <select style={selectStyle} value={schedForm.input_type} onChange={e => setSchedForm(f=>({...f,input_type:e.target.value}))}>
                   <option value="trays">Trays</option><option value="units">Units</option><option value="loaves">Loaves</option>
                 </select>
               </div>
@@ -403,12 +479,64 @@ export default function Production() {
           </div>
         </div>
       )}
+
+      {/* ── EDIT SCHEDULE MODAL ── */}
+      {showEditModal && editingSchedule && (
+        <div className="modal-bg" onClick={e => e.target===e.currentTarget && setShowEditModal(false)}>
+          <div className="modal">
+            <button className="modal-close" onClick={() => setShowEditModal(false)}>×</button>
+            <div className="modal-title">EDIT SCHEDULE</div>
+            <div className="field"><label>Date</label>
+              <input type="date" value={editForm.scheduled_date} onChange={e => setEditForm(f=>({...f,scheduled_date:e.target.value}))} />
+            </div>
+            <div className="field">
+              <label>Product</label>
+              <select style={selectStyle} value={editForm.product_code} onChange={e => handleEditProductChange(e.target.value)}>
+                <option value="">Select...</option>
+                {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+              </select>
+            </div>
+            <div className="field-row">
+              <div className="field" style={{margin:0}}>
+                <label>Input Type</label>
+                <select style={selectStyle} value={editForm.input_type} onChange={e => setEditForm(f=>({...f,input_type:e.target.value}))}>
+                  <option value="trays">Trays</option><option value="units">Units</option><option value="loaves">Loaves</option>
+                </select>
+              </div>
+              <div className="field" style={{margin:0}}><label>Planned Qty</label>
+                <input type="number" value={editForm.planned_input} onChange={e => handleEditQtyChange(e.target.value)} />
+              </div>
+            </div>
+            {editForm.product_code && editForm.planned_input && (
+              <div style={{ background: 'var(--green-l)', padding: 10, borderRadius: 3, marginBottom: 12, fontSize: 12, color: 'var(--green)' }}>
+                <strong>Expected output: {calcOutput(editForm.product_code, editForm.input_type, editForm.planned_input)} units</strong>
+              </div>
+            )}
+            {editRMWarnings.length > 0 && (
+              <div className="alert alert-red" style={{ flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+                <strong>⚠️ Insufficient RM stock:</strong>
+                {editRMWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}kg, have {w.have}kg</div>)}
+              </div>
+            )}
+            {editRMWarnings.length === 0 && editForm.product_code && editForm.planned_input && (
+              <div style={{ background: 'var(--green-l)', padding: 8, borderRadius: 3, marginBottom: 12, fontSize: 11, color: 'var(--green)' }}>
+                ✅ RM stock sufficient
+              </div>
+            )}
+            <div className="field"><label>Notes</label>
+              <textarea value={editForm.notes} onChange={e => setEditForm(f=>({...f,notes:e.target.value}))} rows={2} />
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button className="btn btn-primary btn-full" onClick={saveEdit}>Save Changes</button>
+              <button className="btn btn-secondary" onClick={() => setShowEditModal(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
 
-// Schedule row with RM check
-// Daily total component
 function DailyTotal({ rows, products }) {
   const [total, setTotal] = useState(null)
 
@@ -435,34 +563,23 @@ function DailyTotal({ rows, products }) {
   )
 }
 
-// allSchedule = full list of planned batches so we can compute running RM balance
-function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, calcOutput }) {
-  const [rmStatus, setRMStatus] = useState(null)  // array of { rm, needed, have, remaining }
+function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, onEdit, calcOutput }) {
+  const [rmStatus, setRMStatus] = useState(null)
   const [batchValue, setBatchValue] = useState(null)
 
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
-
-      // Get price
       const { data: p } = await supabase.from('products').select('price_per_unit').eq('code', s.product_code).single()
       setBatchValue(p?.price_per_unit ? out * p.price_per_unit : 0)
-
-      // Get BOM for this product
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', s.product_code)
       if (!bom?.length) { setRMStatus([]); return }
-
-      // Get current RM stock
       const rmNames = bom.map(b => b.rm_name)
       const { data: rms } = await supabase.from('raw_materials').select('name,stock').in('name', rmNames)
       const stockMap = {}
       ;(rms || []).forEach(r => { stockMap[r.name] = r.stock })
-
-      // Calculate how much of each RM is already committed by earlier scheduled batches
-      // "earlier" = batches that appear before this one in the sorted schedule (by date, then creation)
       const myIndex = allSchedule.findIndex(x => x.id === s.id)
       const priorBatches = allSchedule.slice(0, myIndex).filter(x => x.status === 'planned' || x.status === 'in_progress')
-
       const committedMap = {}
       for (const prior of priorBatches) {
         const { data: priorBom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', prior.product_code)
@@ -472,8 +589,6 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, c
           committedMap[item.rm_name] = (committedMap[item.rm_name] || 0) + needed
         })
       }
-
-      // Check if remaining stock (after prior commits) is enough
       const warns = []
       for (const item of bom) {
         const neededKg = (item.qty_per_unit * out) / 1000
@@ -529,10 +644,16 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, c
         </select>
       </td>
       <td>
-        <button onClick={() => onDelete(s.id, s.product_code)}
-          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
-          Delete
-        </button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => onEdit(s)}
+            style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
+            Edit
+          </button>
+          <button onClick={() => onDelete(s.id, s.product_code)}
+            style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
+            Delete
+          </button>
+        </div>
       </td>
     </tr>
   )

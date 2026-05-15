@@ -7,6 +7,7 @@ import Inventory from './pages/Inventory'
 import Production from './pages/Production'
 import Dispatch from './pages/Dispatch'
 import { Sourcing, Activity, Reports } from './pages/Sourcing'
+import TimeTracking from './pages/TimeTracking'
 
 function ProtectedRoute({ children, roles }) {
   const { user, profile, loading } = useAuth()
@@ -17,7 +18,7 @@ function ProtectedRoute({ children, roles }) {
 }
 
 function AppRoutes() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   return (
     <Routes>
       <Route path="/login" element={!user ? <Login /> : <Navigate to="/" replace />} />
@@ -29,6 +30,7 @@ function AppRoutes() {
         <Route path="sourcing" element={<ProtectedRoute roles={['admin','dispatch']}><Sourcing /></ProtectedRoute>} />
         <Route path="activity" element={<Activity />} />
         <Route path="reports" element={<ProtectedRoute roles={['admin']}><Reports /></ProtectedRoute>} />
+        <Route path="time-tracking" element={<ProtectedRoute><TimeTracking user={user} employee={profile} /></ProtectedRoute>} />
       </Route>
     </Routes>
   )

@@ -8,6 +8,7 @@ import Production from './pages/Production'
 import Dispatch from './pages/Dispatch'
 import { Sourcing, Activity, Reports } from './pages/Sourcing'
 import TimeTracking from './pages/TimeTracking'
+import BarcodeScanner from './pages/BarcodeScanner'
 
 function ProtectedRoute({ children, roles }) {
   const { user, profile, loading } = useAuth()
@@ -22,6 +23,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={!user ? <Login /> : <Navigate to="/" replace />} />
+      <Route path="/barcode-test" element={<BarcodeScanner />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Dashboard />} />
         <Route path="inventory" element={<Inventory />} />

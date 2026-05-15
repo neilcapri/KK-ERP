@@ -10,7 +10,7 @@ const navItems = [
   { to: '/sourcing', icon: '📥', label: 'Sourcing', roles: ['admin','dispatch'] },
   { to: '/activity', icon: '🕐', label: 'Activity', roles: ['admin','kitchen','dispatch'] },
   { to: '/reports', icon: '📊', label: 'Reports', roles: ['admin'] },
-  { to: '/time-tracking', icon: '⏱', label: 'Time Tracking', roles: ['admin','manager','staff'] },
+  { to: '/time-tracking', icon: '⏱', label: 'Time Tracking', roles: ['admin','kitchen','staff'] },
 ]
 
 export default function Layout() {

@@ -8,7 +8,7 @@ import Production from './pages/Production'
 import Dispatch from './pages/Dispatch'
 import { Sourcing, Activity, Reports } from './pages/Sourcing'
 import TimeTracking from './pages/TimeTracking'
-import BarcodeScanner from './pages/BarcodeScanner'
+<Route path="/barcode-test" element={<BarcodeScanner />} />
 
 function ProtectedRoute({ children, roles }) {
   const { user, profile, loading } = useAuth()

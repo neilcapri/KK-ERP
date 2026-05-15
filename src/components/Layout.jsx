@@ -7,7 +7,7 @@ const navItems = [
   { to: '/inventory', icon: '📦', label: 'Inventory', roles: ['admin','kitchen','dispatch'] },
   { to: '/production', icon: '🏭', label: 'Production', roles: ['admin','kitchen'] },
   { to: '/dispatch', icon: '📋', label: 'Dispatch', roles: ['admin','dispatch'] },
-  { to: '/sourcing', icon: '📥', label: 'Sourcing', roles: ['admin','dispatch'] },
+  { to: '/sourcing', icon: '📥', label: 'Sourcing', roles: ['admin','kitchen','dispatch'] },
   { to: '/activity', icon: '🕐', label: 'Activity', roles: ['admin','kitchen','dispatch'] },
   { to: '/reports', icon: '📊', label: 'Reports', roles: ['admin'] },
   { to: '/time-tracking', icon: '⏱', label: 'Time Tracking', roles: ['admin','kitchen','staff'] },

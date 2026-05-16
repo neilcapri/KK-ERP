@@ -146,7 +146,53 @@ function printDispatchSlip(orders) {
 // ── AI helper ─────────────────────────────────────────────────
 async function readOrderWithAI(content, products, isImage = false, fileType = '') {
   const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
-  const prompt = `You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list using smart semantic understanding.\n\nOUR PRODUCT LIST:\n${productList}\n\nSEMANTIC MATCHING GUIDE (common customer names → our product code):\n- blueberry muffin / paleo muffin = PBB\n- chocolate muffin / choc muffin = PCC\n- lemon raspberry muffin / lemon muffin = KLR\n- hazelnut donut / hazelnut doughnut = KHD\n- peanut butter donut / PB donut / vegan donut = VPBD\n- cinnamon donut = KSCD\n- brownie / brownie ganache / ganache pouch = PVBRG\n- mini brownie / brownie bar = PVBr\n- pecan bar = VPCAN\n- notella / nutella bar / no'tella = PNF\n- pistachio bar = VPB\n- hemp cookies / hemp vegan cookie = PVHC\n- hazelnut protein cookie / hazelnut cookie = HPCo\n- ginger cookie / ginger snap = PGCo\n- shortbread / PO shortbread = POS\n- keto almond butter cookie = KAB\n- keto walnut cookie = KWAL\n- snickerdoodle = KSCo\n- collagen cookie / keto collagen = KCCo\n- banana bread = PVBB\n- ginger loaf = GBL\n- pumpkin loaf = KPL\n- focaccia = PFB\n- vanilla strawberry slice = VSCS\n- truffle cake slice = TRFCS\n- hazelnut royale slice = HRCS\n- truffle cake whole = WTC\n- pistachio raspberry mini cake = PRMC\n- carrot mini cake = CMC\n- lemon mini cake = LMC\n- truffle mini cake = TMC\n- Use semantic understanding for anything not listed above\n- If 60% confident it matches, mark matched: true\n\nReturn ONLY a JSON array:\n[\n  {"product_name": "exact name from order", "quantity": 12, "product_code": "MATCHED_CODE", "matched": true},\n  {"product_name": "truly unrecognized item", "quantity": 6, "product_code": null, "matched": false}\n]\nReturn ONLY the JSON array, no other text.`
+  const prompt = `You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list using smart semantic understanding.
+
+OUR PRODUCT LIST:
+${productList}
+
+SEMANTIC MATCHING GUIDE (common customer names → our product code):
+- blueberry muffin / paleo muffin = PBB
+- chocolate muffin / choc muffin = PCC
+- lemon raspberry muffin / lemon muffin = KLR
+- hazelnut donut / hazelnut doughnut = KHD
+- peanut butter donut / PB donut / vegan donut = VPBD
+- cinnamon donut = KSCD
+- brownie / brownie ganache / ganache pouch = PVBRG
+- mini brownie / brownie bar = PVBr
+- pecan bar = VPCAN
+- notella / nutella bar / no'tella = PNF
+- pistachio bar = VPB
+- hemp cookies / hemp vegan cookie = PVHC
+- hazelnut protein cookie / hazelnut cookie = HPCo
+- ginger cookie / ginger snap = PGCo
+- shortbread / PO shortbread = POS
+- keto almond butter cookie = KAB
+- keto walnut cookie = KWAL
+- snickerdoodle = KSCo
+- collagen cookie / keto collagen = KCCo
+- banana bread / banana loaf = PVBB
+- ginger loaf = GBL
+- pumpkin loaf = KPL
+- focaccia = PFB
+- vanilla strawberry slice = VSCS
+- truffle cake slice = TRFCS
+- hazelnut royale slice / hazel royale = HRCS
+- truffle cake whole = WTC
+- pistachio raspberry mini cake = PRMC
+- carrot mini cake = CMC
+- lemon mini cake = LMC
+- truffle mini cake = TMC
+- Use semantic understanding for anything not listed above
+- If 60% confident it matches, mark matched: true
+
+Return ONLY a JSON array:
+[
+  {"product_name": "exact name from order", "quantity": 12, "product_code": "MATCHED_CODE", "matched": true},
+  {"product_name": "truly unrecognized item", "quantity": 6, "product_code": null, "matched": false}
+]
+Return ONLY the JSON array, no other text.`
+
   const messages = isImage
     ? [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: fileType, data: content } },
@@ -160,7 +206,9 @@ async function readOrderWithAI(content, products, isImage = false, fileType = ''
     body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, messages })
   })
   const data = await response.json()
+  if (!response.ok) throw new Error('API ' + response.status + ': ' + JSON.stringify(data))
   const text = data.content?.[0]?.text?.trim()
+  if (!text) throw new Error('Empty response: ' + JSON.stringify(data))
   const clean = text.replace(/```json|```/g, '').trim()
   return JSON.parse(clean)
 }
@@ -249,7 +297,7 @@ export default function Orders() {
       processAIItems(items)
     } catch(err) {
       console.error('AI read failed', err)
-      alert('Could not read order automatically. Please add items manually.')
+      alert('Error: ' + err.message)
     }
     setAiLoading(false)
     fileInputRef.current.value = ''
@@ -265,7 +313,7 @@ export default function Orders() {
       processAIItems(items)
     } catch(err) {
       console.error('AI paste read failed', err)
-      alert('Could not read order. Please add items manually.')
+      alert('Error: ' + err.message)
     }
     setAiLoading(false)
   }

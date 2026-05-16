@@ -12,6 +12,13 @@ const STATUS_LABELS = {
 }
 const DELIVERY_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
+const API_HEADERS = {
+  'Content-Type': 'application/json',
+  'x-api-key': process.env.REACT_APP_ANTHROPIC_KEY,
+  'anthropic-version': '2023-06-01',
+  'anthropic-dangerous-direct-browser-access': 'true',
+}
+
 // ── Customer Combobox ─────────────────────────────────────────
 function CustomerSelect({ customers, value, onChange, onAddNew }) {
   const [search, setSearch] = useState(value || '')
@@ -136,6 +143,29 @@ function printDispatchSlip(orders) {
   w.print()
 }
 
+// ── AI helper ─────────────────────────────────────────────────
+async function readOrderWithAI(content, products, isImage = false, fileType = '') {
+  const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
+  const prompt = `Extract all products and quantities from this customer order. Match each item to this product list:\n${productList}\n\nReturn ONLY a JSON array:\n[\n  {"product_name": "name from order", "quantity": 12, "product_code": "CODE_IF_MATCHED", "matched": true},\n  {"product_name": "unrecognized item", "quantity": 6, "product_code": null, "matched": false}\n]\nRules: match by name or code (fuzzy ok), quantity must be a number, return ONLY the JSON array.`
+
+  const messages = isImage
+    ? [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: fileType, data: content } },
+        { type: 'text', text: prompt }
+      ]}]
+    : [{ role: 'user', content: `This is a customer order:\n\n${content}\n\n${prompt}` }]
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: API_HEADERS,
+    body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, messages })
+  })
+  const data = await response.json()
+  const text = data.content?.[0]?.text?.trim()
+  const clean = text.replace(/```json|```/g, '').trim()
+  return JSON.parse(clean)
+}
+
 // ── Main Orders Component ─────────────────────────────────────
 export default function Orders() {
   const { profile } = useAuth()
@@ -150,7 +180,7 @@ export default function Orders() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [aiLoading, setAiLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [inputMode, setInputMode] = useState('upload') // 'upload' | 'paste'
+  const [inputMode, setInputMode] = useState('upload')
   const [pasteText, setPasteText] = useState('')
   const fileInputRef = useRef(null)
 
@@ -191,6 +221,17 @@ export default function Orders() {
     setForm(f => ({ ...f, customer_id: id, customer_name: c.name, delivery_day: c.preferred_delivery_day || f.delivery_day }))
   }
 
+  function processAIItems(items) {
+    const matched = items.filter(i => i.matched)
+    const unmatched = items.filter(i => !i.matched)
+    const enriched = matched.map(i => {
+      const p = products.find(p => p.code === i.product_code)
+      return { product_code: i.product_code, product_name: p?.name || i.product_name, quantity: i.quantity, unit_price: p?.price_per_unit || 0, notes: '' }
+    })
+    setOrderItems(enriched)
+    setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
+  }
+
   async function handleAttachment(e) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -198,7 +239,6 @@ export default function Orders() {
     setAiLoading(true)
     setOrderItems([])
     setUnmatchedItems([])
-
     try {
       const base64 = await new Promise((res, rej) => {
         const reader = new FileReader()
@@ -206,71 +246,29 @@ export default function Orders() {
         reader.onerror = rej
         reader.readAsDataURL(file)
       })
-
-      const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: file.type.includes('pdf') ? 'application/pdf' : file.type, data: base64 } },
-              { type: 'text', text: `This is a customer order. Extract all products and quantities ordered.
-
-Then match each item to this product list:
-${productList}
-
-Return ONLY a JSON array like this:
-[
-  {"product_name": "name from order", "quantity": 12, "product_code": "CODE_IF_MATCHED", "matched": true},
-  {"product_name": "unrecognized item", "quantity": 6, "product_code": null, "matched": false}
-]
-
-Rules:
-- Match by product name or code (fuzzy match is ok)
-- If matched, include the exact product_code from the list
-- If not matched, set matched: false and product_code: null
-- quantity must be a number
-- Return ONLY the JSON array, no other text` }
-            ]
-          }]
-        })
-      })
-
-      const data = await response.json()
-      const text = data.content?.[0]?.text?.trim()
-      const clean = text.replace(/```json|```/g, '').trim()
-      const items = JSON.parse(clean)
-
-      const matched = items.filter(i => i.matched)
-      const unmatched = items.filter(i => !i.matched)
-
-      const enriched = matched.map(i => {
-        const p = products.find(p => p.code === i.product_code)
-        return {
-          product_code: i.product_code,
-          product_name: p?.name || i.product_name,
-          quantity: i.quantity,
-          unit_price: p?.price_per_unit || 0,
-          notes: '',
-        }
-      })
-
-      setOrderItems(enriched)
-      setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
+      const items = await readOrderWithAI(base64, products, true, file.type)
+      processAIItems(items)
     } catch(err) {
       console.error('AI read failed', err)
       alert('Could not read order automatically. Please add items manually.')
     }
     setAiLoading(false)
     fileInputRef.current.value = ''
+  }
+
+  async function handlePasteRead() {
+    if (!pasteText.trim()) { alert('Please paste order text first'); return }
+    setAiLoading(true)
+    setOrderItems([])
+    setUnmatchedItems([])
+    try {
+      const items = await readOrderWithAI(pasteText, products, false)
+      processAIItems(items)
+    } catch(err) {
+      console.error('AI paste read failed', err)
+      alert('Could not read order. Please add items manually.')
+    }
+    setAiLoading(false)
   }
 
   function handleUnmatchedSelect(idx, code) {
@@ -297,9 +295,7 @@ Rules:
     if (!form.customer_name) { alert('Please select a customer'); return }
     if (orderItems.length === 0) { alert('Please add at least one product'); return }
     setSaving(true)
-
     try {
-      // Upload attachment
       let attachment_url = null
       if (form.attachment) {
         const ext = form.attachment.name.split('.').pop()
@@ -310,56 +306,32 @@ Rules:
           attachment_url = publicUrl
         }
       }
-
-      // Generate order number
       const { data: numData } = await supabase.rpc('generate_order_number')
       const order_number = numData || `KK${Date.now()}`
-
-      // Calculate total
       const total = orderItems.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price || 0)), 0)
-
-      // Insert order
       const { data: order, error } = await supabase.from('orders').insert({
-        order_number,
-        customer_id: form.customer_id || null,
-        customer_name: form.customer_name,
-        order_source: form.order_source,
-        po_number: form.po_number || null,
-        delivery_day: form.delivery_day || null,
-        dispatch_date: form.dispatch_date || null,
-        notes: form.notes || null,
-        order_attachment_url: attachment_url,
-        total_value: total,
-        status: 'received',
-        created_by_name: profile?.name,
+        order_number, customer_id: form.customer_id || null, customer_name: form.customer_name,
+        order_source: form.order_source, po_number: form.po_number || null,
+        delivery_day: form.delivery_day || null, dispatch_date: form.dispatch_date || null,
+        notes: form.notes || null, order_attachment_url: attachment_url,
+        total_value: total, status: 'received', created_by_name: profile?.name,
       }).select().single()
-
       if (error) throw error
-
-      // Insert items
       await supabase.from('order_items').insert(
         orderItems.map(i => ({
-          order_id: order.id,
-          product_code: i.product_code || null,
-          product_name: i.product_name,
-          quantity: parseFloat(i.quantity),
-          unit_price: parseFloat(i.unit_price || 0),
-          notes: i.notes || null,
+          order_id: order.id, product_code: i.product_code || null,
+          product_name: i.product_name, quantity: parseFloat(i.quantity),
+          unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
         }))
       )
-
-      // Update customer's preferred delivery day
       if (form.customer_id && form.delivery_day) {
         await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
       }
-
-      // Log activity
       await supabase.from('activity').insert({
         type: 'dispatch', title: `Order received: ${form.customer_name}`,
         description: `${order_number} · ${orderItems.length} items · $${total.toFixed(2)}`,
         created_by_name: profile?.name,
       })
-
       setShowModal(false)
       resetForm()
       await loadData()
@@ -367,43 +339,6 @@ Rules:
       alert('Save failed: ' + err.message)
     }
     setSaving(false)
-  }
-
-  async function handlePasteRead() {
-    if (!pasteText.trim()) { alert('Please paste order text first'); return }
-    setAiLoading(true)
-    setOrderItems([])
-    setUnmatchedItems([])
-    try {
-      const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: `This is a customer order:\n\n${pasteText}\n\nExtract all products and quantities ordered. Then match each item to this product list:\n${productList}\n\nReturn ONLY a JSON array like this:\n[\n  {"product_name": "name from order", "quantity": 12, "product_code": "CODE_IF_MATCHED", "matched": true},\n  {"product_name": "unrecognized item", "quantity": 6, "product_code": null, "matched": false}\n]\n\nRules:\n- Match by product name or code (fuzzy match is ok)\n- If matched, include the exact product_code from the list\n- If not matched, set matched: false and product_code: null\n- quantity must be a number\n- Return ONLY the JSON array, no other text`
-          }]
-        })
-      })
-      const data = await response.json()
-      const text = data.content?.[0]?.text?.trim()
-      const clean = text.replace(/```json|```/g, '').trim()
-      const items = JSON.parse(clean)
-      const matched = items.filter(i => i.matched)
-      const unmatched = items.filter(i => !i.matched)
-      const enriched = matched.map(i => {
-        const p = products.find(p => p.code === i.product_code)
-        return { product_code: i.product_code, product_name: p?.name || i.product_name, quantity: i.quantity, unit_price: p?.price_per_unit || 0, notes: '' }
-      })
-      setOrderItems(enriched)
-      setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
-    } catch(err) {
-      alert('Could not read order. Please add items manually.')
-    }
-    setAiLoading(false)
   }
 
   function resetForm() {
@@ -421,7 +356,6 @@ Rules:
 
   const filtered = filterStatus === 'all' ? orders : orders.filter(o => o.status === filterStatus)
   const totalValue = filtered.reduce((s, o) => s + (o.total_value || 0), 0)
-
   const sel = { padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', width: '100%', outline: 'none' }
 
   return (
@@ -432,17 +366,15 @@ Rules:
       </div>
 
       <div className="page-body">
-        {/* Stats */}
         <div className="grid4" style={{ marginBottom: 16 }}>
           {['received','confirmed','in_production','ready'].map(s => (
-            <div key={s} className={`stat ${s === 'received' ? 'blue' : s === 'confirmed' ? 'amber' : s === 'in_production' ? 'blue' : 'green'}`}>
+            <div key={s} className={`stat ${s==='received'?'blue':s==='confirmed'?'amber':s==='in_production'?'blue':'green'}`}>
               <div className="stat-label">{STATUS_LABELS[s]}</div>
               <div className="stat-value">{orders.filter(o => o.status === s).length}</div>
             </div>
           ))}
         </div>
 
-        {/* Filter */}
         <div className="filter-bar">
           {['all','received','confirmed','in_production','ready','dispatched'].map(s => (
             <button key={s} className={`filter-btn ${filterStatus===s?'active':''}`} onClick={() => setFilterStatus(s)}>
@@ -451,22 +383,18 @@ Rules:
           ))}
         </div>
 
-        {/* Orders table */}
         <div className="card">
           <div className="card-title">
             {filtered.length} orders
-            {totalValue > 0 && <span style={{ color: 'var(--kk-green)', fontWeight: 700 }}>${totalValue.toFixed(2)}</span>}
+            {totalValue > 0 && <span style={{ color:'var(--kk-green)', fontWeight:700 }}>${totalValue.toFixed(2)}</span>}
           </div>
           {loading ? <div style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>Loading...</div> : (
             <div className="table-wrap">
               <table>
-                <thead>
-                  <tr>
-                    <th>Order #</th><th>Customer</th><th>Source</th>
-                    <th>Dispatch Date</th><th>Items</th><th>Value</th>
-                    <th>Status</th><th></th>
-                  </tr>
-                </thead>
+                <thead><tr>
+                  <th>Order #</th><th>Customer</th><th>Source</th>
+                  <th>Dispatch Date</th><th>Items</th><th>Value</th><th>Status</th><th></th>
+                </tr></thead>
                 <tbody>
                   {filtered.length === 0 && <tr><td colSpan={8} style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>No orders yet</td></tr>}
                   {filtered.map(o => (
@@ -477,12 +405,8 @@ Rules:
                       <td style={{ fontSize:11 }}>{o.dispatch_date || o.delivery_day || '—'}</td>
                       <td style={{ fontSize:11 }}>{o.order_items?.length || 0} items</td>
                       <td style={{ fontWeight:600, color:'var(--kk-green)' }}>${(o.total_value||0).toFixed(2)}</td>
-                      <td>
-                        <span className={`badge badge-${STATUS_COLORS[o.status]}`}>{STATUS_LABELS[o.status]}</span>
-                      </td>
-                      <td>
-                        <button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button>
-                      </td>
+                      <td><span className={`badge badge-${STATUS_COLORS[o.status]}`}>{STATUS_LABELS[o.status]}</span></td>
+                      <td><button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -499,7 +423,6 @@ Rules:
             <button className="modal-close" onClick={() => { setShowModal(false); resetForm() }}>×</button>
             <div className="modal-title">NEW ORDER</div>
 
-            {/* Customer */}
             <div className="field">
               <label>Customer</label>
               <CustomerSelect customers={customers} value={form.customer_name}
@@ -567,27 +490,24 @@ Rules:
 
               {inputMode === 'paste' && (
                 <>
-                  <textarea
-                    value={pasteText}
-                    onChange={e => setPasteText(e.target.value)}
+                  <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
                     placeholder="Paste the order email or text here..."
                     style={{ width:'100%', minHeight:120, padding:'10px 14px', border:'1.5px solid var(--border)', borderRadius:'var(--radius)', fontFamily:'var(--body)', fontSize:12, background:'var(--surface)', color:'var(--ink)', outline:'none', resize:'vertical', boxSizing:'border-box' }}
                   />
-                  <button className="btn btn-green btn-full" style={{ marginTop:8 }} onClick={handlePasteRead} disabled={aiLoading || !pasteText.trim()}>
+                  <button className="btn btn-green btn-full" style={{ marginTop:8 }}
+                    onClick={handlePasteRead} disabled={aiLoading || !pasteText.trim()}>
                     {aiLoading ? '⏳ Reading...' : '🤖 Read Order with AI'}
                   </button>
                 </>
               )}
             </div>
 
-            {/* AI reading status — upload mode only */}
             {aiLoading && inputMode === 'upload' && (
               <div style={{ background:'var(--blue-l)', border:'1px solid var(--blue)', borderRadius:6, padding:'10px 14px', fontSize:12, color:'var(--blue)', marginBottom:12 }}>
                 ⏳ Reading order with AI... extracting products and quantities
               </div>
             )}
 
-            {/* Unmatched items */}
             {unmatchedItems.length > 0 && (
               <div style={{ background:'var(--amber-l)', border:'1px solid var(--amber)', borderRadius:6, padding:12, marginBottom:12 }}>
                 <div style={{ fontSize:12, fontWeight:700, color:'#9E5A3E', marginBottom:8 }}>⚠️ {unmatchedItems.length} item(s) not matched — please select manually:</div>
@@ -606,7 +526,6 @@ Rules:
               </div>
             )}
 
-            {/* Order items — fully editable */}
             {orderItems.length > 0 && (
               <div style={{ marginBottom:12 }}>
                 <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
@@ -629,8 +548,7 @@ Rules:
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:4 }}>
                       <span style={{ fontSize:11, color:'var(--ink3)' }}>Qty:</span>
-                      <input type="number" value={item.quantity}
-                        onChange={e => updateItem(idx,'quantity',e.target.value)}
+                      <input type="number" value={item.quantity} onChange={e => updateItem(idx,'quantity',e.target.value)}
                         style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
                     </div>
                     <input type="text" value={item.notes || ''} placeholder="Notes"

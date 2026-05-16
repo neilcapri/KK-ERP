@@ -59,23 +59,24 @@ export default function Layout() {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav className="bottom-nav">
-        {visibleItems.slice(0, 6).map(item => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === '/'}
-            className={({ isActive }) => `bnav-item ${isActive ? 'active' : ''}`}
-          >
-            <span className="bi">{item.icon}</span>
-            {item.label}
-          </NavLink>
-        ))}
-        <button className="bnav-item" onClick={handleSignOut} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+      <nav className="bottom-nav" style={{ overflowX: 'auto', whiteSpace: 'nowrap', display: 'flex', scrollbarWidth: 'none' }}>
+  {visibleItems.map(item => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      end={item.to === '/'}
+      className={({ isActive }) => `bnav-item ${isActive ? 'active' : ''}`}
+      style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', minWidth: '60px' }}
+    >
+      <span className="bi">{item.icon}</span>
+      {item.label}
+    </NavLink>
+  ))}
+  <button className="bnav-item" onClick={handleSignOut} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', minWidth: '60px' }}>
     <span className="bi">🚪</span>
     Sign Out
   </button>
-      </nav>
+</nav>
 
       {/* AI Chat Widget */}
       <ChatWidget />

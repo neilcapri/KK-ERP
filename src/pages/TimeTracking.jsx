@@ -81,18 +81,56 @@ function WeekCalendar({ selectedDate, onSelectWeek, onClose }) {
   );
 }
 
+// ── Live running timer (admin only) ─────────────────────────
+function LiveTimer({ clockIn, hourlyRate }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    function tick() {
+      setElapsed(Math.floor((Date.now() - new Date(clockIn).getTime()) / 1000));
+    }
+    tick();
+    const id = setInterval(tick, 30000); // update every 30s
+    return () => clearInterval(id);
+  }, [clockIn]);
+
+  const hrs = Math.floor(elapsed / 3600);
+  const mins = Math.floor((elapsed % 3600) / 60);
+  const hoursDecimal = elapsed / 3600;
+  const cost = hourlyRate ? hoursDecimal * hourlyRate : null;
+
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "#fff8e1", border: "1px solid #ffe082", borderRadius: "8px", padding: "4px 10px" }}>
+      <span style={{ fontSize: "12px", color: "#f57c00", fontWeight: "700" }}>
+        🟡 {hrs}h {mins}m
+      </span>
+      {cost != null && (
+        <span style={{ fontSize: "12px", color: "#2e7d32", fontWeight: "700" }}>
+          ${cost.toFixed(2)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Mobile employee card (admin) ──────────────────────────────
 function EmployeeCard({ info, empEntries, onEdit, onDelete, toLocalInput }) {
   const [expanded, setExpanded] = useState(false);
   const totalHrs = empEntries.filter(e => e.hours_worked != null).reduce((s, e) => s + parseFloat(e.hours_worked||0), 0);
   const totalPay = info?.hourly_rate ? totalHrs * info.hourly_rate : null;
+  const activeEntry = empEntries.find(e => !e.clock_out);
   return (
-    <div style={{ background:"#f9f9f9", borderRadius:"10px", marginBottom:"12px", overflow:"hidden", border:"1px solid #e0e0e0" }}>
+    <div style={{ background:"#f9f9f9", borderRadius:"10px", marginBottom:"12px", overflow:"hidden", border: activeEntry ? "1px solid #ffe082" : "1px solid #e0e0e0" }}>
       <div onClick={() => setExpanded(v => !v)}
         style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 14px", cursor:"pointer" }}>
         <div>
           <div style={{ fontWeight:"700", color:"#1a3c1a", fontSize:"14px" }}>{info?.name}</div>
           <div style={{ fontSize:"11px", color:"#888" }}>{info?.title}</div>
+          {activeEntry && (
+            <div style={{ marginTop:"4px" }}>
+              <LiveTimer clockIn={activeEntry.clock_in} hourlyRate={info?.hourly_rate} />
+            </div>
+          )}
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
           <div style={{ textAlign:"right" }}>
@@ -425,7 +463,7 @@ export default function TimeTracking({ user, employee }) {
                               <td style={s.td}>{fmtDate(e.clock_in)}</td>
                               <td style={s.td}>{fmtTime(e.clock_in)}</td>
                               <td style={s.td}>{e.clock_out ? fmtTime(e.clock_out) : <span style={{ color:"#f0a500", fontWeight:"600" }}>Active</span>}</td>
-                              <td style={s.td}>{fmtHours(e.hours_worked)}</td>
+                              <td style={s.td}>{e.clock_out ? fmtHours(e.hours_worked) : <LiveTimer clockIn={e.clock_in} hourlyRate={info?.hourly_rate} />}</td>
                               <td style={s.td}>{entryPay?`$${entryPay}`:"—"}</td>
                               <td style={s.td}>{e.notes||"—"}</td>
                               <td style={s.td}>

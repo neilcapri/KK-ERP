@@ -203,7 +203,7 @@ Return ONLY the JSON array, no other text.`
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: API_HEADERS,
-    body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, messages })
+    body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1000, messages })
   })
   const data = await response.json()
   if (!response.ok) throw new Error('API ' + response.status + ': ' + JSON.stringify(data))

@@ -1,0 +1,652 @@
+import { useState, useEffect, useRef } from 'react'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
+
+const STATUS_COLORS = {
+  received: 'blue', confirmed: 'amber', in_production: 'purple',
+  ready: 'green', dispatched: 'green', cancelled: 'red'
+}
+const STATUS_LABELS = {
+  received: 'Received', confirmed: 'Confirmed', in_production: 'In Production',
+  ready: 'Ready', dispatched: 'Dispatched', cancelled: 'Cancelled'
+}
+const DELIVERY_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+
+// ── Customer Combobox ─────────────────────────────────────────
+function CustomerSelect({ customers, value, onChange, onAddNew }) {
+  const [search, setSearch] = useState(value || '')
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const filtered = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 20)
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <input
+        value={search}
+        onChange={e => { setSearch(e.target.value); setOpen(true); onChange('') }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search or select customer..."
+        style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }}
+      />
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', zIndex: 200, maxHeight: 240, overflowY: 'auto' }}>
+          {filtered.map(c => (
+            <div key={c.id} onClick={() => { setSearch(c.name); onChange(c.id); setOpen(false) }}
+              style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f0f0f0' }}
+              onMouseEnter={e => e.target.style.background = '#f5f5f5'}
+              onMouseLeave={e => e.target.style.background = ''}>
+              {c.name} <span style={{ fontSize: 10, color: '#888', marginLeft: 6 }}>{c.type}</span>
+            </div>
+          ))}
+          {search.length > 1 && !customers.find(c => c.name.toLowerCase() === search.toLowerCase()) && (
+            <div onClick={() => { onAddNew(search); setOpen(false) }}
+              style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, color: 'var(--kk-green)', fontWeight: 600, borderTop: '1px solid #eee', background: '#f9f9f9' }}>
+              + Add "{search}" as new customer
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Dispatch Slip Print ───────────────────────────────────────
+function printDispatchSlip(orders) {
+  const slipOrders = orders.slice(0, 3)
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>KK Dispatch Slip</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; font-size: 11px; padding: 16px; }
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #223824; padding-bottom: 10px; }
+        .logo { font-size: 20px; font-weight: 900; letter-spacing: 4px; color: #223824; }
+        .logo-sub { font-size: 7px; letter-spacing: 3px; color: #888; }
+        .slip-title { font-size: 14px; font-weight: 700; color: #223824; }
+        .order-block { margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; }
+        .order-header { background: #223824; color: #fff; padding: 8px 12px; display: flex; justify-content: space-between; }
+        .order-header strong { font-size: 13px; }
+        .order-header span { font-size: 11px; opacity: 0.8; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f0f4f0; padding: 6px 10px; text-align: left; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #555; border-bottom: 1px solid #ddd; }
+        td { padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 11px; }
+        .prod-date-col { width: 120px; background: #fffde7; }
+        .footer { margin-top: 16px; font-size: 9px; color: #aaa; text-align: center; }
+        @media print { .no-print { display: none; } }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div>
+          <div class="logo">KK ERP</div>
+          <div class="logo-sub">KONSCIOUS KITCHEN</div>
+        </div>
+        <div style="text-align:right">
+          <div class="slip-title">DISPATCH SLIP</div>
+          <div style="font-size:10px;color:#888">Generated: ${new Date().toLocaleDateString('en-CA')}</div>
+        </div>
+      </div>
+      ${slipOrders.map(order => `
+        <div class="order-block">
+          <div class="order-header">
+            <div>
+              <strong>${order.customer_name}</strong>
+              <div style="font-size:10px;margin-top:2px">Order #${order.order_number} · ${order.order_source}${order.po_number ? ` · PO: ${order.po_number}` : ''}</div>
+            </div>
+            <span>Dispatch: ${order.dispatch_date || '—'}</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th style="width:60px;text-align:center">Qty</th>
+                <th class="prod-date-col">Production Date</th>
+                <th style="width:100px">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(order.order_items || []).map(item => `
+                <tr>
+                  <td>${item.product_name}${item.product_code ? ` <span style="color:#888;font-size:10px">(${item.product_code})</span>` : ''}</td>
+                  <td style="text-align:center;font-weight:600">${item.quantity}</td>
+                  <td class="prod-date-col">&nbsp;</td>
+                  <td>${item.notes || ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `).join('')}
+      <div class="footer">Konscious Kitchen · MAD CLEAN INGREDIENTS · konsciouskitchen.com</div>
+    </body>
+    </html>
+  `
+  const w = window.open('', '_blank')
+  w.document.write(html)
+  w.document.close()
+  w.print()
+}
+
+// ── Main Orders Component ─────────────────────────────────────
+export default function Orders() {
+  const { profile } = useAuth()
+  const isAdmin = profile?.role === 'admin'
+
+  const [orders, setOrders] = useState([])
+  const [customers, setCustomers] = useState([])
+  const [products, setProducts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [viewOrder, setViewOrder] = useState(null)
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const fileInputRef = useRef(null)
+
+  const [form, setForm] = useState({
+    customer_id: '', customer_name: '', order_source: 'Email',
+    po_number: '', delivery_day: '', dispatch_date: '',
+    notes: '', attachment: null, attachment_preview: null,
+  })
+  const [orderItems, setOrderItems] = useState([])
+  const [unmatchedItems, setUnmatchedItems] = useState([])
+
+  useEffect(() => { loadData() }, [])
+
+  async function loadData() {
+    setLoading(true)
+    const [o, c, p] = await Promise.all([
+      supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).limit(100),
+      supabase.from('customers').select('*').order('name'),
+      supabase.from('products').select('code,name,category,price_per_unit').order('code'),
+    ])
+    setOrders(o.data || [])
+    setCustomers(c.data || [])
+    setProducts(p.data || [])
+    setLoading(false)
+  }
+
+  async function handleAddNewCustomer(name) {
+    const { data } = await supabase.from('customers').insert({ name, type: 'retail' }).select().single()
+    if (data) {
+      setCustomers(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name)))
+      setForm(f => ({ ...f, customer_id: data.id, customer_name: data.name }))
+    }
+  }
+
+  async function handleCustomerChange(id) {
+    const c = customers.find(c => c.id === id)
+    if (!c) return
+    setForm(f => ({ ...f, customer_id: id, customer_name: c.name, delivery_day: c.preferred_delivery_day || f.delivery_day }))
+  }
+
+  async function handleAttachment(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setForm(f => ({ ...f, attachment: file, attachment_preview: URL.createObjectURL(file) }))
+    setAiLoading(true)
+    setOrderItems([])
+    setUnmatchedItems([])
+
+    try {
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader()
+        reader.onload = () => res(reader.result.split(',')[1])
+        reader.onerror = rej
+        reader.readAsDataURL(file)
+      })
+
+      const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: file.type.includes('pdf') ? 'application/pdf' : file.type, data: base64 } },
+              { type: 'text', text: `This is a customer order. Extract all products and quantities ordered.
+
+Then match each item to this product list:
+${productList}
+
+Return ONLY a JSON array like this:
+[
+  {"product_name": "name from order", "quantity": 12, "product_code": "CODE_IF_MATCHED", "matched": true},
+  {"product_name": "unrecognized item", "quantity": 6, "product_code": null, "matched": false}
+]
+
+Rules:
+- Match by product name or code (fuzzy match is ok)
+- If matched, include the exact product_code from the list
+- If not matched, set matched: false and product_code: null
+- quantity must be a number
+- Return ONLY the JSON array, no other text` }
+            ]
+          }]
+        })
+      })
+
+      const data = await response.json()
+      const text = data.content?.[0]?.text?.trim()
+      const clean = text.replace(/```json|```/g, '').trim()
+      const items = JSON.parse(clean)
+
+      const matched = items.filter(i => i.matched)
+      const unmatched = items.filter(i => !i.matched)
+
+      const enriched = matched.map(i => {
+        const p = products.find(p => p.code === i.product_code)
+        return {
+          product_code: i.product_code,
+          product_name: p?.name || i.product_name,
+          quantity: i.quantity,
+          unit_price: p?.price_per_unit || 0,
+          notes: '',
+        }
+      })
+
+      setOrderItems(enriched)
+      setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
+    } catch(err) {
+      console.error('AI read failed', err)
+      alert('Could not read order automatically. Please add items manually.')
+    }
+    setAiLoading(false)
+    fileInputRef.current.value = ''
+  }
+
+  function handleUnmatchedSelect(idx, code) {
+    const p = products.find(p => p.code === code)
+    if (!p) return
+    const item = { product_code: code, product_name: p.name, quantity: unmatchedItems[idx].quantity, unit_price: p.price_per_unit || 0, notes: '' }
+    setOrderItems(prev => [...prev, item])
+    setUnmatchedItems(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  function updateItem(idx, field, val) {
+    setOrderItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item))
+  }
+
+  function removeItem(idx) {
+    setOrderItems(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  function addManualItem() {
+    setOrderItems(prev => [...prev, { product_code: '', product_name: '', quantity: 1, unit_price: 0, notes: '' }])
+  }
+
+  async function saveOrder() {
+    if (!form.customer_name) { alert('Please select a customer'); return }
+    if (orderItems.length === 0) { alert('Please add at least one product'); return }
+    setSaving(true)
+
+    try {
+      // Upload attachment
+      let attachment_url = null
+      if (form.attachment) {
+        const ext = form.attachment.name.split('.').pop()
+        const path = `orders/${Date.now()}-${form.customer_name.replace(/\s+/g,'-')}.${ext}`
+        const { data: upData } = await supabase.storage.from('order-attachments').upload(path, form.attachment, { contentType: form.attachment.type })
+        if (upData) {
+          const { data: { publicUrl } } = supabase.storage.from('order-attachments').getPublicUrl(path)
+          attachment_url = publicUrl
+        }
+      }
+
+      // Generate order number
+      const { data: numData } = await supabase.rpc('generate_order_number')
+      const order_number = numData || `KK${Date.now()}`
+
+      // Calculate total
+      const total = orderItems.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price || 0)), 0)
+
+      // Insert order
+      const { data: order, error } = await supabase.from('orders').insert({
+        order_number,
+        customer_id: form.customer_id || null,
+        customer_name: form.customer_name,
+        order_source: form.order_source,
+        po_number: form.po_number || null,
+        delivery_day: form.delivery_day || null,
+        dispatch_date: form.dispatch_date || null,
+        notes: form.notes || null,
+        order_attachment_url: attachment_url,
+        total_value: total,
+        status: 'received',
+        created_by_name: profile?.name,
+      }).select().single()
+
+      if (error) throw error
+
+      // Insert items
+      await supabase.from('order_items').insert(
+        orderItems.map(i => ({
+          order_id: order.id,
+          product_code: i.product_code || null,
+          product_name: i.product_name,
+          quantity: parseFloat(i.quantity),
+          unit_price: parseFloat(i.unit_price || 0),
+          notes: i.notes || null,
+        }))
+      )
+
+      // Update customer's preferred delivery day
+      if (form.customer_id && form.delivery_day) {
+        await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
+      }
+
+      // Log activity
+      await supabase.from('activity').insert({
+        type: 'dispatch', title: `Order received: ${form.customer_name}`,
+        description: `${order_number} · ${orderItems.length} items · $${total.toFixed(2)}`,
+        created_by_name: profile?.name,
+      })
+
+      setShowModal(false)
+      resetForm()
+      await loadData()
+    } catch(err) {
+      alert('Save failed: ' + err.message)
+    }
+    setSaving(false)
+  }
+
+  function resetForm() {
+    setForm({ customer_id:'', customer_name:'', order_source:'Email', po_number:'', delivery_day:'', dispatch_date:'', notes:'', attachment:null, attachment_preview:null })
+    setOrderItems([])
+    setUnmatchedItems([])
+  }
+
+  async function updateStatus(id, status) {
+    await supabase.from('orders').update({ status }).eq('id', id)
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o))
+  }
+
+  const filtered = filterStatus === 'all' ? orders : orders.filter(o => o.status === filterStatus)
+  const totalValue = filtered.reduce((s, o) => s + (o.total_value || 0), 0)
+
+  const sel = { padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', width: '100%', outline: 'none' }
+
+  return (
+    <>
+      <div className="page-header">
+        <div><h2>ORDERS</h2><p>Incoming order management</p></div>
+        {isAdmin && <button className="btn btn-green" onClick={() => setShowModal(true)}>+ New Order</button>}
+      </div>
+
+      <div className="page-body">
+        {/* Stats */}
+        <div className="grid4" style={{ marginBottom: 16 }}>
+          {['received','confirmed','in_production','ready'].map(s => (
+            <div key={s} className={`stat ${s === 'received' ? 'blue' : s === 'confirmed' ? 'amber' : s === 'in_production' ? 'blue' : 'green'}`}>
+              <div className="stat-label">{STATUS_LABELS[s]}</div>
+              <div className="stat-value">{orders.filter(o => o.status === s).length}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Filter */}
+        <div className="filter-bar">
+          {['all','received','confirmed','in_production','ready','dispatched'].map(s => (
+            <button key={s} className={`filter-btn ${filterStatus===s?'active':''}`} onClick={() => setFilterStatus(s)}>
+              {s === 'all' ? 'All' : STATUS_LABELS[s]}
+            </button>
+          ))}
+        </div>
+
+        {/* Orders table */}
+        <div className="card">
+          <div className="card-title">
+            {filtered.length} orders
+            {totalValue > 0 && <span style={{ color: 'var(--kk-green)', fontWeight: 700 }}>${totalValue.toFixed(2)}</span>}
+          </div>
+          {loading ? <div style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>Loading...</div> : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Order #</th><th>Customer</th><th>Source</th>
+                    <th>Dispatch Date</th><th>Items</th><th>Value</th>
+                    <th>Status</th><th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 && <tr><td colSpan={8} style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>No orders yet</td></tr>}
+                  {filtered.map(o => (
+                    <tr key={o.id}>
+                      <td><span className="code-tag">{o.order_number}</span></td>
+                      <td style={{ fontWeight:500 }}>{o.customer_name}</td>
+                      <td style={{ fontSize:11 }}>{o.order_source}</td>
+                      <td style={{ fontSize:11 }}>{o.dispatch_date || o.delivery_day || '—'}</td>
+                      <td style={{ fontSize:11 }}>{o.order_items?.length || 0} items</td>
+                      <td style={{ fontWeight:600, color:'var(--kk-green)' }}>${(o.total_value||0).toFixed(2)}</td>
+                      <td>
+                        <span className={`badge badge-${STATUS_COLORS[o.status]}`}>{STATUS_LABELS[o.status]}</span>
+                      </td>
+                      <td>
+                        <button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── NEW ORDER MODAL ── */}
+      {showModal && (
+        <div className="modal-bg" onClick={e => e.target===e.currentTarget && setShowModal(false)}>
+          <div className="modal" style={{ maxWidth: 640 }}>
+            <button className="modal-close" onClick={() => { setShowModal(false); resetForm() }}>×</button>
+            <div className="modal-title">NEW ORDER</div>
+
+            {/* Customer */}
+            <div className="field">
+              <label>Customer</label>
+              <CustomerSelect customers={customers} value={form.customer_name}
+                onChange={handleCustomerChange} onAddNew={handleAddNewCustomer} />
+            </div>
+
+            <div className="field-row">
+              <div className="field" style={{ margin:0 }}>
+                <label>Order Source</label>
+                <select style={sel} value={form.order_source} onChange={e => setForm(f=>({...f,order_source:e.target.value}))}>
+                  <option>Email</option><option>PO</option><option>Direct</option><option>KK Website</option>
+                </select>
+              </div>
+              <div className="field" style={{ margin:0 }}>
+                <label>PO Number (optional)</label>
+                <input style={sel} value={form.po_number} onChange={e => setForm(f=>({...f,po_number:e.target.value}))} placeholder="e.g. PO-12345" />
+              </div>
+            </div>
+
+            <div className="field-row">
+              <div className="field" style={{ margin:0 }}>
+                <label>Delivery Day</label>
+                <select style={sel} value={form.delivery_day} onChange={e => setForm(f=>({...f,delivery_day:e.target.value}))}>
+                  <option value="">Select day...</option>
+                  {DELIVERY_DAYS.map(d => <option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <div className="field" style={{ margin:0 }}>
+                <label>Dispatch Date</label>
+                <input type="date" style={sel} value={form.dispatch_date} onChange={e => setForm(f=>({...f,dispatch_date:e.target.value}))} />
+              </div>
+            </div>
+
+            {/* Upload order */}
+            <div className="field">
+              <label>📎 Upload Order (photo or PDF)</label>
+              <input ref={fileInputRef} type="file" accept="image/*,application/pdf" capture="environment"
+                onChange={handleAttachment} style={{ display:'none' }} />
+              <button className="btn btn-secondary btn-full" onClick={() => fileInputRef.current.click()}>
+                {form.attachment ? '📎 Change Attachment' : '📎 Upload Order'}
+              </button>
+              {form.attachment_preview && form.attachment?.type?.includes('image') && (
+                <img src={form.attachment_preview} alt="Order" style={{ width:'100%', maxHeight:150, objectFit:'contain', borderRadius:6, marginTop:8, background:'#f5f5f5' }} />
+              )}
+              {form.attachment && !form.attachment?.type?.includes('image') && (
+                <div style={{ marginTop:8, fontSize:12, color:'var(--kk-green)' }}>✅ {form.attachment.name}</div>
+              )}
+            </div>
+
+            {/* AI reading status */}
+            {aiLoading && (
+              <div style={{ background:'var(--blue-l)', border:'1px solid var(--blue)', borderRadius:6, padding:'10px 14px', fontSize:12, color:'var(--blue)', marginBottom:12 }}>
+                ⏳ Reading order with AI... extracting products and quantities
+              </div>
+            )}
+
+            {/* Unmatched items */}
+            {unmatchedItems.length > 0 && (
+              <div style={{ background:'var(--amber-l)', border:'1px solid var(--amber)', borderRadius:6, padding:12, marginBottom:12 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'#9E5A3E', marginBottom:8 }}>⚠️ {unmatchedItems.length} item(s) not matched — please select manually:</div>
+                {unmatchedItems.map((item, idx) => (
+                  <div key={idx} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6 }}>
+                    <span style={{ fontSize:12, flex:1 }}>{item.product_name} × {item.quantity}</span>
+                    <select style={{ ...sel, width:'auto', flex:2, padding:'6px 10px' }}
+                      onChange={e => handleUnmatchedSelect(idx, e.target.value)} defaultValue="">
+                      <option value="">Select product...</option>
+                      {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                    </select>
+                    <button onClick={() => setUnmatchedItems(prev => prev.filter((_,i)=>i!==idx))}
+                      style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:16 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Order items */}
+            {orderItems.length > 0 && (
+              <div style={{ marginBottom:12 }}>
+                <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
+                  Order Items ({orderItems.length})
+                </div>
+                {orderItems.map((item, idx) => (
+                  <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6 }}>
+                    <div style={{ flex:3 }}>
+                      {item.product_code ? (
+                        <span style={{ fontSize:12 }}><span className="code-tag">{item.product_code}</span> {item.product_name}</span>
+                      ) : (
+                        <select style={{ ...sel, padding:'4px 8px', fontSize:11 }}
+                          value={item.product_code}
+                          onChange={e => {
+                            const p = products.find(p => p.code === e.target.value)
+                            if (p) updateItem(idx, 'product_code', p.code)
+                            updateItem(idx, 'product_name', p?.name || item.product_name)
+                          }}>
+                          <option value="">Select product...</option>
+                          {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                        </select>
+                      )}
+                    </div>
+                    <input type="number" value={item.quantity} onChange={e => updateItem(idx,'quantity',e.target.value)}
+                      style={{ ...sel, width:60, padding:'4px 8px', fontSize:12 }} />
+                    <button onClick={() => removeItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:16 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button className="btn btn-secondary btn-sm" onClick={addManualItem} style={{ marginBottom:12 }}>+ Add Item Manually</button>
+
+            <div className="field">
+              <label>Notes</label>
+              <textarea style={{ ...sel, minHeight:60 }} value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Special instructions..." />
+            </div>
+
+            <div style={{ display:'flex', gap:10 }}>
+              <button className="btn btn-green btn-full" onClick={saveOrder} disabled={saving}>
+                {saving ? 'Saving...' : 'Save Order'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => { setShowModal(false); resetForm() }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── VIEW ORDER MODAL ── */}
+      {viewOrder && (
+        <div className="modal-bg" onClick={e => e.target===e.currentTarget && setViewOrder(null)}>
+          <div className="modal" style={{ maxWidth: 640 }}>
+            <button className="modal-close" onClick={() => setViewOrder(null)}>×</button>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16, flexWrap:'wrap', gap:8 }}>
+              <div>
+                <div className="modal-title" style={{ marginBottom:4 }}>{viewOrder.customer_name}</div>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                  <span className="code-tag">{viewOrder.order_number}</span>
+                  <span className={`badge badge-${STATUS_COLORS[viewOrder.status]}`}>{STATUS_LABELS[viewOrder.status]}</span>
+                  <span style={{ fontSize:11, color:'var(--ink3)' }}>{viewOrder.order_source}{viewOrder.po_number ? ` · PO: ${viewOrder.po_number}` : ''}</span>
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => printDispatchSlip([viewOrder])}>🖨️ Print Slip</button>
+                {isAdmin && viewOrder.status !== 'dispatched' && viewOrder.status !== 'cancelled' && (
+                  <select style={{ ...sel, width:'auto', padding:'6px 12px', fontSize:11 }}
+                    value={viewOrder.status}
+                    onChange={e => { updateStatus(viewOrder.id, e.target.value); setViewOrder(v => ({...v, status: e.target.value})) }}>
+                    {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16, fontSize:12 }}>
+              <div><span style={{ color:'var(--ink3)' }}>Delivery Day:</span> <strong>{viewOrder.delivery_day || '—'}</strong></div>
+              <div><span style={{ color:'var(--ink3)' }}>Dispatch Date:</span> <strong>{viewOrder.dispatch_date || '—'}</strong></div>
+              <div><span style={{ color:'var(--ink3)' }}>Total Value:</span> <strong style={{ color:'var(--kk-green)' }}>${(viewOrder.total_value||0).toFixed(2)}</strong></div>
+              <div><span style={{ color:'var(--ink3)' }}>Created by:</span> <strong>{viewOrder.created_by_name}</strong></div>
+            </div>
+
+            {viewOrder.order_attachment_url && (
+              <div style={{ marginBottom:16 }}>
+                <a href={viewOrder.order_attachment_url} target="_blank" rel="noopener noreferrer"
+                  className="btn btn-secondary btn-sm">📎 View Original Order</a>
+              </div>
+            )}
+
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Product</th><th>Code</th><th>Qty</th><th>Notes</th></tr></thead>
+                <tbody>
+                  {(viewOrder.order_items || []).map(item => (
+                    <tr key={item.id}>
+                      <td style={{ fontWeight:500, fontSize:12 }}>{item.product_name}</td>
+                      <td>{item.product_code ? <span className="code-tag">{item.product_code}</span> : '—'}</td>
+                      <td style={{ fontWeight:600, color:'var(--kk-green)' }}>{item.quantity}</td>
+                      <td style={{ fontSize:11, color:'var(--ink3)' }}>{item.notes || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {viewOrder.notes && (
+              <div style={{ marginTop:12, padding:'10px 14px', background:'var(--surface2)', borderRadius:6, fontSize:12, color:'var(--ink2)' }}>
+                📝 {viewOrder.notes}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}

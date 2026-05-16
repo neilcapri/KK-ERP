@@ -11,6 +11,7 @@ const navItems = [
   { to: '/activity', icon: '🕐', label: 'Activity', roles: ['admin','kitchen','analyst','dispatch'] },
   { to: '/reports', icon: '📊', label: 'Reports', roles: ['admin','analyst'] },
   { to: '/time-tracking', icon: '⏱', label: 'Time Tracking', roles: ['admin','kitchen','staff'] },
+  { to: '/orders', icon: '🛒', label: 'Orders', roles: ['admin'] },
 ]
 
 export default function Layout() {
@@ -58,7 +59,7 @@ export default function Layout() {
         <Outlet />
       </div>
 
-      {/* Mobile Bottom Nav — no inline display style, controlled by CSS media query only */}
+      {/* Mobile Bottom Nav */}
       <nav className="bottom-nav">
         {visibleItems.map(item => (
           <NavLink

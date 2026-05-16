@@ -8,7 +8,7 @@ import Production from './pages/Production'
 import Dispatch from './pages/Dispatch'
 import { Sourcing, Activity, Reports } from './pages/Sourcing'
 import TimeTracking from './pages/TimeTracking'
-
+import Orders from './pages/Orders'
 
 function ProtectedRoute({ children, roles }) {
   const { user, profile, loading } = useAuth()
@@ -23,16 +23,16 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={!user ? <Login /> : <Navigate to="/" replace />} />
-     
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Dashboard />} />
         <Route path="inventory" element={<Inventory />} />
         <Route path="production" element={<ProtectedRoute roles={['admin','kitchen']}><Production /></ProtectedRoute>} />
         <Route path="dispatch" element={<ProtectedRoute roles={['admin','dispatch']}><Dispatch /></ProtectedRoute>} />
-        <Route path="sourcing" element={<ProtectedRoute roles={['admin','dispatch']}><Sourcing /></ProtectedRoute>} />
+        <Route path="sourcing" element={<ProtectedRoute roles={['admin','kitchen','dispatch']}><Sourcing /></ProtectedRoute>} />
         <Route path="activity" element={<Activity />} />
-        <Route path="reports" element={<ProtectedRoute roles={['admin']}><Reports /></ProtectedRoute>} />
+        <Route path="reports" element={<ProtectedRoute roles={['admin','analyst']}><Reports /></ProtectedRoute>} />
         <Route path="time-tracking" element={<ProtectedRoute><TimeTracking user={user} employee={profile} /></ProtectedRoute>} />
+        <Route path="orders" element={<ProtectedRoute roles={['admin']}><Orders /></ProtectedRoute>} />
       </Route>
     </Routes>
   )

@@ -68,75 +68,51 @@ function CustomerSelect({ customers, value, onChange, onAddNew }) {
 function printDispatchSlip(orders) {
   const slipOrders = orders.slice(0, 3)
   const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>KK Dispatch Slip</title>
-      <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: Arial, sans-serif; font-size: 11px; padding: 16px; }
-        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #223824; padding-bottom: 10px; }
-        .logo { font-size: 20px; font-weight: 900; letter-spacing: 4px; color: #223824; }
-        .logo-sub { font-size: 7px; letter-spacing: 3px; color: #888; }
-        .slip-title { font-size: 14px; font-weight: 700; color: #223824; }
-        .order-block { margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; }
-        .order-header { background: #223824; color: #fff; padding: 8px 12px; display: flex; justify-content: space-between; }
-        .order-header strong { font-size: 13px; }
-        .order-header span { font-size: 11px; opacity: 0.8; }
-        table { width: 100%; border-collapse: collapse; }
-        th { background: #f0f4f0; padding: 6px 10px; text-align: left; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #555; border-bottom: 1px solid #ddd; }
-        td { padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 11px; }
-        .prod-date-col { width: 120px; background: #fffde7; }
-        .footer { margin-top: 16px; font-size: 9px; color: #aaa; text-align: center; }
-        @media print { .no-print { display: none; } }
-      </style>
-    </head>
-    <body>
+    <!DOCTYPE html><html><head><title>KK Dispatch Slip</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; font-size: 11px; padding: 16px; }
+      .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; border-bottom: 2px solid #223824; padding-bottom: 10px; }
+      .logo { font-size: 20px; font-weight: 900; letter-spacing: 4px; color: #223824; }
+      .logo-sub { font-size: 7px; letter-spacing: 3px; color: #888; }
+      .slip-title { font-size: 14px; font-weight: 700; color: #223824; }
+      .order-block { margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; }
+      .order-header { background: #223824; color: #fff; padding: 8px 12px; display: flex; justify-content: space-between; }
+      .order-header strong { font-size: 13px; }
+      .order-header span { font-size: 11px; opacity: 0.8; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #f0f4f0; padding: 6px 10px; text-align: left; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #555; border-bottom: 1px solid #ddd; }
+      td { padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 11px; }
+      .prod-date-col { width: 120px; background: #fffde7; }
+      .footer { margin-top: 16px; font-size: 9px; color: #aaa; text-align: center; }
+    </style></head><body>
       <div class="header">
-        <div>
-          <div class="logo">KK ERP</div>
-          <div class="logo-sub">KONSCIOUS KITCHEN</div>
-        </div>
-        <div style="text-align:right">
-          <div class="slip-title">DISPATCH SLIP</div>
-          <div style="font-size:10px;color:#888">Generated: ${new Date().toLocaleDateString('en-CA')}</div>
-        </div>
+        <div><div class="logo">KK ERP</div><div class="logo-sub">KONSCIOUS KITCHEN</div></div>
+        <div style="text-align:right"><div class="slip-title">DISPATCH SLIP</div>
+        <div style="font-size:10px;color:#888">Generated: ${new Date().toLocaleDateString('en-CA')}</div></div>
       </div>
       ${slipOrders.map(order => `
         <div class="order-block">
           <div class="order-header">
-            <div>
-              <strong>${order.customer_name}</strong>
-              <div style="font-size:10px;margin-top:2px">Order #${order.order_number} · ${order.order_source}${order.po_number ? ` · PO: ${order.po_number}` : ''}</div>
-            </div>
+            <div><strong>${order.customer_name}</strong>
+            <div style="font-size:10px;margin-top:2px">Order #${order.order_number} · ${order.order_source}${order.po_number ? ` · PO: ${order.po_number}` : ''}</div></div>
             <span>Dispatch: ${order.dispatch_date || '—'}</span>
           </div>
-          <table>
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th style="width:60px;text-align:center">Qty</th>
-                <th class="prod-date-col">Production Date</th>
-                <th style="width:100px">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${(order.order_items || []).map(item => `
-                <tr>
-                  <td>${item.product_name}${item.product_code ? ` <span style="color:#888;font-size:10px">(${item.product_code})</span>` : ''}</td>
-                  <td style="text-align:center;font-weight:600">${item.quantity}</td>
-                  <td class="prod-date-col">&nbsp;</td>
-                  <td>${item.notes || ''}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      `).join('')}
+          <table><thead><tr>
+            <th>Product</th><th style="width:60px;text-align:center">Qty</th>
+            <th class="prod-date-col">Production Date</th><th style="width:100px">Notes</th>
+          </tr></thead><tbody>
+          ${(order.order_items || []).map(item => `
+            <tr>
+              <td>${item.product_name}${item.product_code ? ` <span style="color:#888;font-size:10px">(${item.product_code})</span>` : ''}</td>
+              <td style="text-align:center;font-weight:600">${item.quantity}</td>
+              <td class="prod-date-col">&nbsp;</td>
+              <td>${item.notes || ''}</td>
+            </tr>`).join('')}
+          </tbody></table>
+        </div>`).join('')}
       <div class="footer">Konscious Kitchen · MAD CLEAN INGREDIENTS · konsciouskitchen.com</div>
-    </body>
-    </html>
-  `
+    </body></html>`
   const w = window.open('', '_blank')
   w.document.write(html)
   w.document.close()
@@ -144,8 +120,10 @@ function printDispatchSlip(orders) {
 }
 
 // ── AI helper ─────────────────────────────────────────────────
-async function readOrderWithAI(content, products, isImage = false, fileType = '') {
+async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '') {
   const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
+  const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
+
   const prompt = `You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list using smart semantic understanding.
 
 OUR PRODUCT LIST:
@@ -158,8 +136,13 @@ SEMANTIC MATCHING GUIDE (common customer names → our product code):
 - hazelnut donut / hazelnut doughnut = KHD
 - peanut butter donut / PB donut / vegan donut = VPBD
 - cinnamon donut = KSCD
-- brownie / brownie ganache / ganache pouch = PVBRG
-- mini brownie / brownie bar = PVBr
+- brownie / mini brownie / brownie bar (NOT ganache) = PVBR
+- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG
+${isNaturesEmporium ? `
+SPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):
+- "brownie ganache 90g" or "brownie ganache pouch" = PVBRG (packaged, retail)
+- "brownie ganache" without 90g or pouch = PVBRG-BULK (bulk order)
+` : ''}
 - pecan bar = VPCAN
 - notella / nutella bar / no'tella = PNF
 - pistachio bar = VPB
@@ -224,6 +207,9 @@ export default function Orders() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [viewOrder, setViewOrder] = useState(null)
+  const [editingOrder, setEditingOrder] = useState(null)
+  const [editItems, setEditItems] = useState([])
+  const [editSaving, setEditSaving] = useState(false)
   const [filterStatus, setFilterStatus] = useState('all')
   const [aiLoading, setAiLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -293,7 +279,7 @@ export default function Orders() {
         reader.onerror = rej
         reader.readAsDataURL(file)
       })
-      const items = await readOrderWithAI(base64, products, true, file.type)
+      const items = await readOrderWithAI(base64, products, form.customer_name, true, file.type)
       processAIItems(items)
     } catch(err) {
       console.error('AI read failed', err)
@@ -309,7 +295,7 @@ export default function Orders() {
     setOrderItems([])
     setUnmatchedItems([])
     try {
-      const items = await readOrderWithAI(pasteText, products, false)
+      const items = await readOrderWithAI(pasteText, products, form.customer_name, false)
       processAIItems(items)
     } catch(err) {
       console.error('AI paste read failed', err)
@@ -329,13 +315,64 @@ export default function Orders() {
   function updateItem(idx, field, val) {
     setOrderItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item))
   }
-
   function removeItem(idx) {
     setOrderItems(prev => prev.filter((_, i) => i !== idx))
   }
-
   function addManualItem() {
     setOrderItems(prev => [...prev, { product_code: '', product_name: '', quantity: 1, unit_price: 0, notes: '' }])
+  }
+
+  // ── Edit order item helpers ──
+  function updateEditItem(idx, field, val) {
+    setEditItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item))
+  }
+  function removeEditItem(idx) {
+    setEditItems(prev => prev.filter((_, i) => i !== idx))
+  }
+  function addEditItem() {
+    setEditItems(prev => [...prev, { product_code: '', product_name: '', quantity: 1, unit_price: 0, notes: '', isNew: true }])
+  }
+
+  function startEditOrder(order) {
+    setEditingOrder({ ...order })
+    setEditItems((order.order_items || []).map(i => ({ ...i })))
+    setViewOrder(null)
+  }
+
+  async function saveEditOrder() {
+    if (editItems.length === 0) { alert('Please add at least one product'); return }
+    setEditSaving(true)
+    try {
+      // Update order fields
+      await supabase.from('orders').update({
+        delivery_day: editingOrder.delivery_day || null,
+        dispatch_date: editingOrder.dispatch_date || null,
+        po_number: editingOrder.po_number || null,
+        order_source: editingOrder.order_source,
+        notes: editingOrder.notes || null,
+        status: editingOrder.status,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editingOrder.id)
+
+      // Delete old items and re-insert
+      await supabase.from('order_items').delete().eq('order_id', editingOrder.id)
+      await supabase.from('order_items').insert(
+        editItems.map(i => ({
+          order_id: editingOrder.id,
+          product_code: i.product_code || null,
+          product_name: i.product_name,
+          quantity: parseFloat(i.quantity),
+          unit_price: parseFloat(i.unit_price || 0),
+          notes: i.notes || null,
+        }))
+      )
+      setEditingOrder(null)
+      setEditItems([])
+      await loadData()
+    } catch(err) {
+      alert('Save failed: ' + err.message)
+    }
+    setEditSaving(false)
   }
 
   async function saveOrder() {
@@ -376,7 +413,7 @@ export default function Orders() {
       }
       await supabase.from('activity').insert({
         type: 'dispatch', title: `Order received: ${form.customer_name}`,
-        description: `${order_number} · ${orderItems.length} items · $${total.toFixed(2)}`,
+        description: `${order_number} · ${orderItems.length} items`,
         created_by_name: profile?.name,
       })
       setShowModal(false)
@@ -402,7 +439,6 @@ export default function Orders() {
   }
 
   const filtered = filterStatus === 'all' ? orders : orders.filter(o => o.status === filterStatus)
-  const totalValue = filtered.reduce((s, o) => s + (o.total_value || 0), 0)
   const sel = { padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', width: '100%', outline: 'none' }
 
   return (
@@ -431,19 +467,16 @@ export default function Orders() {
         </div>
 
         <div className="card">
-          <div className="card-title">
-            {filtered.length} orders
-            {totalValue > 0 && <span style={{ color:'var(--kk-green)', fontWeight:700 }}>${totalValue.toFixed(2)}</span>}
-          </div>
+          <div className="card-title">{filtered.length} orders</div>
           {loading ? <div style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>Loading...</div> : (
             <div className="table-wrap">
               <table>
                 <thead><tr>
                   <th>Order #</th><th>Customer</th><th>Source</th>
-                  <th>Dispatch Date</th><th>Items</th><th>Value</th><th>Status</th><th></th>
+                  <th>Dispatch Date</th><th>Items</th><th>Status</th><th></th>
                 </tr></thead>
                 <tbody>
-                  {filtered.length === 0 && <tr><td colSpan={8} style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>No orders yet</td></tr>}
+                  {filtered.length === 0 && <tr><td colSpan={7} style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>No orders yet</td></tr>}
                   {filtered.map(o => (
                     <tr key={o.id}>
                       <td><span className="code-tag">{o.order_number}</span></td>
@@ -451,9 +484,12 @@ export default function Orders() {
                       <td style={{ fontSize:11 }}>{o.order_source}</td>
                       <td style={{ fontSize:11 }}>{o.dispatch_date || o.delivery_day || '—'}</td>
                       <td style={{ fontSize:11 }}>{o.order_items?.length || 0} items</td>
-                      <td style={{ fontWeight:600, color:'var(--kk-green)' }}>${(o.total_value||0).toFixed(2)}</td>
                       <td><span className={`badge badge-${STATUS_COLORS[o.status]}`}>{STATUS_LABELS[o.status]}</span></td>
-                      <td><button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button></td>
+                      <td style={{ display:'flex', gap:4 }}>
+                        <button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button>
+                        {isAdmin && <button onClick={() => startEditOrder(o)} className="btn btn-secondary btn-sm">Edit</button>}
+                        {isAdmin && <button onClick={async () => { if(window.confirm('Delete order ' + o.order_number + '?')) { await supabase.from('orders').delete().eq('id', o.id); await loadData(); }}} className="btn btn-red btn-sm">Del</button>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -503,7 +539,6 @@ export default function Orders() {
               </div>
             </div>
 
-            {/* Upload / Paste tabs */}
             <div className="field">
               <label>Order Input</label>
               <div style={{ display:'flex', gap:0, marginBottom:10, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
@@ -551,7 +586,7 @@ export default function Orders() {
 
             {aiLoading && inputMode === 'upload' && (
               <div style={{ background:'var(--blue-l)', border:'1px solid var(--blue)', borderRadius:6, padding:'10px 14px', fontSize:12, color:'var(--blue)', marginBottom:12 }}>
-                ⏳ Reading order with AI... extracting products and quantities
+                ⏳ Reading order with AI...
               </div>
             )}
 
@@ -576,7 +611,7 @@ export default function Orders() {
             {orderItems.length > 0 && (
               <div style={{ marginBottom:12 }}>
                 <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
-                  Order Items ({orderItems.length}) — tap to edit
+                  Order Items ({orderItems.length})
                 </div>
                 {orderItems.map((item, idx) => (
                   <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
@@ -641,6 +676,8 @@ export default function Orders() {
               </div>
               <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => printDispatchSlip([viewOrder])}>🖨️ Print Slip</button>
+                {isAdmin && <button className="btn btn-amber btn-sm" onClick={() => startEditOrder(viewOrder)}>✏️ Edit</button>}
+                {isAdmin && <button className="btn btn-red btn-sm" onClick={async () => { if(window.confirm('Delete order ' + viewOrder.order_number + '?')) { await supabase.from('orders').delete().eq('id', viewOrder.id); setViewOrder(null); await loadData(); }}}>🗑️ Delete</button>}
                 {isAdmin && viewOrder.status !== 'dispatched' && viewOrder.status !== 'cancelled' && (
                   <select style={{ ...sel, width:'auto', padding:'6px 12px', fontSize:11 }}
                     value={viewOrder.status}
@@ -654,7 +691,6 @@ export default function Orders() {
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16, fontSize:12 }}>
               <div><span style={{ color:'var(--ink3)' }}>Delivery Day:</span> <strong>{viewOrder.delivery_day || '—'}</strong></div>
               <div><span style={{ color:'var(--ink3)' }}>Dispatch Date:</span> <strong>{viewOrder.dispatch_date || '—'}</strong></div>
-              <div><span style={{ color:'var(--ink3)' }}>Total Value:</span> <strong style={{ color:'var(--kk-green)' }}>${(viewOrder.total_value||0).toFixed(2)}</strong></div>
               <div><span style={{ color:'var(--ink3)' }}>Created by:</span> <strong>{viewOrder.created_by_name}</strong></div>
             </div>
 
@@ -686,6 +722,95 @@ export default function Orders() {
                 📝 {viewOrder.notes}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT ORDER MODAL ── */}
+      {editingOrder && (
+        <div className="modal-bg" onClick={e => e.target===e.currentTarget && setEditingOrder(null)}>
+          <div className="modal" style={{ maxWidth: 640 }}>
+            <button className="modal-close" onClick={() => setEditingOrder(null)}>×</button>
+            <div className="modal-title">EDIT ORDER — {editingOrder.order_number}</div>
+            <div style={{ fontSize:13, color:'var(--ink3)', marginBottom:16 }}>{editingOrder.customer_name}</div>
+
+            <div className="field-row">
+              <div className="field" style={{ margin:0 }}>
+                <label>Order Source</label>
+                <select style={sel} value={editingOrder.order_source} onChange={e => setEditingOrder(o=>({...o,order_source:e.target.value}))}>
+                  <option>Email</option><option>PO</option><option>Direct</option><option>KK Website</option>
+                </select>
+              </div>
+              <div className="field" style={{ margin:0 }}>
+                <label>PO Number</label>
+                <input style={sel} value={editingOrder.po_number || ''} onChange={e => setEditingOrder(o=>({...o,po_number:e.target.value}))} placeholder="e.g. PO-12345" />
+              </div>
+            </div>
+
+            <div className="field-row">
+              <div className="field" style={{ margin:0 }}>
+                <label>Delivery Day</label>
+                <select style={sel} value={editingOrder.delivery_day || ''} onChange={e => setEditingOrder(o=>({...o,delivery_day:e.target.value}))}>
+                  <option value="">Select day...</option>
+                  {DELIVERY_DAYS.map(d => <option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <div className="field" style={{ margin:0 }}>
+                <label>Dispatch Date</label>
+                <input type="date" style={sel} value={editingOrder.dispatch_date || ''} onChange={e => setEditingOrder(o=>({...o,dispatch_date:e.target.value}))} />
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Status</label>
+              <select style={sel} value={editingOrder.status} onChange={e => setEditingOrder(o=>({...o,status:e.target.value}))}>
+                {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+
+            <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
+              Order Items ({editItems.length})
+            </div>
+            {editItems.map((item, idx) => (
+              <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
+                <div style={{ flex:3, minWidth:180 }}>
+                  <select style={{ ...sel, padding:'6px 10px', fontSize:12 }}
+                    value={item.product_code || ''}
+                    onChange={e => {
+                      const p = products.find(p => p.code === e.target.value)
+                      updateEditItem(idx, 'product_code', p?.code || '')
+                      updateEditItem(idx, 'product_name', p?.name || item.product_name)
+                      updateEditItem(idx, 'unit_price', p?.price_per_unit || 0)
+                    }}>
+                    <option value="">{item.product_name || 'Select product...'}</option>
+                    {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                  </select>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  <span style={{ fontSize:11, color:'var(--ink3)' }}>Qty:</span>
+                  <input type="number" value={item.quantity} onChange={e => updateEditItem(idx,'quantity',e.target.value)}
+                    style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
+                </div>
+                <input type="text" value={item.notes || ''} placeholder="Notes"
+                  onChange={e => updateEditItem(idx,'notes',e.target.value)}
+                  style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
+                <button onClick={() => removeEditItem(idx)}
+                  style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>×</button>
+              </div>
+            ))}
+            <button className="btn btn-secondary btn-sm" onClick={addEditItem} style={{ marginBottom:12 }}>+ Add Item</button>
+
+            <div className="field">
+              <label>Notes</label>
+              <textarea style={{ ...sel, minHeight:60 }} value={editingOrder.notes || ''} onChange={e => setEditingOrder(o=>({...o,notes:e.target.value}))} placeholder="Special instructions..." />
+            </div>
+
+            <div style={{ display:'flex', gap:10 }}>
+              <button className="btn btn-green btn-full" onClick={saveEditOrder} disabled={editSaving}>
+                {editSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setEditingOrder(null)}>Cancel</button>
+            </div>
           </div>
         </div>
       )}

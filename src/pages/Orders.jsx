@@ -150,6 +150,8 @@ export default function Orders() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [aiLoading, setAiLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [inputMode, setInputMode] = useState('upload') // 'upload' | 'paste'
+  const [pasteText, setPasteText] = useState('')
   const fileInputRef = useRef(null)
 
   const [form, setForm] = useState({
@@ -367,10 +369,49 @@ Rules:
     setSaving(false)
   }
 
+  async function handlePasteRead() {
+    if (!pasteText.trim()) { alert('Please paste order text first'); return }
+    setAiLoading(true)
+    setOrderItems([])
+    setUnmatchedItems([])
+    try {
+      const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'anthropic-dangerous-direct-browser-access': 'true' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: `This is a customer order:\n\n${pasteText}\n\nExtract all products and quantities ordered. Then match each item to this product list:\n${productList}\n\nReturn ONLY a JSON array like this:\n[\n  {"product_name": "name from order", "quantity": 12, "product_code": "CODE_IF_MATCHED", "matched": true},\n  {"product_name": "unrecognized item", "quantity": 6, "product_code": null, "matched": false}\n]\n\nRules:\n- Match by product name or code (fuzzy match is ok)\n- If matched, include the exact product_code from the list\n- If not matched, set matched: false and product_code: null\n- quantity must be a number\n- Return ONLY the JSON array, no other text`
+          }]
+        })
+      })
+      const data = await response.json()
+      const text = data.content?.[0]?.text?.trim()
+      const clean = text.replace(/```json|```/g, '').trim()
+      const items = JSON.parse(clean)
+      const matched = items.filter(i => i.matched)
+      const unmatched = items.filter(i => !i.matched)
+      const enriched = matched.map(i => {
+        const p = products.find(p => p.code === i.product_code)
+        return { product_code: i.product_code, product_name: p?.name || i.product_name, quantity: i.quantity, unit_price: p?.price_per_unit || 0, notes: '' }
+      })
+      setOrderItems(enriched)
+      setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
+    } catch(err) {
+      alert('Could not read order. Please add items manually.')
+    }
+    setAiLoading(false)
+  }
+
   function resetForm() {
     setForm({ customer_id:'', customer_name:'', order_source:'Email', po_number:'', delivery_day:'', dispatch_date:'', notes:'', attachment:null, attachment_preview:null })
     setOrderItems([])
     setUnmatchedItems([])
+    setPasteText('')
+    setInputMode('upload')
   }
 
   async function updateStatus(id, status) {
@@ -492,24 +533,55 @@ Rules:
               </div>
             </div>
 
-            {/* Upload order */}
+            {/* Upload / Paste tabs */}
             <div className="field">
-              <label>📎 Upload Order (photo or PDF)</label>
-              <input ref={fileInputRef} type="file" accept="image/*,application/pdf" capture="environment"
-                onChange={handleAttachment} style={{ display:'none' }} />
-              <button className="btn btn-secondary btn-full" onClick={() => fileInputRef.current.click()}>
-                {form.attachment ? '📎 Change Attachment' : '📎 Upload Order'}
-              </button>
-              {form.attachment_preview && form.attachment?.type?.includes('image') && (
-                <img src={form.attachment_preview} alt="Order" style={{ width:'100%', maxHeight:150, objectFit:'contain', borderRadius:6, marginTop:8, background:'#f5f5f5' }} />
+              <label>Order Input</label>
+              <div style={{ display:'flex', gap:0, marginBottom:10, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
+                {['upload','paste'].map(mode => (
+                  <button key={mode} onClick={() => setInputMode(mode)} style={{
+                    flex:1, padding:'8px 12px', border:'none', cursor:'pointer', fontSize:12,
+                    fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',
+                    background: inputMode===mode ? 'var(--kk-green)' : 'var(--surface)',
+                    color: inputMode===mode ? 'var(--kk-cream)' : 'var(--ink3)',
+                  }}>
+                    {mode === 'upload' ? '📎 Upload' : '📋 Paste Text'}
+                  </button>
+                ))}
+              </div>
+
+              {inputMode === 'upload' && (
+                <>
+                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" capture="environment"
+                    onChange={handleAttachment} style={{ display:'none' }} />
+                  <button className="btn btn-secondary btn-full" onClick={() => fileInputRef.current.click()}>
+                    {form.attachment ? '📎 Change Attachment' : '📎 Upload Photo or PDF'}
+                  </button>
+                  {form.attachment_preview && form.attachment?.type?.includes('image') && (
+                    <img src={form.attachment_preview} alt="Order" style={{ width:'100%', maxHeight:150, objectFit:'contain', borderRadius:6, marginTop:8, background:'#f5f5f5' }} />
+                  )}
+                  {form.attachment && !form.attachment?.type?.includes('image') && (
+                    <div style={{ marginTop:8, fontSize:12, color:'var(--kk-green)' }}>✅ {form.attachment.name}</div>
+                  )}
+                </>
               )}
-              {form.attachment && !form.attachment?.type?.includes('image') && (
-                <div style={{ marginTop:8, fontSize:12, color:'var(--kk-green)' }}>✅ {form.attachment.name}</div>
+
+              {inputMode === 'paste' && (
+                <>
+                  <textarea
+                    value={pasteText}
+                    onChange={e => setPasteText(e.target.value)}
+                    placeholder="Paste the order email or text here..."
+                    style={{ width:'100%', minHeight:120, padding:'10px 14px', border:'1.5px solid var(--border)', borderRadius:'var(--radius)', fontFamily:'var(--body)', fontSize:12, background:'var(--surface)', color:'var(--ink)', outline:'none', resize:'vertical', boxSizing:'border-box' }}
+                  />
+                  <button className="btn btn-green btn-full" style={{ marginTop:8 }} onClick={handlePasteRead} disabled={aiLoading || !pasteText.trim()}>
+                    {aiLoading ? '⏳ Reading...' : '🤖 Read Order with AI'}
+                  </button>
+                </>
               )}
             </div>
 
-            {/* AI reading status */}
-            {aiLoading && (
+            {/* AI reading status — upload mode only */}
+            {aiLoading && inputMode === 'upload' && (
               <div style={{ background:'var(--blue-l)', border:'1px solid var(--blue)', borderRadius:6, padding:'10px 14px', fontSize:12, color:'var(--blue)', marginBottom:12 }}>
                 ⏳ Reading order with AI... extracting products and quantities
               </div>
@@ -534,33 +606,38 @@ Rules:
               </div>
             )}
 
-            {/* Order items */}
+            {/* Order items — fully editable */}
             {orderItems.length > 0 && (
               <div style={{ marginBottom:12 }}>
                 <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
-                  Order Items ({orderItems.length})
+                  Order Items ({orderItems.length}) — tap to edit
                 </div>
                 {orderItems.map((item, idx) => (
-                  <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6 }}>
-                    <div style={{ flex:3 }}>
-                      {item.product_code ? (
-                        <span style={{ fontSize:12 }}><span className="code-tag">{item.product_code}</span> {item.product_name}</span>
-                      ) : (
-                        <select style={{ ...sel, padding:'4px 8px', fontSize:11 }}
-                          value={item.product_code}
-                          onChange={e => {
-                            const p = products.find(p => p.code === e.target.value)
-                            if (p) updateItem(idx, 'product_code', p.code)
-                            updateItem(idx, 'product_name', p?.name || item.product_name)
-                          }}>
-                          <option value="">Select product...</option>
-                          {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
-                        </select>
-                      )}
+                  <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
+                    <div style={{ flex:3, minWidth:180 }}>
+                      <select style={{ ...sel, padding:'6px 10px', fontSize:12 }}
+                        value={item.product_code || ''}
+                        onChange={e => {
+                          const p = products.find(p => p.code === e.target.value)
+                          updateItem(idx, 'product_code', p?.code || '')
+                          updateItem(idx, 'product_name', p?.name || item.product_name)
+                          updateItem(idx, 'unit_price', p?.price_per_unit || 0)
+                        }}>
+                        <option value="">{item.product_name || 'Select product...'}</option>
+                        {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                      </select>
                     </div>
-                    <input type="number" value={item.quantity} onChange={e => updateItem(idx,'quantity',e.target.value)}
-                      style={{ ...sel, width:60, padding:'4px 8px', fontSize:12 }} />
-                    <button onClick={() => removeItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:16 }}>×</button>
+                    <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                      <span style={{ fontSize:11, color:'var(--ink3)' }}>Qty:</span>
+                      <input type="number" value={item.quantity}
+                        onChange={e => updateItem(idx,'quantity',e.target.value)}
+                        style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
+                    </div>
+                    <input type="text" value={item.notes || ''} placeholder="Notes"
+                      onChange={e => updateItem(idx,'notes',e.target.value)}
+                      style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
+                    <button onClick={() => removeItem(idx)}
+                      style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>×</button>
                   </div>
                 ))}
               </div>

@@ -101,7 +101,7 @@ Answer questions concisely and helpfully. Use the data above to give specific, a
       {/* Chat window */}
       {open && (
         <div style={{
-          position: 'fixed', bottom: 80, right: 24, width: 360, height: 500,
+          position: 'fixed', bottom: 140, right: 24, width: 360, height: 500,
           background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 12, boxShadow: '0 8px 40px rgba(34,56,36,.2)',
           display: 'flex', flexDirection: 'column', zIndex: 999,
@@ -205,7 +205,7 @@ Answer questions concisely and helpfully. Use the data above to give specific, a
       <button
         onClick={() => setOpen(o => !o)}
         style={{
-          position: 'fixed', bottom: 24, right: 24,
+          position: 'fixed', bottom: 80, right: 24,
           width: 52, height: 52, borderRadius: '50%',
           background: open ? 'var(--kk-brown)' : 'var(--kk-green)',
           color: 'var(--kk-cream)', border: 'none',

@@ -3,8 +3,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import * as XLSX from 'xlsx-js-style'
 
-const STATUS_COLORS = { received: 'blue', order_sheet: 'green', archived: 'purple' }
-const STATUS_LABELS = { received: 'Received', order_sheet: 'Order Sheet', archived: 'Archived' }
+const STATUS_COLORS = { order_sheet: 'green', archived: 'purple' }
+const STATUS_LABELS = { order_sheet: 'Active', archived: 'Archived' }
 const DELIVERY_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
 const API_HEADERS = {
@@ -304,6 +304,33 @@ function buildBulkSheet(wb, orders, weekLabel) {
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
 }
 
+
+
+// ── Week helpers ──────────────────────────────────────────────
+function getCurrentWeekBounds() {
+  const now = new Date()
+  const day = now.getDay() // 0=Sun, 1=Mon...
+  const monday = new Date(now)
+  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1))
+  monday.setHours(0, 0, 0, 0)
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  sunday.setHours(23, 59, 59, 999)
+  return { monday, sunday }
+}
+
+function getWeekLabel() {
+  const { monday, sunday } = getCurrentWeekBounds()
+  const fmt = d => d.toLocaleString('en-CA', { month: 'short', day: 'numeric' })
+  return `${fmt(monday)}–${fmt(sunday)}, ${monday.getFullYear()}`
+}
+
+function isCurrentWeekOrder(order) {
+  if (!order.dispatch_date) return true // no date = current week
+  const { monday, sunday } = getCurrentWeekBounds()
+  const d = new Date(order.dispatch_date + 'T00:00:00')
+  return d >= monday && d <= sunday
+}
 
 // ── Case → Units helper ───────────────────────────────────────
 function getUnitsPerCase(product) { return product?.units_per_case || 6 }
@@ -666,7 +693,7 @@ export default function Orders() {
         order_source: form.order_source, po_number: form.po_number || null,
         delivery_day: form.delivery_day || null, dispatch_date: form.dispatch_date || null,
         notes: form.notes || null, order_attachment_url: attachment_url,
-        total_value: total, status: 'received', created_by_name: profile?.name, slip_number: slipNum,
+        total_value: total, status: 'order_sheet', created_by_name: profile?.name, slip_number: slipNum,
       }).select().single()
       if (error) throw error
       await supabase.from('order_items').insert(orderItems.map(i => ({
@@ -693,8 +720,7 @@ export default function Orders() {
   }
 
   async function updateStatus(id, status) {
-    const { error } = await supabase.from('orders').update({ status }).eq('id', id)
-    if (error) { alert('Status update failed: ' + error.message); return }
+    await supabase.from('orders').update({ status }).eq('id', id)
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o))
     if (viewOrder?.id === id) setViewOrder(v => ({ ...v, status }))
   }
@@ -702,25 +728,33 @@ export default function Orders() {
   async function exportOrderSheet(includePricing) {
     setExportLoading(true)
     try {
-      const sheetOrders = orders.filter(o => o.status === 'order_sheet')
-      if (!sheetOrders.length) { alert('No orders with "Order Sheet" status to export.'); setExportLoading(false); return }
-      const now = new Date()
-      const weekLabel = `${now.toLocaleString('en-CA', { month: 'long' })} ${now.getFullYear()}`
+      const sheetOrders = orders.filter(o => o.status !== 'archived' && isCurrentWeekOrder(o))
+      if (!sheetOrders.length) { alert('No active orders for this week to export.'); setExportLoading(false); return }
+      const weekLabel = getWeekLabel()
       const wb = XLSX.utils.book_new()
       buildRetailSheet(wb, sheetOrders, includePricing, weekLabel)
       buildBulkSheet(wb, sheetOrders, weekLabel)
       const suffix = includePricing ? 'FULL' : 'TEAM'
-      XLSX.writeFile(wb, `KK_Order_Sheet_${weekLabel.replace(' ', '_')}_${suffix}.xlsx`)
+      const fileLabel = weekLabel.replace(/[^a-zA-Z0-9]/g, '_')
+      XLSX.writeFile(wb, `KK_Order_Sheet_${fileLabel}_${suffix}.xlsx`)
     } catch(err) { alert('Export failed: ' + err.message) }
     setExportLoading(false)
   }
 
-  const activeOrders = orders.filter(o => o.status === 'received' || o.status === 'order_sheet')
+  async function resetWeek() {
+    const weekLabel = getWeekLabel()
+    if (!window.confirm(`Archive all active orders for week of ${weekLabel} and start fresh?\n\nNext-week orders will NOT be affected.`)) return
+    const currentWeekOrders = orders.filter(o => o.status !== 'archived' && isCurrentWeekOrder(o))
+    if (!currentWeekOrders.length) { alert('No active orders for this week to archive.'); return }
+    const ids = currentWeekOrders.map(o => o.id)
+    const { error } = await supabase.from('orders').update({ status: 'archived' }).in('id', ids)
+    if (error) { alert('Reset failed: ' + error.message); return }
+    await loadData()
+  }
+
+  const activeOrders = orders.filter(o => o.status !== 'archived')
   const archivedOrders = orders.filter(o => o.status === 'archived')
-  const filtered = filterStatus === 'archived' ? archivedOrders : activeOrders
-  const filteredByStatus = filterStatus === 'received' ? activeOrders.filter(o => o.status === 'received')
-    : filterStatus === 'order_sheet' ? activeOrders.filter(o => o.status === 'order_sheet')
-    : filtered
+  const filteredByStatus = filterStatus === 'archived' ? archivedOrders : activeOrders
 
   const sel = { padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', width: '100%', outline: 'none' }
 
@@ -733,30 +767,33 @@ export default function Orders() {
 
       <div className="page-body">
         <div className="grid2" style={{ marginBottom: 16, maxWidth: 400 }}>
-          <div className="stat blue"><div className="stat-label">Received</div><div className="stat-value">{orders.filter(o => o.status === 'received').length}</div></div>
-          <div className="stat green"><div className="stat-label">Order Sheet</div><div className="stat-value">{orders.filter(o => o.status === 'order_sheet').length}</div></div>
+          <div className="stat green"><div className="stat-label">Active Orders</div><div className="stat-value">{orders.filter(o => o.status !== 'archived').length}</div></div>
+          <div className="stat purple"><div className="stat-label">Archived</div><div className="stat-value">{orders.filter(o => o.status === 'archived').length}</div></div>
         </div>
 
         {isAdmin && (
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title">📊 Order Sheet Export
               <span style={{ fontSize:11, color:'var(--ink3)', fontWeight:400 }}>
-                {orders.filter(o => o.status === 'order_sheet').length} orders ready
+                Week of {getWeekLabel()} · {orders.filter(o => o.status !== 'archived' && isCurrentWeekOrder(o)).length} orders
               </span>
             </div>
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>
               <button className="btn btn-green" onClick={() => exportOrderSheet(true)} disabled={exportLoading}>
                 {exportLoading ? '⏳ Generating...' : '📥 Export Full (with pricing)'}
               </button>
               <button className="btn btn-secondary" onClick={() => exportOrderSheet(false)} disabled={exportLoading}>
                 {exportLoading ? '⏳ Generating...' : '📥 Export Team Sheet'}
               </button>
+              <button className="btn btn-red" onClick={resetWeek} disabled={exportLoading} style={{ marginLeft:'auto' }}>
+                🗄 Reset Week
+              </button>
             </div>
           </div>
         )}
 
         <div className="filter-bar">
-          {[{ key:'active',label:'All Active' },{ key:'received',label:'Received' },{ key:'order_sheet',label:'Order Sheet' },{ key:'archived',label:'Archived' }].map(f => (
+          {[{ key:'active',label:'All Active' },{ key:'archived',label:'Archived' }].map(f => (
             <button key={f.key} className={`filter-btn ${filterStatus===f.key?'active':''}`} onClick={() => setFilterStatus(f.key)}>{f.label}</button>
           ))}
         </div>
@@ -960,20 +997,12 @@ export default function Orders() {
             </div>
             {isAdmin && (
               <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
-                {Object.entries(STATUS_LABELS).map(([k,v]) => {
-                  const isCurrent = viewOrder.status === k
-                  const isDisabled = k === 'received' && viewOrder.status !== 'received'
-                  return (
-                    <button key={k} onClick={() => !isDisabled && !isCurrent && updateStatus(viewOrder.id, k)} style={{
-                      padding:'6px 14px', borderRadius:20, border:'1px solid var(--border)',
-                      cursor: isDisabled ? 'not-allowed' : isCurrent ? 'default' : 'pointer',
-                      fontSize:11, fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',
-                      background: isCurrent ? 'var(--kk-green)' : 'var(--surface)',
-                      color: isCurrent ? 'var(--kk-cream)' : isDisabled ? '#ccc' : 'var(--ink3)',
-                      opacity: isDisabled ? 0.4 : 1,
-                    }}>{v}</button>
-                  )
-                })}
+                <button onClick={() => updateStatus(viewOrder.id, viewOrder.status === 'archived' ? 'order_sheet' : 'archived')} style={{
+                  padding:'6px 14px', borderRadius:20, border:'1px solid var(--border)', cursor:'pointer',
+                  fontSize:11, fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',
+                  background: viewOrder.status === 'archived' ? '#7e57c2' : 'var(--surface)',
+                  color: viewOrder.status === 'archived' ? '#fff' : 'var(--ink3)',
+                }}>{viewOrder.status === 'archived' ? '↩ Unarchive' : '🗄 Archive'}</button>
               </div>
             )}
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16, fontSize:12 }}>
@@ -1048,9 +1077,8 @@ export default function Orders() {
             <div className="field">
               <label>Status</label>
               <select style={sel} value={editingOrder.status} onChange={e => setEditingOrder(o=>({...o,status:e.target.value}))}>
-                {Object.entries(STATUS_LABELS).map(([k,v]) => (
-                <option key={k} value={k} disabled={k === 'received' && editingOrder.status !== 'received'}>{v}</option>
-              ))}
+                <option value="order_sheet">Active</option>
+                <option value="archived">Archived</option>
               </select>
             </div>
             <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>

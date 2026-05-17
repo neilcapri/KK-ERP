@@ -693,7 +693,8 @@ export default function Orders() {
   }
 
   async function updateStatus(id, status) {
-    await supabase.from('orders').update({ status }).eq('id', id)
+    const { error } = await supabase.from('orders').update({ status }).eq('id', id)
+    if (error) { alert('Status update failed: ' + error.message); return }
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o))
     if (viewOrder?.id === id) setViewOrder(v => ({ ...v, status }))
   }

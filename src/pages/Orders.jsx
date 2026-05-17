@@ -959,14 +959,20 @@ export default function Orders() {
             </div>
             {isAdmin && (
               <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
-                {Object.entries(STATUS_LABELS).map(([k,v]) => (
-                  <button key={k} onClick={() => updateStatus(viewOrder.id, k)} style={{
-                    padding:'6px 14px', borderRadius:20, border:'1px solid var(--border)', cursor:'pointer',
-                    fontSize:11, fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',
-                    background: viewOrder.status===k ? 'var(--kk-green)' : 'var(--surface)',
-                    color: viewOrder.status===k ? 'var(--kk-cream)' : 'var(--ink3)',
-                  }}>{v}</button>
-                ))}
+                {Object.entries(STATUS_LABELS).map(([k,v]) => {
+                  const isCurrent = viewOrder.status === k
+                  const isDisabled = k === 'received' && viewOrder.status !== 'received'
+                  return (
+                    <button key={k} onClick={() => !isDisabled && !isCurrent && updateStatus(viewOrder.id, k)} style={{
+                      padding:'6px 14px', borderRadius:20, border:'1px solid var(--border)',
+                      cursor: isDisabled ? 'not-allowed' : isCurrent ? 'default' : 'pointer',
+                      fontSize:11, fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',
+                      background: isCurrent ? 'var(--kk-green)' : 'var(--surface)',
+                      color: isCurrent ? 'var(--kk-cream)' : isDisabled ? '#ccc' : 'var(--ink3)',
+                      opacity: isDisabled ? 0.4 : 1,
+                    }}>{v}</button>
+                  )
+                })}
               </div>
             )}
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16, fontSize:12 }}>
@@ -1041,7 +1047,9 @@ export default function Orders() {
             <div className="field">
               <label>Status</label>
               <select style={sel} value={editingOrder.status} onChange={e => setEditingOrder(o=>({...o,status:e.target.value}))}>
-                {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+                {Object.entries(STATUS_LABELS).map(([k,v]) => (
+                <option key={k} value={k} disabled={k === 'received' && editingOrder.status !== 'received'}>{v}</option>
+              ))}
               </select>
             </div>
             <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>

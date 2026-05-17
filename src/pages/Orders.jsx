@@ -1,14 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import * as XLSX from 'xlsx'
+import * as XLSX from 'xlsx-js-style'
 
-const STATUS_COLORS = {
-  received: 'blue', order_sheet: 'green', archived: 'purple'
-}
-const STATUS_LABELS = {
-  received: 'Received', order_sheet: 'Order Sheet', archived: 'Archived'
-}
+const STATUS_COLORS = { received: 'blue', order_sheet: 'green', archived: 'purple' }
+const STATUS_LABELS = { received: 'Received', order_sheet: 'Order Sheet', archived: 'Archived' }
 const DELIVERY_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
 
 const API_HEADERS = {
@@ -18,7 +14,6 @@ const API_HEADERS = {
   'anthropic-dangerous-direct-browser-access': 'true',
 }
 
-// ── Order Sheet column definitions ───────────────────────────
 const RETAIL_COLS = [
   { code: 'PBB', label: 'PBB' }, { code: 'PCC', label: 'PCC' }, { code: 'KLR', label: 'KLR' },
   { code: 'NACo-S', label: 'NACo Single' }, { code: 'NACo-D', label: 'NACo Double' },
@@ -50,68 +45,152 @@ const BULK_COLS = [
 
 const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
 
+// ── Style helpers ─────────────────────────────────────────────
+const S = {
+  KK_GREEN: '223824',
+  KK_CREAM: 'E3DDD1',
+  KK_PEACH: 'E79B81',
+  CAT_GREEN: '2D4A35',
+  TOTAL_BG: 'C8E6C9',
+  TOTAL_FG: '1B5E20',
+  DAY_BG: '223824',
+  ALT1: 'F2F5F2',
+  ALT2: 'FFFFFF',
+  QTY_FG: '1A3A20',
+  VAL_BG: 'E8F5E9',
+}
+
+function cellStyle(bg, fg, bold = false, size = 9, wrap = false, halign = 'center') {
+  return {
+    font: { name: 'Arial', sz: size, bold, color: { rgb: fg || '000000' } },
+    fill: { fgColor: { rgb: bg || 'FFFFFF' } },
+    alignment: { horizontal: halign, vertical: 'center', wrapText: wrap },
+    border: {
+      top: { style: 'thin', color: { rgb: 'CCCCCC' } },
+      bottom: { style: 'thin', color: { rgb: 'CCCCCC' } },
+      left: { style: 'thin', color: { rgb: 'CCCCCC' } },
+      right: { style: 'thin', color: { rgb: 'CCCCCC' } },
+    }
+  }
+}
+
+function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing) {
+  const encode = (r, c) => XLSX.utils.encode_cell({ r, c })
+
+  for (let r = 0; r < totalRows; r++) {
+    for (let c = 0; c < numCols; c++) {
+      const addr = encode(r, c)
+      if (!ws[addr]) ws[addr] = { v: '', t: 's' }
+
+      // Row 0: Title
+      if (r === 0) {
+        ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 12, false, c === 0 ? 'left' : 'center')
+        continue
+      }
+      // Row 1: Category headers
+      if (r === 1) {
+        ws[addr].s = cellStyle(S.CAT_GREEN, S.KK_CREAM, true, 8, false, 'center')
+        continue
+      }
+      // Row 2: Column headers
+      if (r === 2) {
+        if (c === 0) {
+          ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 9, true, 'left')
+        } else if (includePricing && c === numCols - 1) {
+          ws[addr].s = cellStyle(S.KK_PEACH, 'FFFFFF', true, 9, true, 'center')
+        } else {
+          ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 8, true, 'center')
+        }
+        continue
+      }
+      // Day header rows
+      if (dayRowIdxs.has(r)) {
+        ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, false, c === 0 ? 'left' : 'center')
+        continue
+      }
+      // Total rows
+      if (totalRowIdxs.has(r)) {
+        if (c === 0) {
+          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 9, false, 'left')
+        } else if (includePricing && c === numCols - 1) {
+          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 9, false, 'center')
+        } else {
+          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 9, false, 'center')
+        }
+        continue
+      }
+      // Store rows
+      if (storeRowIdxs.has(r)) {
+        const isAlt = [...storeRowIdxs].indexOf(r) % 2 === 0
+        const rowBg = isAlt ? S.ALT1 : S.ALT2
+        if (c === 0) {
+          ws[addr].s = cellStyle(rowBg, '000000', true, 9, false, 'left')
+        } else if (includePricing && c === numCols - 1) {
+          const hasVal = ws[addr].v && ws[addr].v !== ''
+          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 9, false, 'center')
+        } else if (c > 0 && ws[addr].v) {
+          ws[addr].s = cellStyle(rowBg, S.QTY_FG, true, 9, false, 'center')
+        } else {
+          ws[addr].s = cellStyle(rowBg, '999999', false, 9, false, 'center')
+        }
+        continue
+      }
+      // Blank gap rows
+      ws[addr].s = { fill: { fgColor: { rgb: 'FFFFFF' } } }
+    }
+  }
+}
+
 function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const ws = XLSX.utils.aoa_to_sheet([])
   const title = `KONSCIOUS KITCHEN — ORDER SHEET${weekLabel ? ' — ' + weekLabel : ''}`
   const numCols = RETAIL_COLS.length + 1 + (includePricing ? 1 : 0)
 
   const rows = []
-  // Row 1: Title
   const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push('')
   rows.push(titleRow)
 
-  // Row 2: Category groups
   const catGroups = [
     [3,'MUFFINS'], [4,'NATURES PL'], [3,'WHOLE CAKES'],
     [4,'BREAD & LOAVES'], [3,'DOUGHNUTS'], [1,'TARTS'], [3,'CAKE SLICES'],
     [9,'COOKIES'], [5,'BARS'], [4,'MINI CAKES'], [3,'NEW']
   ]
   const catRow = ['']
-  for (const [count, label] of catGroups) {
-    catRow.push(label)
-    for (let i = 1; i < count; i++) catRow.push('')
-  }
+  for (const [count, label] of catGroups) { catRow.push(label); for (let i = 1; i < count; i++) catRow.push('') }
   if (includePricing) catRow.push('')
   rows.push(catRow)
 
-  // Row 3: Column headers
   const headerRow = ['Store']
   for (const col of RETAIL_COLS) headerRow.push(`${col.label}\n(${col.code})`)
   if (includePricing) headerRow.push('ORDER VALUE ($)')
   rows.push(headerRow)
 
-  // Group orders by delivery day
   const byDay = {}
-  for (const o of orders) {
-    const day = o.delivery_day || 'Unknown'
-    if (!byDay[day]) byDay[day] = []
-    byDay[day].push(o)
-  }
+  for (const o of orders) { const day = o.delivery_day || 'Unknown'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
 
-  const merges = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }
-  ]
-
-  // Build category merges in row 2
+  const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
   let catColIdx = 1
   for (const [count] of catGroups) {
     if (count > 1) merges.push({ s: { r: 1, c: catColIdx }, e: { r: 1, c: catColIdx + count - 1 } })
     catColIdx += count
   }
 
+  const dayRowIdxs = new Set()
+  const totalRowIdxs = new Set()
+  const storeRowIdxs = new Set()
   let rowIdx = 3
 
   for (const day of DELIVERY_DAYS) {
     const dayOrders = byDay[day] || []
     if (!dayOrders.length) continue
 
-    const dayRow = [day.toUpperCase()]
-    for (let i = 1; i < numCols; i++) dayRow.push('')
+    const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
     rows.push(dayRow)
     merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: numCols - 1 } })
+    dayRowIdxs.add(rowIdx)
     rowIdx++
 
-    const storeStart = rowIdx + 1 // 1-indexed for Excel formulas
+    const storeStart = rowIdx + 1
 
     for (const order of dayOrders) {
       const items = order.order_items || []
@@ -131,10 +210,10 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
       }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
       rows.push(storeRow)
+      storeRowIdxs.add(rowIdx)
       rowIdx++
     }
 
-    // Totals row with SUM formulas
     const totalRow = ['TOTAL']
     for (let ci = 0; ci < RETAIL_COLS.length; ci++) {
       const colLetter = XLSX.utils.encode_col(ci + 1)
@@ -145,7 +224,8 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
       totalRow.push({ f: `SUM(${valCol}${storeStart}:${valCol}${rowIdx})` })
     }
     rows.push(totalRow)
-    rowIdx += 2 // total + blank gap
+    totalRowIdxs.add(rowIdx)
+    rowIdx += 2
   }
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
@@ -155,6 +235,8 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   if (includePricing) colWidths.push({ wch: 14 })
   ws['!cols'] = colWidths
   ws['!rows'] = [{ hpt: 22 }, { hpt: 14 }, { hpt: 48 }]
+
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing)
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
 }
 
@@ -172,37 +254,33 @@ function buildBulkSheet(wb, orders, weekLabel) {
   rows.push(headerRow)
 
   const byDay = {}
-  for (const o of orders) {
-    const day = o.delivery_day || 'Unknown'
-    if (!byDay[day]) byDay[day] = []
-    byDay[day].push(o)
-  }
+  for (const o of orders) { const day = o.delivery_day || 'Unknown'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
 
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
+  const dayRowIdxs = new Set()
+  const totalRowIdxs = new Set()
+  const storeRowIdxs = new Set()
   let rowIdx = 2
 
   for (const day of DELIVERY_DAYS) {
-    const dayOrders = (byDay[day] || []).filter(o =>
-      (o.order_items || []).some(item => BULK_CODES.has(item.product_code))
-    )
+    const dayOrders = (byDay[day] || []).filter(o => (o.order_items || []).some(item => BULK_CODES.has(item.product_code)))
     if (!dayOrders.length) continue
 
     const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
     rows.push(dayRow)
     merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: numCols - 1 } })
+    dayRowIdxs.add(rowIdx)
     rowIdx++
 
     const storeStart = rowIdx + 1
-
     for (const order of dayOrders) {
       const items = order.order_items || []
       const qtyMap = {}
-      for (const item of items) {
-        if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
-      }
+      for (const item of items) { if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0) }
       const storeRow = [order.customer_name]
       for (const col of BULK_COLS) storeRow.push(qtyMap[col.code] || null)
       rows.push(storeRow)
+      storeRowIdxs.add(rowIdx)
       rowIdx++
     }
 
@@ -212,17 +290,20 @@ function buildBulkSheet(wb, orders, weekLabel) {
       totalRow.push({ f: `SUM(${colLetter}${storeStart}:${colLetter}${rowIdx})` })
     }
     rows.push(totalRow)
+    totalRowIdxs.add(rowIdx)
     rowIdx += 2
   }
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
-  const colWidths = [{ wch: 32 }]
-  for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 10 })
+  const colWidths = [{ wch: 32 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 10 })
   ws['!cols'] = colWidths
   ws['!rows'] = [{ hpt: 22 }, { hpt: 48 }]
+
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, false)
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
 }
+
 
 // ── Case → Units helper ───────────────────────────────────────
 function getUnitsPerCase(product) { return product?.units_per_case || 6 }
@@ -622,12 +703,11 @@ export default function Orders() {
     try {
       const sheetOrders = orders.filter(o => o.status === 'order_sheet')
       if (!sheetOrders.length) { alert('No orders with "Order Sheet" status to export.'); setExportLoading(false); return }
-      const orders_to_export = sheetOrders
       const now = new Date()
       const weekLabel = `${now.toLocaleString('en-CA', { month: 'long' })} ${now.getFullYear()}`
       const wb = XLSX.utils.book_new()
-      buildRetailSheet(wb, orders_to_export, includePricing, weekLabel)
-      buildBulkSheet(wb, orders_to_export, weekLabel)
+      buildRetailSheet(wb, sheetOrders, includePricing, weekLabel)
+      buildBulkSheet(wb, sheetOrders, weekLabel)
       const suffix = includePricing ? 'FULL' : 'TEAM'
       XLSX.writeFile(wb, `KK_Order_Sheet_${weekLabel.replace(' ', '_')}_${suffix}.xlsx`)
     } catch(err) { alert('Export failed: ' + err.message) }
@@ -656,7 +736,6 @@ export default function Orders() {
           <div className="stat green"><div className="stat-label">Order Sheet</div><div className="stat-value">{orders.filter(o => o.status === 'order_sheet').length}</div></div>
         </div>
 
-        {/* Order Sheet Export — admin only */}
         {isAdmin && (
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title">📊 Order Sheet Export
@@ -716,7 +795,6 @@ export default function Orders() {
         </div>
       </div>
 
-      {/* ── NEW ORDER MODAL ── */}
       {showModal && (
         <div className="modal-bg" onClick={e => e.target===e.currentTarget && setShowModal(false)}>
           <div className="modal" style={{ maxWidth: 640 }}>
@@ -859,7 +937,6 @@ export default function Orders() {
         </div>
       )}
 
-      {/* ── VIEW ORDER MODAL ── */}
       {viewOrder && (
         <div className="modal-bg" onClick={e => e.target===e.currentTarget && setViewOrder(null)}>
           <div className="modal" style={{ maxWidth: 640 }}>
@@ -930,7 +1007,6 @@ export default function Orders() {
         </div>
       )}
 
-      {/* ── EDIT ORDER MODAL ── */}
       {editingOrder && (
         <div className="modal-bg" onClick={e => e.target===e.currentTarget && setEditingOrder(null)}>
           <div className="modal" style={{ maxWidth: 640 }}>

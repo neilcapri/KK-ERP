@@ -190,8 +190,6 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     dayRowIdxs.add(rowIdx)
     rowIdx++
 
-    const storeStart = rowIdx + 1
-
     for (const order of dayOrders) {
       const items = order.order_items || []
       const qtyMap = {}, priceMap = {}
@@ -214,15 +212,26 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
       rowIdx++
     }
 
-    const totalRow = ['TOTAL']
-    for (let ci = 0; ci < RETAIL_COLS.length; ci++) {
-      const colLetter = XLSX.utils.encode_col(ci + 1)
-      totalRow.push({ f: `SUM(${colLetter}${storeStart}:${colLetter}${rowIdx})` })
+    // Calculate column totals from store rows
+    const colTotals = new Array(RETAIL_COLS.length).fill(0)
+    let grandTotal = 0
+    for (const order of dayOrders) {
+      const items = order.order_items || []
+      const qtyMap = {}, priceMap = {}
+      for (const item of items) {
+        if (item.product_code) {
+          qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+          priceMap[item.product_code] = item.unit_price || 0
+        }
+      }
+      RETAIL_COLS.forEach((col, ci) => {
+        const qty = qtyMap[col.code] || 0
+        colTotals[ci] += qty
+        if (qty && priceMap[col.code]) grandTotal += qty * priceMap[col.code]
+      })
     }
-    if (includePricing) {
-      const valCol = XLSX.utils.encode_col(RETAIL_COLS.length + 1)
-      totalRow.push({ f: `SUM(${valCol}${storeStart}:${valCol}${rowIdx})` })
-    }
+    const totalRow = ['TOTAL', ...colTotals.map(v => v || null)]
+    if (includePricing) totalRow.push(grandTotal > 0 ? Math.round(grandTotal * 100) / 100 : null)
     rows.push(totalRow)
     totalRowIdxs.add(rowIdx)
     rowIdx += 2
@@ -284,11 +293,15 @@ function buildBulkSheet(wb, orders, weekLabel) {
       rowIdx++
     }
 
-    const totalRow = ['TOTAL']
-    for (let ci = 0; ci < BULK_COLS.length; ci++) {
-      const colLetter = XLSX.utils.encode_col(ci + 1)
-      totalRow.push({ f: `SUM(${colLetter}${storeStart}:${colLetter}${rowIdx})` })
+    // Calculate column totals from store rows
+    const bulkTotals = new Array(BULK_COLS.length).fill(0)
+    for (const order of dayOrders) {
+      const items = order.order_items || []
+      const qtyMap = {}
+      for (const item of items) { if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0) }
+      BULK_COLS.forEach((col, ci) => { bulkTotals[ci] += qtyMap[col.code] || 0 })
     }
+    const totalRow = ['TOTAL', ...bulkTotals.map(v => v || null)]
     rows.push(totalRow)
     totalRowIdxs.add(rowIdx)
     rowIdx += 2

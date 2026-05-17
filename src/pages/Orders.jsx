@@ -98,9 +98,8 @@ function printDispatchSlip(ordersInput) {
       </div>
       <table><thead><tr>
         <th>Product</th>
-        <th style="width:44px;text-align:center">Qty</th>
-        <th style="width:100px;background:#fffde7">Prod. Date</th>
-        <th style="width:80px">Notes</th>
+        <th style="width:70px;text-align:center">Qty</th>
+        <th style="width:110px;background:#fffde7">Prod. Date</th>
       </tr></thead><tbody>
       ${(order.order_items || []).map(item => {
         const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
@@ -109,7 +108,6 @@ function printDispatchSlip(ordersInput) {
           <td>${item.product_name}${item.product_code ? ` <span style="color:#888;font-size:8px">(${item.product_code})</span>` : ''}</td>
           <td style="text-align:center;font-weight:700">${cases} cs / ${item.quantity} u</td>
           <td style="background:#fffde7">&nbsp;</td>
-          <td>${item.notes || ''}</td>
         </tr>`}).join('')}
       </tbody></table>
     </div>`
@@ -141,8 +139,8 @@ function printDispatchSlip(ordersInput) {
     .logo { font-size: 16px; font-weight: 900; letter-spacing: 3px; color: #223824; }
     .logo-sub { font-size: 6px; letter-spacing: 2px; color: #888; }
     .slip-title { font-size: 12px; font-weight: 700; color: #223824; }
-    .slips-grid { display: grid; grid-template-columns: ${perPage === 1 ? '1fr' : '1fr 1fr'}; grid-template-rows: repeat(${perPage <= 2 ? perPage : Math.ceil(perPage/2)}, ${slipHeight}); gap: 6px; flex: 1; }
-    .order-block { border: 1px solid #ccc; border-radius: 3px; overflow: hidden; display: flex; flex-direction: column; }
+    .slips-grid { display: grid; grid-template-columns: ${perPage === 1 ? '1fr' : '1fr 1fr'}; gap: 8px; align-content: start; }
+    .order-block { border: 1px solid #ccc; border-radius: 3px; overflow: visible; display: flex; flex-direction: column; break-inside: avoid; }
     .order-header { background: #223824; color: #fff; padding: 5px 8px; display: flex; justify-content: space-between; align-items: flex-start; flex-shrink: 0; }
     .order-header strong { font-size: ${perPage === 4 ? '10px' : '11px'}; }
     .order-header span { font-size: 9px; opacity: 0.85; white-space: nowrap; }

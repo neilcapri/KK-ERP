@@ -307,11 +307,11 @@ function buildBulkSheet(wb, orders, weekLabel) {
 
 
 // ── Week helpers ──────────────────────────────────────────────
-function getCurrentWeekBounds() {
+function getWeekBounds(offset = 0) {
   const now = new Date()
-  const day = now.getDay() // 0=Sun, 1=Mon...
+  const day = now.getDay()
   const monday = new Date(now)
-  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1))
+  monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1) + (offset * 7))
   monday.setHours(0, 0, 0, 0)
   const sunday = new Date(monday)
   sunday.setDate(monday.getDate() + 6)
@@ -319,15 +319,15 @@ function getCurrentWeekBounds() {
   return { monday, sunday }
 }
 
-function getWeekLabel() {
-  const { monday, sunday } = getCurrentWeekBounds()
+function getWeekLabel(offset = 0) {
+  const { monday, sunday } = getWeekBounds(offset)
   const fmt = d => d.toLocaleString('en-CA', { month: 'short', day: 'numeric' })
   return `${fmt(monday)}–${fmt(sunday)}, ${monday.getFullYear()}`
 }
 
-function isCurrentWeekOrder(order) {
-  if (!order.dispatch_date) return true // no date = current week
-  const { monday, sunday } = getCurrentWeekBounds()
+function isWeekOrder(order, offset = 0) {
+  const { monday, sunday } = getWeekBounds(offset)
+  if (!order.dispatch_date) return offset === 0 // no date = current week only
   const d = new Date(order.dispatch_date + 'T00:00:00')
   return d >= monday && d <= sunday
 }
@@ -548,6 +548,7 @@ export default function Orders() {
   const [inputMode, setInputMode] = useState('upload')
   const [pasteText, setPasteText] = useState('')
   const [exportLoading, setExportLoading] = useState(false)
+  const [exportWeek, setExportWeek] = useState('current')
   const fileInputRef = useRef(null)
 
   const [form, setForm] = useState({
@@ -728,9 +729,10 @@ export default function Orders() {
   async function exportOrderSheet(includePricing) {
     setExportLoading(true)
     try {
-      const sheetOrders = orders.filter(o => o.status !== 'archived' && isCurrentWeekOrder(o))
-      if (!sheetOrders.length) { alert('No active orders for this week to export.'); setExportLoading(false); return }
-      const weekLabel = getWeekLabel()
+      const offset = exportWeek === 'next' ? 1 : 0
+      const sheetOrders = orders.filter(o => o.status !== 'archived' && isWeekOrder(o, offset))
+      if (!sheetOrders.length) { alert(`No active orders for ${exportWeek === 'next' ? 'next' : 'this'} week.`); setExportLoading(false); return }
+      const weekLabel = getWeekLabel(offset)
       const wb = XLSX.utils.book_new()
       buildRetailSheet(wb, sheetOrders, includePricing, weekLabel)
       buildBulkSheet(wb, sheetOrders, weekLabel)
@@ -742,9 +744,9 @@ export default function Orders() {
   }
 
   async function resetWeek() {
-    const weekLabel = getWeekLabel()
+    const weekLabel = getWeekLabel(0)
     if (!window.confirm(`Archive all active orders for week of ${weekLabel} and start fresh?\n\nNext-week orders will NOT be affected.`)) return
-    const currentWeekOrders = orders.filter(o => o.status !== 'archived' && isCurrentWeekOrder(o))
+    const currentWeekOrders = orders.filter(o => o.status !== 'archived' && isWeekOrder(o, 0))
     if (!currentWeekOrders.length) { alert('No active orders for this week to archive.'); return }
     const ids = currentWeekOrders.map(o => o.id)
     const { error } = await supabase.from('orders').update({ status: 'archived' }).in('id', ids)
@@ -773,9 +775,15 @@ export default function Orders() {
 
         {isAdmin && (
           <div className="card" style={{ marginBottom: 16 }}>
-            <div className="card-title">📊 Order Sheet Export
-              <span style={{ fontSize:11, color:'var(--ink3)', fontWeight:400 }}>
-                Week of {getWeekLabel()} · {orders.filter(o => o.status !== 'archived' && isCurrentWeekOrder(o)).length} orders
+            <div className="card-title">📊 Order Sheet Export</div>
+            <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:12, flexWrap:'wrap' }}>
+              <select style={{ ...sel, width:'auto', fontSize:12, padding:'6px 12px' }}
+                value={exportWeek} onChange={e => setExportWeek(e.target.value)}>
+                <option value="current">This Week ({getWeekLabel(0)})</option>
+                <option value="next">Next Week ({getWeekLabel(1)})</option>
+              </select>
+              <span style={{ fontSize:11, color:'var(--ink3)' }}>
+                {orders.filter(o => o.status !== 'archived' && isWeekOrder(o, exportWeek === 'next' ? 1 : 0)).length} orders
               </span>
             </div>
             <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>

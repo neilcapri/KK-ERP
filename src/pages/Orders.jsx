@@ -620,17 +620,14 @@ export default function Orders() {
   async function exportOrderSheet(includePricing) {
     setExportLoading(true)
     try {
-      const { data: sheetOrders } = await supabase
-        .from('orders').select('*, order_items(*)')
-        .eq('status', 'order_sheet')
-        .order('delivery_day', { ascending: true })
-      const orders = sheetOrders || []
-      if (!orders.length) { alert('No orders with "Order Sheet" status to export.'); setExportLoading(false); return }
+      const sheetOrders = orders.filter(o => o.status === 'order_sheet')
+      if (!sheetOrders.length) { alert('No orders with "Order Sheet" status to export.'); setExportLoading(false); return }
+      const orders_to_export = sheetOrders
       const now = new Date()
       const weekLabel = `${now.toLocaleString('en-CA', { month: 'long' })} ${now.getFullYear()}`
       const wb = XLSX.utils.book_new()
-      buildRetailSheet(wb, orders, includePricing, weekLabel)
-      buildBulkSheet(wb, orders, weekLabel)
+      buildRetailSheet(wb, orders_to_export, includePricing, weekLabel)
+      buildBulkSheet(wb, orders_to_export, weekLabel)
       const suffix = includePricing ? 'FULL' : 'TEAM'
       XLSX.writeFile(wb, `KK_Order_Sheet_${weekLabel.replace(' ', '_')}_${suffix}.xlsx`)
     } catch(err) { alert('Export failed: ' + err.message) }

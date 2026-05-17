@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import * as XLSX from 'xlsx'
 
 const STATUS_COLORS = {
   received: 'blue', order_sheet: 'green', archived: 'purple'
@@ -17,33 +18,229 @@ const API_HEADERS = {
   'anthropic-dangerous-direct-browser-access': 'true',
 }
 
+// ── Order Sheet column definitions ───────────────────────────
+const RETAIL_COLS = [
+  { code: 'PBB', label: 'PBB' }, { code: 'PCC', label: 'PCC' }, { code: 'KLR', label: 'KLR' },
+  { code: 'NACo-S', label: 'NACo Single' }, { code: 'NACo-D', label: 'NACo Double' },
+  { code: 'NALCOB', label: 'NALCOB' }, { code: 'NBFB', label: 'NBFB' },
+  { code: 'TRFC', label: 'WTC' }, { code: 'KLRCKE', label: 'KLRCKE' }, { code: 'KCC', label: 'KCC' },
+  { code: 'PFB', label: 'PFB' }, { code: 'PVBB', label: 'PVBB' }, { code: 'KPL', label: 'KPL' }, { code: 'GBL', label: 'GBL' },
+  { code: 'KSCD', label: 'KSCD' }, { code: 'VPBD', label: 'VPBD' }, { code: 'KHD', label: 'KHD' },
+  { code: 'PCrt', label: 'PCrt' },
+  { code: 'VSCS', label: 'VSCS' }, { code: 'TRFCS', label: 'TRFCS' }, { code: 'HRCS', label: 'HRCS' },
+  { code: 'POS', label: 'POS' }, { code: 'PGCo', label: 'PGCo' }, { code: 'PVHC', label: 'PVHC' },
+  { code: 'HPCo', label: 'HPCo' }, { code: 'KCOC', label: 'KCCo' }, { code: 'KSCO', label: 'KSCo' },
+  { code: 'KAB', label: 'KAB' }, { code: 'KWAL', label: 'KWAL' }, { code: 'KABIS', label: 'KABIS' },
+  { code: 'PVBRG', label: 'PVBRG' }, { code: 'PVBR', label: 'PVBr' }, { code: 'VPCAN', label: 'VPCAN' },
+  { code: 'PNF', label: 'PNF' }, { code: 'VPB', label: 'VPB' },
+  { code: 'TMC', label: 'TMC' }, { code: 'PRMC', label: 'PRMC' }, { code: 'CMC', label: 'CMC' }, { code: 'LMC', label: 'LMC' },
+  { code: 'CCB', label: 'CCB' }, { code: 'SFNL', label: 'SFNL' }, { code: 'CCBS', label: 'CCBS' },
+]
+
+const BULK_COLS = [
+  { code: 'CKTC', label: 'Keto Choc Cup' }, { code: 'CKTV', label: 'Keto Van Cup' },
+  { code: 'CKLR', label: 'KLR Cup' }, { code: 'CKAC', label: 'Almond Choc Cup' },
+  { code: 'CKHH', label: 'Hazelnut Cup' },
+  { code: 'PVBB', label: 'Banana Bread' }, { code: 'PVBBSL', label: 'BB Slice Unfrost' },
+  { code: 'PVBBSLF', label: 'BB Slice Frost' },
+  { code: 'KAB', label: 'KAB' }, { code: 'KWAL', label: 'KWAL' }, { code: 'HPCo', label: 'HPCo' },
+  { code: 'PVHC', label: 'PVHC' }, { code: 'VPCAN', label: 'Pecan Bars' },
+  { code: 'VPB', label: 'Pistachio Bars' }, { code: 'PNF', label: "No'tella Bars" },
+]
+
+const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
+
+function buildRetailSheet(wb, orders, includePricing, weekLabel) {
+  const ws = XLSX.utils.aoa_to_sheet([])
+  const title = `KONSCIOUS KITCHEN — ORDER SHEET${weekLabel ? ' — ' + weekLabel : ''}`
+  const numCols = RETAIL_COLS.length + 1 + (includePricing ? 1 : 0)
+
+  const rows = []
+  // Row 1: Title
+  const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push('')
+  rows.push(titleRow)
+
+  // Row 2: Category groups
+  const catGroups = [
+    [3,'MUFFINS'], [4,'NATURES PL'], [3,'WHOLE CAKES'],
+    [4,'BREAD & LOAVES'], [3,'DOUGHNUTS'], [1,'TARTS'], [3,'CAKE SLICES'],
+    [9,'COOKIES'], [5,'BARS'], [4,'MINI CAKES'], [3,'NEW']
+  ]
+  const catRow = ['']
+  for (const [count, label] of catGroups) {
+    catRow.push(label)
+    for (let i = 1; i < count; i++) catRow.push('')
+  }
+  if (includePricing) catRow.push('')
+  rows.push(catRow)
+
+  // Row 3: Column headers
+  const headerRow = ['Store']
+  for (const col of RETAIL_COLS) headerRow.push(`${col.label}\n(${col.code})`)
+  if (includePricing) headerRow.push('ORDER VALUE ($)')
+  rows.push(headerRow)
+
+  // Group orders by delivery day
+  const byDay = {}
+  for (const o of orders) {
+    const day = o.delivery_day || 'Unknown'
+    if (!byDay[day]) byDay[day] = []
+    byDay[day].push(o)
+  }
+
+  const merges = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }
+  ]
+
+  // Build category merges in row 2
+  let catColIdx = 1
+  for (const [count] of catGroups) {
+    if (count > 1) merges.push({ s: { r: 1, c: catColIdx }, e: { r: 1, c: catColIdx + count - 1 } })
+    catColIdx += count
+  }
+
+  let rowIdx = 3
+
+  for (const day of DELIVERY_DAYS) {
+    const dayOrders = byDay[day] || []
+    if (!dayOrders.length) continue
+
+    const dayRow = [day.toUpperCase()]
+    for (let i = 1; i < numCols; i++) dayRow.push('')
+    rows.push(dayRow)
+    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: numCols - 1 } })
+    rowIdx++
+
+    const storeStart = rowIdx + 1 // 1-indexed for Excel formulas
+
+    for (const order of dayOrders) {
+      const items = order.order_items || []
+      const qtyMap = {}, priceMap = {}
+      for (const item of items) {
+        if (item.product_code) {
+          qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+          priceMap[item.product_code] = item.unit_price || 0
+        }
+      }
+      const storeRow = [order.customer_name]
+      let rowTotal = 0
+      for (const col of RETAIL_COLS) {
+        const qty = qtyMap[col.code]
+        storeRow.push(qty || null)
+        if (qty && priceMap[col.code]) rowTotal += qty * priceMap[col.code]
+      }
+      if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
+      rows.push(storeRow)
+      rowIdx++
+    }
+
+    // Totals row with SUM formulas
+    const totalRow = ['TOTAL']
+    for (let ci = 0; ci < RETAIL_COLS.length; ci++) {
+      const colLetter = XLSX.utils.encode_col(ci + 1)
+      totalRow.push({ f: `SUM(${colLetter}${storeStart}:${colLetter}${rowIdx})` })
+    }
+    if (includePricing) {
+      const valCol = XLSX.utils.encode_col(RETAIL_COLS.length + 1)
+      totalRow.push({ f: `SUM(${valCol}${storeStart}:${valCol}${rowIdx})` })
+    }
+    rows.push(totalRow)
+    rowIdx += 2 // total + blank gap
+  }
+
+  XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
+  ws['!merges'] = merges
+  const colWidths = [{ wch: 32 }]
+  for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 7 })
+  if (includePricing) colWidths.push({ wch: 14 })
+  ws['!cols'] = colWidths
+  ws['!rows'] = [{ hpt: 22 }, { hpt: 14 }, { hpt: 48 }]
+  XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
+}
+
+function buildBulkSheet(wb, orders, weekLabel) {
+  const ws = XLSX.utils.aoa_to_sheet([])
+  const title = `KONSCIOUS KITCHEN — BULK ORDERS${weekLabel ? ' — ' + weekLabel : ''}`
+  const numCols = BULK_COLS.length + 1
+
+  const rows = []
+  const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push('')
+  rows.push(titleRow)
+
+  const headerRow = ['Store']
+  for (const col of BULK_COLS) headerRow.push(`${col.label}\n(${col.code})`)
+  rows.push(headerRow)
+
+  const byDay = {}
+  for (const o of orders) {
+    const day = o.delivery_day || 'Unknown'
+    if (!byDay[day]) byDay[day] = []
+    byDay[day].push(o)
+  }
+
+  const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
+  let rowIdx = 2
+
+  for (const day of DELIVERY_DAYS) {
+    const dayOrders = (byDay[day] || []).filter(o =>
+      (o.order_items || []).some(item => BULK_CODES.has(item.product_code))
+    )
+    if (!dayOrders.length) continue
+
+    const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
+    rows.push(dayRow)
+    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: numCols - 1 } })
+    rowIdx++
+
+    const storeStart = rowIdx + 1
+
+    for (const order of dayOrders) {
+      const items = order.order_items || []
+      const qtyMap = {}
+      for (const item of items) {
+        if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+      }
+      const storeRow = [order.customer_name]
+      for (const col of BULK_COLS) storeRow.push(qtyMap[col.code] || null)
+      rows.push(storeRow)
+      rowIdx++
+    }
+
+    const totalRow = ['TOTAL']
+    for (let ci = 0; ci < BULK_COLS.length; ci++) {
+      const colLetter = XLSX.utils.encode_col(ci + 1)
+      totalRow.push({ f: `SUM(${colLetter}${storeStart}:${colLetter}${rowIdx})` })
+    }
+    rows.push(totalRow)
+    rowIdx += 2
+  }
+
+  XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
+  ws['!merges'] = merges
+  const colWidths = [{ wch: 32 }]
+  for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 10 })
+  ws['!cols'] = colWidths
+  ws['!rows'] = [{ hpt: 22 }, { hpt: 48 }]
+  XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
+}
 
 // ── Case → Units helper ───────────────────────────────────────
-function getUnitsPerCase(product) {
-  return product?.units_per_case || 6
-}
-function casesToUnits(cases, product) {
-  return parseFloat(cases) * getUnitsPerCase(product)
-}
+function getUnitsPerCase(product) { return product?.units_per_case || 6 }
 
 // ── Customer Combobox ─────────────────────────────────────────
 function CustomerSelect({ customers, value, onChange, onAddNew }) {
   const [search, setSearch] = useState(value || '')
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
-
   useEffect(() => {
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
-
   const filtered = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 20)
-
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <input
-        value={search}
+      <input value={search}
         onChange={e => { setSearch(e.target.value); setOpen(true); onChange('') }}
         onFocus={() => setOpen(true)}
         placeholder="Search or select customer..."
@@ -71,19 +268,12 @@ function CustomerSelect({ customers, value, onChange, onAddNew }) {
   )
 }
 
-// ── Dispatch Slip Print — smart 4/3/2 per A4 ─────────────────
+// ── Dispatch Slip Print ───────────────────────────────────────
 function printDispatchSlip(ordersInput) {
-  // Determine how many slips fit per page based on total item count
   const totalItems = ordersInput.reduce((s, o) => s + (o.order_items?.length || 0), 0)
   const perPage = totalItems <= 16 ? 4 : totalItems <= 24 ? 3 : 2
-
-  // Split orders into pages
   const pages = []
-  for (let i = 0; i < ordersInput.length; i += perPage) {
-    pages.push(ordersInput.slice(i, i + perPage))
-  }
-
-  const slipHeight = perPage === 4 ? '23%' : perPage === 3 ? '31%' : '47%'
+  for (let i = 0; i < ordersInput.length; i += perPage) pages.push(ordersInput.slice(i, i + perPage))
   const fontSize = perPage === 4 ? '9px' : '10px'
   const tdPad = perPage === 4 ? '4px 8px' : '6px 10px'
 
@@ -103,8 +293,7 @@ function printDispatchSlip(ordersInput) {
       </tr></thead><tbody>
       ${(order.order_items || []).map(item => {
         const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
-        return `
-        <tr>
+        return `<tr>
           <td>${item.product_name}${item.product_code ? ` <span style="color:#888;font-size:8px">(${item.product_code})</span>` : ''}</td>
           <td style="text-align:center;font-weight:700">${cases} cs / ${item.quantity} u</td>
           <td style="background:#fffde7">&nbsp;</td>
@@ -115,18 +304,13 @@ function printDispatchSlip(ordersInput) {
   const renderPage = (pageOrders, pageNum, total) => `
     <div class="page">
       <div class="page-header">
-        <div>
-          <div class="logo">KK ERP</div>
-          <div class="logo-sub">KONSCIOUS KITCHEN</div>
-        </div>
+        <div><div class="logo">KK ERP</div><div class="logo-sub">KONSCIOUS KITCHEN</div></div>
         <div style="text-align:right">
           <div class="slip-title">DISPATCH SLIP</div>
           <div style="font-size:9px;color:#888">Page ${pageNum}/${total} · ${new Date().toLocaleDateString('en-CA')}</div>
         </div>
       </div>
-      <div class="slips-grid">
-        ${pageOrders.map(renderOrder).join('')}
-      </div>
+      <div class="slips-grid">${pageOrders.map(renderOrder).join('')}</div>
       <div class="footer">Konscious Kitchen · MAD CLEAN INGREDIENTS · konsciouskitchen.com</div>
     </div>`
 
@@ -144,14 +328,11 @@ function printDispatchSlip(ordersInput) {
     .order-header { background: #223824; color: #fff; padding: 5px 8px; display: flex; justify-content: space-between; align-items: flex-start; flex-shrink: 0; }
     .order-header strong { font-size: ${perPage === 4 ? '10px' : '11px'}; }
     .order-header span { font-size: 9px; opacity: 0.85; white-space: nowrap; }
-    table { width: 100%; border-collapse: collapse; flex: 1; }
+    table { width: 100%; border-collapse: collapse; }
     th { background: #f0f4f0; padding: ${tdPad}; text-align: left; font-size: 8px; letter-spacing: 0.5px; text-transform: uppercase; color: #555; border-bottom: 1px solid #ddd; }
     td { padding: ${tdPad}; border-bottom: 1px solid #eee; font-size: ${fontSize}; vertical-align: middle; }
     .footer { font-size: 8px; color: #bbb; text-align: center; padding-top: 6px; border-top: 1px solid #eee; margin-top: 6px; }
-    @media print {
-      body { margin: 0; }
-      .page { page-break-after: always; }
-    }
+    @media print { body { margin: 0; } .page { page-break-after: always; } }
   </style></head><body>
     ${pages.map((pg, i) => renderPage(pg, i+1, pages.length)).join('')}
   </body></html>`
@@ -166,7 +347,6 @@ function printDispatchSlip(ordersInput) {
 async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '') {
   const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
   const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
-
   const prompt = `You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list using smart semantic understanding.
 
 OUR PRODUCT LIST:
@@ -220,7 +400,6 @@ Return ONLY a JSON array:
 Return ONLY the JSON array, no other text.`
 
   const isPDF = fileType === 'application/pdf'
-
   const messages = isImage
     ? [{ role: 'user', content: [
         isPDF
@@ -231,16 +410,14 @@ Return ONLY the JSON array, no other text.`
     : [{ role: 'user', content: `This is a customer order:\n\n${content}\n\n${prompt}` }]
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: API_HEADERS,
+    method: 'POST', headers: API_HEADERS,
     body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1000, messages })
   })
   const data = await response.json()
   if (!response.ok) throw new Error('API ' + response.status + ': ' + JSON.stringify(data))
   const text = data.content?.[0]?.text?.trim()
   if (!text) throw new Error('Empty response: ' + JSON.stringify(data))
-  const clean = text.replace(/```json|```/g, '').trim()
-  return JSON.parse(clean)
+  return JSON.parse(text.replace(/```json|```/g, '').trim())
 }
 
 // ── Main Orders Component ─────────────────────────────────────
@@ -262,6 +439,7 @@ export default function Orders() {
   const [saving, setSaving] = useState(false)
   const [inputMode, setInputMode] = useState('upload')
   const [pasteText, setPasteText] = useState('')
+  const [exportLoading, setExportLoading] = useState(false)
   const fileInputRef = useRef(null)
 
   const [form, setForm] = useState({
@@ -307,8 +485,7 @@ export default function Orders() {
     const enriched = matched.map(i => {
       const p = products.find(p => p.code === i.product_code)
       const upc = getUnitsPerCase(p)
-      const units = parseFloat(i.quantity) * upc
-      return { product_code: i.product_code, product_name: p?.name || i.product_name, cases: i.quantity, quantity: units, units_per_case: upc, unit_price: p?.price_per_unit || 0, notes: '' }
+      return { product_code: i.product_code, product_name: p?.name || i.product_name, cases: i.quantity, quantity: parseFloat(i.quantity) * upc, units_per_case: upc, unit_price: p?.price_per_unit || 0, notes: '' }
     })
     setOrderItems(enriched)
     setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
@@ -318,9 +495,7 @@ export default function Orders() {
     const file = e.target.files?.[0]
     if (!file) return
     setForm(f => ({ ...f, attachment: file, attachment_preview: URL.createObjectURL(file) }))
-    setAiLoading(true)
-    setOrderItems([])
-    setUnmatchedItems([])
+    setAiLoading(true); setOrderItems([]); setUnmatchedItems([])
     try {
       const base64 = await new Promise((res, rej) => {
         const reader = new FileReader()
@@ -328,43 +503,30 @@ export default function Orders() {
         reader.onerror = rej
         reader.readAsDataURL(file)
       })
-      const items = await readOrderWithAI(base64, products, form.customer_name, true, file.type)
-      processAIItems(items)
-    } catch(err) {
-      console.error('AI read failed', err)
-      alert('Error: ' + err.message)
-    }
+      processAIItems(await readOrderWithAI(base64, products, form.customer_name, true, file.type))
+    } catch(err) { alert('Error: ' + err.message) }
     setAiLoading(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   async function handlePasteRead() {
     if (!pasteText.trim()) { alert('Please paste order text first'); return }
-    setAiLoading(true)
-    setOrderItems([])
-    setUnmatchedItems([])
-    try {
-      const items = await readOrderWithAI(pasteText, products, form.customer_name, false)
-      processAIItems(items)
-    } catch(err) {
-      console.error('AI paste read failed', err)
-      alert('Error: ' + err.message)
-    }
+    setAiLoading(true); setOrderItems([]); setUnmatchedItems([])
+    try { processAIItems(await readOrderWithAI(pasteText, products, form.customer_name, false)) }
+    catch(err) { alert('Error: ' + err.message) }
     setAiLoading(false)
   }
 
   function handleUnmatchedSelect(idx, code) {
     const p = products.find(p => p.code === code)
     if (!p) return
-    const item = { product_code: code, product_name: p.name, quantity: unmatchedItems[idx].quantity, unit_price: p.price_per_unit || 0, notes: '' }
-    setOrderItems(prev => [...prev, item])
+    setOrderItems(prev => [...prev, { product_code: code, product_name: p.name, quantity: unmatchedItems[idx].quantity, unit_price: p.price_per_unit || 0, notes: '' }])
     setUnmatchedItems(prev => prev.filter((_, i) => i !== idx))
   }
 
   function updateItem(idx, field, val) { setOrderItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeItem(idx) { setOrderItems(prev => prev.filter((_, i) => i !== idx)) }
   function addManualItem() { setOrderItems(prev => [...prev, { product_code: '', product_name: '', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '' }]) }
-
   function updateEditItem(idx, field, val) { setEditItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeEditItem(idx) { setEditItems(prev => prev.filter((_, i) => i !== idx)) }
   function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '', isNew: true }]) }
@@ -381,32 +543,20 @@ export default function Orders() {
     try {
       const total = editItems.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price || 0)), 0)
       await supabase.from('orders').update({
-        delivery_day: editingOrder.delivery_day || null,
-        dispatch_date: editingOrder.dispatch_date || null,
-        po_number: editingOrder.po_number || null,
-        order_source: editingOrder.order_source,
-        notes: editingOrder.notes || null,
-        status: editingOrder.status,
-        total_value: total,
+        delivery_day: editingOrder.delivery_day || null, dispatch_date: editingOrder.dispatch_date || null,
+        po_number: editingOrder.po_number || null, order_source: editingOrder.order_source,
+        notes: editingOrder.notes || null, status: editingOrder.status, total_value: total,
         updated_at: new Date().toISOString(),
       }).eq('id', editingOrder.id)
       await supabase.from('order_items').delete().eq('order_id', editingOrder.id)
-      await supabase.from('order_items').insert(
-        editItems.map(i => ({
-          order_id: editingOrder.id, product_code: i.product_code || null,
-          product_name: i.product_name,
-          cases: parseFloat(i.cases || 1),
-          quantity: parseFloat(i.quantity),
-          units_per_case: parseInt(i.units_per_case || 6),
-          unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
-        }))
-      )
-      setEditingOrder(null)
-      setEditItems([])
+      await supabase.from('order_items').insert(editItems.map(i => ({
+        order_id: editingOrder.id, product_code: i.product_code || null, product_name: i.product_name,
+        cases: parseFloat(i.cases || 1), quantity: parseFloat(i.quantity),
+        units_per_case: parseInt(i.units_per_case || 6), unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
+      })))
+      setEditingOrder(null); setEditItems([])
       await loadData()
-    } catch(err) {
-      alert('Save failed: ' + err.message)
-    }
+    } catch(err) { alert('Save failed: ' + err.message) }
     setEditSaving(false)
   }
 
@@ -428,30 +578,21 @@ export default function Orders() {
       const { data: numData } = await supabase.rpc('generate_order_number')
       const order_number = numData || `KK${Date.now()}`
       const total = orderItems.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price || 0)), 0)
-
-      // Generate slip number
       const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true })
       const slipNum = 'SLIP-' + String((count || 0) + 1).padStart(3, '0')
-
       const { data: order, error } = await supabase.from('orders').insert({
         order_number, customer_id: form.customer_id || null, customer_name: form.customer_name,
         order_source: form.order_source, po_number: form.po_number || null,
         delivery_day: form.delivery_day || null, dispatch_date: form.dispatch_date || null,
         notes: form.notes || null, order_attachment_url: attachment_url,
-        total_value: total, status: 'received', created_by_name: profile?.name,
-        slip_number: slipNum,
+        total_value: total, status: 'received', created_by_name: profile?.name, slip_number: slipNum,
       }).select().single()
       if (error) throw error
-      await supabase.from('order_items').insert(
-        orderItems.map(i => ({
-          order_id: order.id, product_code: i.product_code || null,
-          product_name: i.product_name,
-          cases: parseFloat(i.cases || 1),
-          quantity: parseFloat(i.quantity),
-          units_per_case: parseInt(i.units_per_case || 6),
-          unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
-        }))
-      )
+      await supabase.from('order_items').insert(orderItems.map(i => ({
+        order_id: order.id, product_code: i.product_code || null, product_name: i.product_name,
+        cases: parseFloat(i.cases || 1), quantity: parseFloat(i.quantity),
+        units_per_case: parseInt(i.units_per_case || 6), unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
+      })))
       if (form.customer_id && form.delivery_day) {
         await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
       }
@@ -460,21 +601,14 @@ export default function Orders() {
         description: `${order_number} · ${slipNum} · ${orderItems.length} items · $${total.toFixed(2)}`,
         created_by_name: profile?.name,
       })
-      setShowModal(false)
-      resetForm()
-      await loadData()
-    } catch(err) {
-      alert('Save failed: ' + err.message)
-    }
+      setShowModal(false); resetForm(); await loadData()
+    } catch(err) { alert('Save failed: ' + err.message) }
     setSaving(false)
   }
 
   function resetForm() {
     setForm({ customer_id:'', customer_name:'', order_source:'Email', po_number:'', delivery_day:'', dispatch_date:'', notes:'', attachment:null, attachment_preview:null })
-    setOrderItems([])
-    setUnmatchedItems([])
-    setPasteText('')
-    setInputMode('upload')
+    setOrderItems([]); setUnmatchedItems([]); setPasteText(''); setInputMode('upload')
   }
 
   async function updateStatus(id, status) {
@@ -483,7 +617,26 @@ export default function Orders() {
     if (viewOrder?.id === id) setViewOrder(v => ({ ...v, status }))
   }
 
-  // Active = received + order_sheet, Archived = archived
+  async function exportOrderSheet(includePricing) {
+    setExportLoading(true)
+    try {
+      const { data: sheetOrders } = await supabase
+        .from('orders').select('*, order_items(*)')
+        .eq('status', 'order_sheet')
+        .order('delivery_day', { ascending: true })
+      const orders = sheetOrders || []
+      if (!orders.length) { alert('No orders with "Order Sheet" status to export.'); setExportLoading(false); return }
+      const now = new Date()
+      const weekLabel = `${now.toLocaleString('en-CA', { month: 'long' })} ${now.getFullYear()}`
+      const wb = XLSX.utils.book_new()
+      buildRetailSheet(wb, orders, includePricing, weekLabel)
+      buildBulkSheet(wb, orders, weekLabel)
+      const suffix = includePricing ? 'FULL' : 'TEAM'
+      XLSX.writeFile(wb, `KK_Order_Sheet_${weekLabel.replace(' ', '_')}_${suffix}.xlsx`)
+    } catch(err) { alert('Export failed: ' + err.message) }
+    setExportLoading(false)
+  }
+
   const activeOrders = orders.filter(o => o.status === 'received' || o.status === 'order_sheet')
   const archivedOrders = orders.filter(o => o.status === 'archived')
   const filtered = filterStatus === 'archived' ? archivedOrders : activeOrders
@@ -501,29 +654,33 @@ export default function Orders() {
       </div>
 
       <div className="page-body">
-        {/* Stats — just 2 */}
         <div className="grid2" style={{ marginBottom: 16, maxWidth: 400 }}>
-          <div className="stat blue">
-            <div className="stat-label">Received</div>
-            <div className="stat-value">{orders.filter(o => o.status === 'received').length}</div>
-          </div>
-          <div className="stat green">
-            <div className="stat-label">Order Sheet</div>
-            <div className="stat-value">{orders.filter(o => o.status === 'order_sheet').length}</div>
-          </div>
+          <div className="stat blue"><div className="stat-label">Received</div><div className="stat-value">{orders.filter(o => o.status === 'received').length}</div></div>
+          <div className="stat green"><div className="stat-label">Order Sheet</div><div className="stat-value">{orders.filter(o => o.status === 'order_sheet').length}</div></div>
         </div>
 
-        {/* Filter tabs */}
+        {/* Order Sheet Export — admin only */}
+        {isAdmin && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title">📊 Order Sheet Export
+              <span style={{ fontSize:11, color:'var(--ink3)', fontWeight:400 }}>
+                {orders.filter(o => o.status === 'order_sheet').length} orders ready
+              </span>
+            </div>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+              <button className="btn btn-green" onClick={() => exportOrderSheet(true)} disabled={exportLoading}>
+                {exportLoading ? '⏳ Generating...' : '📥 Export Full (with pricing)'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => exportOrderSheet(false)} disabled={exportLoading}>
+                {exportLoading ? '⏳ Generating...' : '📥 Export Team Sheet'}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="filter-bar">
-          {[
-            { key: 'active', label: 'All Active' },
-            { key: 'received', label: 'Received' },
-            { key: 'order_sheet', label: 'Order Sheet' },
-            { key: 'archived', label: 'Archived' },
-          ].map(f => (
-            <button key={f.key} className={`filter-btn ${filterStatus===f.key?'active':''}`} onClick={() => setFilterStatus(f.key)}>
-              {f.label}
-            </button>
+          {[{ key:'active',label:'All Active' },{ key:'received',label:'Received' },{ key:'order_sheet',label:'Order Sheet' },{ key:'archived',label:'Archived' }].map(f => (
+            <button key={f.key} className={`filter-btn ${filterStatus===f.key?'active':''}`} onClick={() => setFilterStatus(f.key)}>{f.label}</button>
           ))}
         </div>
 
@@ -568,13 +725,10 @@ export default function Orders() {
           <div className="modal" style={{ maxWidth: 640 }}>
             <button className="modal-close" onClick={() => { setShowModal(false); resetForm() }}>×</button>
             <div className="modal-title">NEW ORDER</div>
-
             <div className="field">
               <label>Customer</label>
-              <CustomerSelect customers={customers} value={form.customer_name}
-                onChange={handleCustomerChange} onAddNew={handleAddNewCustomer} />
+              <CustomerSelect customers={customers} value={form.customer_name} onChange={handleCustomerChange} onAddNew={handleAddNewCustomer} />
             </div>
-
             <div className="field-row">
               <div className="field" style={{ margin:0 }}>
                 <label>Order Source</label>
@@ -587,7 +741,6 @@ export default function Orders() {
                 <input style={sel} value={form.po_number} onChange={e => setForm(f=>({...f,po_number:e.target.value}))} placeholder="e.g. PO-12345" />
               </div>
             </div>
-
             <div className="field-row">
               <div className="field" style={{ margin:0 }}>
                 <label>Delivery Day</label>
@@ -601,7 +754,6 @@ export default function Orders() {
                 <input type="date" style={sel} value={form.dispatch_date} onChange={e => setForm(f=>({...f,dispatch_date:e.target.value}))} />
               </div>
             </div>
-
             <div className="field">
               <label>Order Input</label>
               <div style={{ display:'flex', gap:0, marginBottom:10, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
@@ -611,16 +763,12 @@ export default function Orders() {
                     fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',
                     background: inputMode===mode ? 'var(--kk-green)' : 'var(--surface)',
                     color: inputMode===mode ? 'var(--kk-cream)' : 'var(--ink3)',
-                  }}>
-                    {mode === 'upload' ? '📎 Upload' : '📋 Paste Text'}
-                  </button>
+                  }}>{mode === 'upload' ? '📎 Upload' : '📋 Paste Text'}</button>
                 ))}
               </div>
-
               {inputMode === 'upload' && (
                 <>
-                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf"
-                    onChange={handleAttachment} style={{ display:'none' }} />
+                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" onChange={handleAttachment} style={{ display:'none' }} />
                   <button className="btn btn-secondary btn-full" onClick={() => fileInputRef.current.click()}>
                     {form.attachment ? '📎 Change Attachment' : '📎 Upload Photo or PDF'}
                   </button>
@@ -632,45 +780,38 @@ export default function Orders() {
                   )}
                 </>
               )}
-
               {inputMode === 'paste' && (
                 <>
                   <textarea value={pasteText} onChange={e => setPasteText(e.target.value)}
                     placeholder="Paste the order email or text here..."
                     style={{ width:'100%', minHeight:120, padding:'10px 14px', border:'1.5px solid var(--border)', borderRadius:'var(--radius)', fontFamily:'var(--body)', fontSize:12, background:'var(--surface)', color:'var(--ink)', outline:'none', resize:'vertical', boxSizing:'border-box' }}
                   />
-                  <button className="btn btn-green btn-full" style={{ marginTop:8 }}
-                    onClick={handlePasteRead} disabled={aiLoading || !pasteText.trim()}>
+                  <button className="btn btn-green btn-full" style={{ marginTop:8 }} onClick={handlePasteRead} disabled={aiLoading || !pasteText.trim()}>
                     {aiLoading ? '⏳ Reading...' : '🤖 Read Order with AI'}
                   </button>
                 </>
               )}
             </div>
-
             {aiLoading && inputMode === 'upload' && (
               <div style={{ background:'var(--blue-l)', border:'1px solid var(--blue)', borderRadius:6, padding:'10px 14px', fontSize:12, color:'var(--blue)', marginBottom:12 }}>
                 ⏳ Reading order with AI...
               </div>
             )}
-
             {unmatchedItems.length > 0 && (
               <div style={{ background:'var(--amber-l)', border:'1px solid var(--amber)', borderRadius:6, padding:12, marginBottom:12 }}>
                 <div style={{ fontSize:12, fontWeight:700, color:'#9E5A3E', marginBottom:8 }}>⚠️ {unmatchedItems.length} item(s) not matched — please select manually:</div>
                 {unmatchedItems.map((item, idx) => (
                   <div key={idx} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6 }}>
                     <span style={{ fontSize:12, flex:1 }}>{item.product_name} × {item.quantity}</span>
-                    <select style={{ ...sel, width:'auto', flex:2, padding:'6px 10px' }}
-                      onChange={e => handleUnmatchedSelect(idx, e.target.value)} defaultValue="">
+                    <select style={{ ...sel, width:'auto', flex:2, padding:'6px 10px' }} onChange={e => handleUnmatchedSelect(idx, e.target.value)} defaultValue="">
                       <option value="">Select product...</option>
                       {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
                     </select>
-                    <button onClick={() => setUnmatchedItems(prev => prev.filter((_,i)=>i!==idx))}
-                      style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:16 }}>×</button>
+                    <button onClick={() => setUnmatchedItems(prev => prev.filter((_,i)=>i!==idx))} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:16 }}>×</button>
                   </div>
                 ))}
               </div>
             )}
-
             {orderItems.length > 0 && (
               <div style={{ marginBottom:12 }}>
                 <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
@@ -679,8 +820,7 @@ export default function Orders() {
                 {orderItems.map((item, idx) => (
                   <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
                     <div style={{ flex:3, minWidth:180 }}>
-                      <select style={{ ...sel, padding:'6px 10px', fontSize:12 }}
-                        value={item.product_code || ''}
+                      <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''}
                         onChange={e => {
                           const p = products.find(p => p.code === e.target.value)
                           updateItem(idx, 'product_code', p?.code || '')
@@ -696,35 +836,26 @@ export default function Orders() {
                       <input type="number" value={item.cases || item.quantity} onChange={e => {
                         const p = products.find(p => p.code === item.product_code)
                         const upc = getUnitsPerCase(p)
-                        const units = parseFloat(e.target.value) * upc
                         updateItem(idx, 'cases', e.target.value)
-                        updateItem(idx, 'quantity', units)
+                        updateItem(idx, 'quantity', parseFloat(e.target.value) * upc)
                         updateItem(idx, 'units_per_case', upc)
-                      }}
-                        style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
+                      }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
                       <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} units</span>
                     </div>
-                    <input type="text" value={item.notes || ''} placeholder="Notes"
-                      onChange={e => updateItem(idx,'notes',e.target.value)}
+                    <input type="text" value={item.notes || ''} placeholder="Notes" onChange={e => updateItem(idx,'notes',e.target.value)}
                       style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
-                    <button onClick={() => removeItem(idx)}
-                      style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>×</button>
+                    <button onClick={() => removeItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>×</button>
                   </div>
                 ))}
               </div>
             )}
-
             <button className="btn btn-secondary btn-sm" onClick={addManualItem} style={{ marginBottom:12 }}>+ Add Item Manually</button>
-
             <div className="field">
               <label>Notes</label>
               <textarea style={{ ...sel, minHeight:60 }} value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Special instructions..." />
             </div>
-
             <div style={{ display:'flex', gap:10 }}>
-              <button className="btn btn-green btn-full" onClick={saveOrder} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Order'}
-              </button>
+              <button className="btn btn-green btn-full" onClick={saveOrder} disabled={saving}>{saving ? 'Saving...' : 'Save Order'}</button>
               <button className="btn btn-secondary" onClick={() => { setShowModal(false); resetForm() }}>Cancel</button>
             </div>
           </div>
@@ -752,8 +883,6 @@ export default function Orders() {
                 {isAdmin && <button className="btn btn-red btn-sm" onClick={async () => { if(window.confirm('Delete order ' + viewOrder.order_number + '?')) { await supabase.from('orders').delete().eq('id', viewOrder.id); setViewOrder(null); await loadData(); }}}>🗑️ Delete</button>}
               </div>
             </div>
-
-            {/* Status toggle — just Received / Order Sheet / Archived */}
             {isAdmin && (
               <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
                 {Object.entries(STATUS_LABELS).map(([k,v]) => (
@@ -766,21 +895,17 @@ export default function Orders() {
                 ))}
               </div>
             )}
-
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16, fontSize:12 }}>
               <div><span style={{ color:'var(--ink3)' }}>Delivery Day:</span> <strong>{viewOrder.delivery_day || '—'}</strong></div>
               <div><span style={{ color:'var(--ink3)' }}>Dispatch Date:</span> <strong>{viewOrder.dispatch_date || '—'}</strong></div>
               {isAdmin && <div><span style={{ color:'var(--ink3)' }}>Total Value:</span> <strong style={{ color:'var(--kk-green)' }}>${(viewOrder.total_value||0).toFixed(2)}</strong></div>}
               <div><span style={{ color:'var(--ink3)' }}>Created by:</span> <strong>{viewOrder.created_by_name}</strong></div>
             </div>
-
             {viewOrder.order_attachment_url && (
               <div style={{ marginBottom:16 }}>
-                <a href={viewOrder.order_attachment_url} target="_blank" rel="noopener noreferrer"
-                  className="btn btn-secondary btn-sm">📎 View Original Order</a>
+                <a href={viewOrder.order_attachment_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">📎 View Original Order</a>
               </div>
             )}
-
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Product</th><th>Code</th><th>Cases</th><th>Units</th>{isAdmin && <th>Unit $</th>}{isAdmin && <th>Line Total</th>}<th>Notes</th></tr></thead>
@@ -799,7 +924,6 @@ export default function Orders() {
                 </tbody>
               </table>
             </div>
-
             {viewOrder.notes && (
               <div style={{ marginTop:12, padding:'10px 14px', background:'var(--surface2)', borderRadius:6, fontSize:12, color:'var(--ink2)' }}>
                 📝 {viewOrder.notes}
@@ -816,7 +940,6 @@ export default function Orders() {
             <button className="modal-close" onClick={() => setEditingOrder(null)}>×</button>
             <div className="modal-title">EDIT ORDER — {editingOrder.order_number}</div>
             <div style={{ fontSize:13, color:'var(--ink3)', marginBottom:16 }}>{editingOrder.customer_name} · {editingOrder.slip_number}</div>
-
             <div className="field-row">
               <div className="field" style={{ margin:0 }}>
                 <label>Order Source</label>
@@ -829,7 +952,6 @@ export default function Orders() {
                 <input style={sel} value={editingOrder.po_number || ''} onChange={e => setEditingOrder(o=>({...o,po_number:e.target.value}))} placeholder="e.g. PO-12345" />
               </div>
             </div>
-
             <div className="field-row">
               <div className="field" style={{ margin:0 }}>
                 <label>Delivery Day</label>
@@ -843,22 +965,19 @@ export default function Orders() {
                 <input type="date" style={sel} value={editingOrder.dispatch_date || ''} onChange={e => setEditingOrder(o=>({...o,dispatch_date:e.target.value}))} />
               </div>
             </div>
-
             <div className="field">
               <label>Status</label>
               <select style={sel} value={editingOrder.status} onChange={e => setEditingOrder(o=>({...o,status:e.target.value}))}>
                 {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
-
             <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
               Order Items ({editItems.length})
             </div>
             {editItems.map((item, idx) => (
               <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
                 <div style={{ flex:3, minWidth:180 }}>
-                  <select style={{ ...sel, padding:'6px 10px', fontSize:12 }}
-                    value={item.product_code || ''}
+                  <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''}
                     onChange={e => {
                       const p = products.find(p => p.code === e.target.value)
                       updateEditItem(idx, 'product_code', p?.code || '')
@@ -874,32 +993,24 @@ export default function Orders() {
                   <input type="number" value={item.cases || Math.round(item.quantity / (item.units_per_case || 6))} onChange={e => {
                     const p = products.find(p => p.code === item.product_code)
                     const upc = getUnitsPerCase(p)
-                    const units = parseFloat(e.target.value) * upc
                     updateEditItem(idx, 'cases', e.target.value)
-                    updateEditItem(idx, 'quantity', units)
+                    updateEditItem(idx, 'quantity', parseFloat(e.target.value) * upc)
                     updateEditItem(idx, 'units_per_case', upc)
-                  }}
-                    style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
+                  }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
                   <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} units</span>
                 </div>
-                <input type="text" value={item.notes || ''} placeholder="Notes"
-                  onChange={e => updateEditItem(idx,'notes',e.target.value)}
+                <input type="text" value={item.notes || ''} placeholder="Notes" onChange={e => updateEditItem(idx,'notes',e.target.value)}
                   style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
-                <button onClick={() => removeEditItem(idx)}
-                  style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>×</button>
+                <button onClick={() => removeEditItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>×</button>
               </div>
             ))}
             <button className="btn btn-secondary btn-sm" onClick={addEditItem} style={{ marginBottom:12 }}>+ Add Item</button>
-
             <div className="field">
               <label>Notes</label>
               <textarea style={{ ...sel, minHeight:60 }} value={editingOrder.notes || ''} onChange={e => setEditingOrder(o=>({...o,notes:e.target.value}))} placeholder="Special instructions..." />
             </div>
-
             <div style={{ display:'flex', gap:10 }}>
-              <button className="btn btn-green btn-full" onClick={saveEditOrder} disabled={editSaving}>
-                {editSaving ? 'Saving...' : 'Save Changes'}
-              </button>
+              <button className="btn btn-green btn-full" onClick={saveEditOrder} disabled={editSaving}>{editSaving ? 'Saving...' : 'Save Changes'}</button>
               <button className="btn btn-secondary" onClick={() => setEditingOrder(null)}>Cancel</button>
             </div>
           </div>

@@ -273,8 +273,8 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   }
   const grandTotalRow = ['GRAND TOTAL', ...grandColTotals.map(v => v || null)]
   if (includePricing) grandTotalRow.push(grandOrderTotal > 0 ? Math.round(grandOrderTotal * 100) / 100 : null)
+  const grandTotalIdx = rows.length
   rows.push(grandTotalRow)
-  const grandTotalIdx = rowIdx
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
@@ -351,8 +351,8 @@ function buildBulkSheet(wb, orders, weekLabel) {
     BULK_COLS.forEach((col, ci) => { grandBulkTotals[ci] += qtyMap[col.code] || 0 })
   }
   const grandTotalRow = ['GRAND TOTAL', ...grandBulkTotals.map(v => v || null)]
+  const grandTotalIdx = rows.length
   rows.push(grandTotalRow)
-  const grandTotalIdx = rowIdx
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges

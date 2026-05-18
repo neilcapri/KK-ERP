@@ -197,17 +197,15 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const dayRowIdxs = new Set()
   const totalRowIdxs = new Set()
   const storeRowIdxs = new Set()
-  let rowIdx = 3
 
   for (const day of DELIVERY_DAYS) {
     const dayOrders = byDay[day] || []
     if (!dayOrders.length) continue
 
     const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
+    dayRowIdxs.add(rows.length)
+    merges.push({ s: { r: rows.length, c: 0 }, e: { r: rows.length, c: numCols - 1 } })
     rows.push(dayRow)
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: numCols - 1 } })
-    dayRowIdxs.add(rowIdx)
-    rowIdx++
 
     for (const order of dayOrders) {
       const items = order.order_items || []
@@ -226,9 +224,8 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
         if (qty && priceMap[col.code]) rowTotal += qty * priceMap[col.code]
       }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
+      storeRowIdxs.add(rows.length)
       rows.push(storeRow)
-      storeRowIdxs.add(rowIdx)
-      rowIdx++
     }
 
     // Calculate column totals from store rows
@@ -251,9 +248,9 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     }
     const totalRow = ['TOTAL', ...colTotals.map(v => v || null)]
     if (includePricing) totalRow.push(grandTotal > 0 ? Math.round(grandTotal * 100) / 100 : null)
+    totalRowIdxs.add(rows.length)
     rows.push(totalRow)
-    totalRowIdxs.add(rowIdx)
-    rowIdx += 2
+    rows.push([]) // blank gap row
   }
 
   // ── Grand Total row ──────────────────────────────────────
@@ -311,28 +308,24 @@ function buildBulkSheet(wb, orders, weekLabel) {
   const dayRowIdxs = new Set()
   const totalRowIdxs = new Set()
   const storeRowIdxs = new Set()
-  let rowIdx = 2
 
   for (const day of DELIVERY_DAYS) {
     const dayOrders = (byDay[day] || []).filter(o => (o.order_items || []).some(item => BULK_CODES.has(item.product_code)))
     if (!dayOrders.length) continue
 
     const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
+    dayRowIdxs.add(rows.length)
+    merges.push({ s: { r: rows.length, c: 0 }, e: { r: rows.length, c: numCols - 1 } })
     rows.push(dayRow)
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: numCols - 1 } })
-    dayRowIdxs.add(rowIdx)
-    rowIdx++
 
-    const storeStart = rowIdx + 1
     for (const order of dayOrders) {
       const items = order.order_items || []
       const qtyMap = {}
       for (const item of items) { if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0) }
       const storeRow = [order.customer_name]
       for (const col of BULK_COLS) storeRow.push(qtyMap[col.code] || null)
+      storeRowIdxs.add(rows.length)
       rows.push(storeRow)
-      storeRowIdxs.add(rowIdx)
-      rowIdx++
     }
 
     // Calculate column totals from store rows
@@ -344,9 +337,9 @@ function buildBulkSheet(wb, orders, weekLabel) {
       BULK_COLS.forEach((col, ci) => { bulkTotals[ci] += qtyMap[col.code] || 0 })
     }
     const totalRow = ['TOTAL', ...bulkTotals.map(v => v || null)]
+    totalRowIdxs.add(rows.length)
     rows.push(totalRow)
-    totalRowIdxs.add(rowIdx)
-    rowIdx += 2
+    rows.push([]) // blank gap row
   }
 
   // ── Grand Total row ──────────────────────────────────────

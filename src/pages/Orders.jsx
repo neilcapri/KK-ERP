@@ -622,6 +622,7 @@ export default function Orders() {
     customer_id: '', customer_name: '', order_source: 'Email',
     po_number: '', delivery_day: '', dispatch_date: '',
     notes: '', attachment: null, attachment_preview: null,
+    order_input_mode: '',
   })
   const [orderItems, setOrderItems] = useState([])
   const [unmatchedItems, setUnmatchedItems] = useState([])
@@ -661,7 +662,10 @@ export default function Orders() {
     const enriched = matched.map(i => {
       const p = products.find(p => p.code === i.product_code)
       const upc = getUnitsPerCase(p)
-      return { product_code: i.product_code, product_name: p?.name || i.product_name, input_mode: 'cases', cases: i.quantity, quantity: parseFloat(i.quantity) * upc, units_per_case: upc, unit_price: p?.price_per_unit || 0, notes: '' }
+      const imode = form.order_input_mode || 'cases'
+      const qty = imode === 'cases' ? parseFloat(i.quantity) * upc : parseFloat(i.quantity)
+      const cs = imode === 'cases' ? i.quantity : null
+      return { product_code: i.product_code, product_name: p?.name || i.product_name, input_mode: imode, cases: cs, quantity: qty, units_per_case: upc, unit_price: p?.price_per_unit || 0, notes: '' }
     })
     setOrderItems(enriched)
     setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
@@ -702,7 +706,7 @@ export default function Orders() {
 
   function updateItem(idx, field, val) { setOrderItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeItem(idx) { setOrderItems(prev => prev.filter((_, i) => i !== idx)) }
-  function addManualItem() { setOrderItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'cases', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '' }]) }
+  function addManualItem() { const m = form.order_input_mode || 'cases'; setOrderItems(prev => [...prev, { product_code: '', product_name: '', input_mode: m, cases: m === 'cases' ? 1 : null, quantity: m === 'cases' ? 6 : 1, units_per_case: 6, unit_price: 0, notes: '' }]) }
   function updateEditItem(idx, field, val) { setEditItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeEditItem(idx) { setEditItems(prev => prev.filter((_, i) => i !== idx)) }
   function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'cases', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '', isNew: true }]) }
@@ -783,7 +787,7 @@ export default function Orders() {
   }
 
   function resetForm() {
-    setForm({ customer_id:'', customer_name:'', order_source:'Email', po_number:'', delivery_day:'', dispatch_date:'', notes:'', attachment:null, attachment_preview:null })
+    setForm({ customer_id:'', customer_name:'', order_source:'Email', po_number:'', delivery_day:'', dispatch_date:'', notes:'', attachment:null, attachment_preview:null, order_input_mode:'' })
     setOrderItems([]); setUnmatchedItems([]); setPasteText(''); setInputMode('upload')
   }
 
@@ -943,6 +947,24 @@ export default function Orders() {
               </div>
             </div>
             <div className="field">
+              <label>Order Type</label>
+              <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', marginBottom: form.order_input_mode ? 16 : 0 }}>
+                {['cases','units'].map(m => (
+                  <button key={m} onClick={() => setForm(f => ({ ...f, order_input_mode: m }))} style={{
+                    flex:1, padding:'10px 12px', border:'none', cursor:'pointer', fontSize:13,
+                    fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',
+                    background: form.order_input_mode === m ? 'var(--kk-green)' : 'var(--surface)',
+                    color: form.order_input_mode === m ? 'var(--kk-cream)' : 'var(--ink3)',
+                    fontWeight: form.order_input_mode === m ? 700 : 400,
+                  }}>{m === 'cases' ? '📦 Order in Cases' : '🔢 Order in Units'}</button>
+                ))}
+              </div>
+              {!form.order_input_mode && (
+                <div style={{ fontSize:11, color:'var(--amber)', marginTop:4 }}>⚠️ Select order type to continue</div>
+              )}
+            </div>
+            {form.order_input_mode && (
+            <div className="field">
               <label>Order Input</label>
               <div style={{ display:'flex', gap:0, marginBottom:10, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
                 {['upload','paste'].map(mode => (
@@ -980,6 +1002,7 @@ export default function Orders() {
                 </>
               )}
             </div>
+            )}
             {aiLoading && inputMode === 'upload' && (
               <div style={{ background:'var(--blue-l)', border:'1px solid var(--blue)', borderRadius:6, padding:'10px 14px', fontSize:12, color:'var(--blue)', marginBottom:12 }}>
                 ⏳ Reading order with AI...
@@ -1080,7 +1103,7 @@ export default function Orders() {
               <textarea style={{ ...sel, minHeight:60 }} value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Special instructions..." />
             </div>
             <div style={{ display:'flex', gap:10 }}>
-              <button className="btn btn-green btn-full" onClick={saveOrder} disabled={saving}>{saving ? 'Saving...' : 'Save Order'}</button>
+              <button className="btn btn-green btn-full" onClick={saveOrder} disabled={saving || !form.order_input_mode}>{saving ? 'Saving...' : 'Save Order'}</button>
               <button className="btn btn-secondary" onClick={() => { setShowModal(false); resetForm() }}>Cancel</button>
             </div>
           </div>

@@ -661,7 +661,7 @@ export default function Orders() {
     const enriched = matched.map(i => {
       const p = products.find(p => p.code === i.product_code)
       const upc = getUnitsPerCase(p)
-      return { product_code: i.product_code, product_name: p?.name || i.product_name, cases: i.quantity, quantity: parseFloat(i.quantity) * upc, units_per_case: upc, unit_price: p?.price_per_unit || 0, notes: '' }
+      return { product_code: i.product_code, product_name: p?.name || i.product_name, input_mode: 'cases', cases: i.quantity, quantity: parseFloat(i.quantity) * upc, units_per_case: upc, unit_price: p?.price_per_unit || 0, notes: '' }
     })
     setOrderItems(enriched)
     setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
@@ -702,10 +702,10 @@ export default function Orders() {
 
   function updateItem(idx, field, val) { setOrderItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeItem(idx) { setOrderItems(prev => prev.filter((_, i) => i !== idx)) }
-  function addManualItem() { setOrderItems(prev => [...prev, { product_code: '', product_name: '', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '' }]) }
+  function addManualItem() { setOrderItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'cases', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '' }]) }
   function updateEditItem(idx, field, val) { setEditItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeEditItem(idx) { setEditItems(prev => prev.filter((_, i) => i !== idx)) }
-  function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '', isNew: true }]) }
+  function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'cases', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '', isNew: true }]) }
 
   function startEditOrder(order) {
     setEditingOrder({ ...order })
@@ -1027,16 +1027,45 @@ export default function Orders() {
                         <option value="OTHER">— Other (specify in notes) —</option>
                       </select>
                     </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                      <span style={{ fontSize:11, color:'var(--ink3)' }}>Cases:</span>
-                      <input type="number" value={item.cases || item.quantity} onChange={e => {
-                        const p = products.find(p => p.code === item.product_code)
-                        const upc = getUnitsPerCase(p)
-                        updateItem(idx, 'cases', e.target.value)
-                        updateItem(idx, 'quantity', parseFloat(e.target.value) * upc)
-                        updateItem(idx, 'units_per_case', upc)
-                      }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
-                      <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} units</span>
+                    <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
+                      <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden', fontSize:11 }}>
+                        {['cases','units'].map(m => (
+                          <button key={m} onClick={() => {
+                            updateItem(idx, 'input_mode', m)
+                            if (m === 'units') {
+                              updateItem(idx, 'cases', null)
+                            } else {
+                              const p = products.find(p => p.code === item.product_code)
+                              const upc = getUnitsPerCase(p)
+                              const cs = item.quantity ? Math.round(item.quantity / upc) : 1
+                              updateItem(idx, 'cases', cs)
+                              updateItem(idx, 'quantity', cs * upc)
+                            }
+                          }} style={{
+                            padding:'4px 8px', border:'none', cursor:'pointer', fontSize:11,
+                            background: (item.input_mode || 'cases') === m ? 'var(--kk-green)' : 'var(--surface)',
+                            color: (item.input_mode || 'cases') === m ? 'var(--kk-cream)' : 'var(--ink3)',
+                            fontFamily:'var(--display)', letterSpacing:0.5, textTransform:'uppercase',
+                          }}>{m}</button>
+                        ))}
+                      </div>
+                      <input type="number" value={(item.input_mode || 'cases') === 'cases' ? (item.cases || 1) : item.quantity}
+                        onChange={e => {
+                          const val = parseFloat(e.target.value) || 0
+                          if ((item.input_mode || 'cases') === 'cases') {
+                            const p = products.find(p => p.code === item.product_code)
+                            const upc = getUnitsPerCase(p)
+                            updateItem(idx, 'cases', e.target.value)
+                            updateItem(idx, 'quantity', val * upc)
+                            updateItem(idx, 'units_per_case', upc)
+                          } else {
+                            updateItem(idx, 'quantity', val)
+                            updateItem(idx, 'cases', null)
+                          }
+                        }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
+                      {(item.input_mode || 'cases') === 'cases' && (
+                        <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>
+                      )}
                     </div>
                     <input type="text" value={item.notes || ''} placeholder="Notes" onChange={e => updateItem(idx,'notes',e.target.value)}
                       style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
@@ -1188,16 +1217,45 @@ export default function Orders() {
                     <option value="OTHER">— Other (specify in notes) —</option>
                   </select>
                 </div>
-                <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                  <span style={{ fontSize:11, color:'var(--ink3)' }}>Cases:</span>
-                  <input type="number" value={item.cases || Math.round(item.quantity / (item.units_per_case || 6))} onChange={e => {
-                    const p = products.find(p => p.code === item.product_code)
-                    const upc = getUnitsPerCase(p)
-                    updateEditItem(idx, 'cases', e.target.value)
-                    updateEditItem(idx, 'quantity', parseFloat(e.target.value) * upc)
-                    updateEditItem(idx, 'units_per_case', upc)
-                  }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
-                  <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} units</span>
+                <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
+                  <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden' }}>
+                    {['cases','units'].map(m => (
+                      <button key={m} onClick={() => {
+                        updateEditItem(idx, 'input_mode', m)
+                        if (m === 'units') {
+                          updateEditItem(idx, 'cases', null)
+                        } else {
+                          const p = products.find(p => p.code === item.product_code)
+                          const upc = getUnitsPerCase(p)
+                          const cs = item.quantity ? Math.round(item.quantity / upc) : 1
+                          updateEditItem(idx, 'cases', cs)
+                          updateEditItem(idx, 'quantity', cs * upc)
+                        }
+                      }} style={{
+                        padding:'4px 8px', border:'none', cursor:'pointer', fontSize:11,
+                        background: (item.input_mode || 'cases') === m ? 'var(--kk-green)' : 'var(--surface)',
+                        color: (item.input_mode || 'cases') === m ? 'var(--kk-cream)' : 'var(--ink3)',
+                        fontFamily:'var(--display)', letterSpacing:0.5, textTransform:'uppercase',
+                      }}>{m}</button>
+                    ))}
+                  </div>
+                  <input type="number" value={(item.input_mode || 'cases') === 'cases' ? (item.cases || Math.round(item.quantity / (item.units_per_case || 6))) : item.quantity}
+                    onChange={e => {
+                      const val = parseFloat(e.target.value) || 0
+                      if ((item.input_mode || 'cases') === 'cases') {
+                        const p = products.find(p => p.code === item.product_code)
+                        const upc = getUnitsPerCase(p)
+                        updateEditItem(idx, 'cases', e.target.value)
+                        updateEditItem(idx, 'quantity', val * upc)
+                        updateEditItem(idx, 'units_per_case', upc)
+                      } else {
+                        updateEditItem(idx, 'quantity', val)
+                        updateEditItem(idx, 'cases', null)
+                      }
+                    }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
+                  {(item.input_mode || 'cases') === 'cases' && (
+                    <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>
+                  )}
                 </div>
                 <input type="text" value={item.notes || ''} placeholder="Notes" onChange={e => updateEditItem(idx,'notes',e.target.value)}
                   style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />

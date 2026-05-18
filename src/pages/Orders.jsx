@@ -38,9 +38,10 @@ const BULK_COLS = [
   { code: 'CKHH', label: 'Hazelnut Cup' },
   { code: 'PVBB', label: 'Banana Bread' }, { code: 'PVBBSL', label: 'BB Slice Unfrost' },
   { code: 'PVBBSLF', label: 'BB Slice Frost' },
-  { code: 'KAB', label: 'KAB' }, { code: 'KWAL', label: 'KWAL' }, { code: 'HPCo', label: 'HPCo' },
-  { code: 'PVHC', label: 'PVHC' }, { code: 'VPCAN', label: 'Pecan Bars' },
-  { code: 'VPB', label: 'Pistachio Bars' }, { code: 'PNF', label: "No'tella Bars" },
+  { code: 'KABBu', label: 'KAB Bulk' }, { code: 'KWALBu', label: 'KWAL Bulk' },
+  { code: 'HPCoBu', label: 'HPCo Bulk' }, { code: 'PVHCBu', label: 'PVHC Bulk' },
+  { code: 'VPCANBu', label: 'Pecan Bulk' }, { code: 'VPBBu', label: 'Pistachio Bulk' },
+  { code: 'PNFBu', label: "No'tella Bulk" },
 ]
 
 const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
@@ -60,7 +61,7 @@ const S = {
   VAL_BG: 'E8F5E9',
 }
 
-function cellStyle(bg, fg, bold = false, size = 9, wrap = false, halign = 'center') {
+function cellStyle(bg, fg, bold = false, size = 10, wrap = false, halign = 'center') {
   return {
     font: { name: 'Arial', sz: size, bold, color: { rgb: fg || '000000' } },
     fill: { fgColor: { rgb: bg || 'FFFFFF' } },
@@ -84,28 +85,28 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
 
       // Row 0: Title
       if (r === 0) {
-        ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 12, false, c === 0 ? 'left' : 'center')
+        ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 14, false, c === 0 ? 'left' : 'center')
         continue
       }
       // Row 1: Category headers
       if (r === 1) {
-        ws[addr].s = cellStyle(S.CAT_GREEN, S.KK_CREAM, true, 8, false, 'center')
+        ws[addr].s = cellStyle(S.CAT_GREEN, S.KK_CREAM, true, 10, false, 'center')
         continue
       }
       // Row 2: Column headers
       if (r === 2) {
         if (c === 0) {
-          ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 9, true, 'left')
+          ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'left')
         } else if (includePricing && c === numCols - 1) {
-          ws[addr].s = cellStyle(S.KK_PEACH, 'FFFFFF', true, 9, true, 'center')
+          ws[addr].s = cellStyle(S.KK_PEACH, 'FFFFFF', true, 10, true, 'center')
         } else {
-          ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 8, true, 'center')
+          ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'center')
         }
         continue
       }
       // Day header rows
       if (dayRowIdxs.has(r)) {
-        ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, false, c === 0 ? 'left' : 'center')
+        ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 12, false, c === 0 ? 'left' : 'center')
         continue
       }
       // Total rows
@@ -239,11 +240,11 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
-  const colWidths = [{ wch: 32 }]
-  for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 7 })
+  const colWidths = [{ wch: 38 }]
+  for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 8 })
   if (includePricing) colWidths.push({ wch: 14 })
   ws['!cols'] = colWidths
-  ws['!rows'] = [{ hpt: 22 }, { hpt: 14 }, { hpt: 48 }]
+  ws['!rows'] = [{ hpt: 28 }, { hpt: 18 }, { hpt: 56 }]
 
   applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing)
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
@@ -309,9 +310,9 @@ function buildBulkSheet(wb, orders, weekLabel) {
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
-  const colWidths = [{ wch: 32 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 10 })
+  const colWidths = [{ wch: 38 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 12 })
   ws['!cols'] = colWidths
-  ws['!rows'] = [{ hpt: 22 }, { hpt: 48 }]
+  ws['!rows'] = [{ hpt: 28 }, { hpt: 56 }]
 
   applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, false)
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
@@ -403,7 +404,7 @@ function printDispatchSlip(ordersInput) {
       <div class="order-header">
         <div>
           <strong>${order.customer_name}</strong>
-          <div style="font-size:9px;margin-top:1px">Order #${order.order_number} · ${order.order_source}${order.po_number ? ` · PO: ${order.po_number}` : ''} · ${order.slip_number || ''}</div>
+          <div style="font-size:9px;margin-top:1px">${order.order_source}${order.po_number ? ` · PO: ${order.po_number}` : ''} · ${order.slip_number || ''} · <span style="font-weight:600">Inv #: ___________</span></div>
         </div>
         <span>Dispatch: ${order.dispatch_date || order.delivery_day || '—'}</span>
       </div>
@@ -940,6 +941,7 @@ export default function Orders() {
                     <select style={{ ...sel, width:'auto', flex:2, padding:'6px 10px' }} onChange={e => handleUnmatchedSelect(idx, e.target.value)} defaultValue="">
                       <option value="">Select product...</option>
                       {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                      <option value="OTHER">— Other (specify in notes) —</option>
                     </select>
                     <button onClick={() => setUnmatchedItems(prev => prev.filter((_,i)=>i!==idx))} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:16 }}>×</button>
                   </div>
@@ -956,13 +958,20 @@ export default function Orders() {
                     <div style={{ flex:3, minWidth:180 }}>
                       <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''}
                         onChange={e => {
-                          const p = products.find(p => p.code === e.target.value)
-                          updateItem(idx, 'product_code', p?.code || '')
-                          updateItem(idx, 'product_name', p?.name || item.product_name)
-                          updateItem(idx, 'unit_price', p?.price_per_unit || 0)
+                          if (e.target.value === 'OTHER') {
+                            updateItem(idx, 'product_code', 'OTHER')
+                            updateItem(idx, 'product_name', 'Other')
+                            updateItem(idx, 'unit_price', 0)
+                          } else {
+                            const p = products.find(p => p.code === e.target.value)
+                            updateItem(idx, 'product_code', p?.code || '')
+                            updateItem(idx, 'product_name', p?.name || item.product_name)
+                            updateItem(idx, 'unit_price', p?.price_per_unit || 0)
+                          }
                         }}>
                         <option value="">{item.product_name || 'Select product...'}</option>
                         {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                        <option value="OTHER">— Other (specify in notes) —</option>
                       </select>
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:4 }}>
@@ -1110,13 +1119,20 @@ export default function Orders() {
                 <div style={{ flex:3, minWidth:180 }}>
                   <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''}
                     onChange={e => {
-                      const p = products.find(p => p.code === e.target.value)
-                      updateEditItem(idx, 'product_code', p?.code || '')
-                      updateEditItem(idx, 'product_name', p?.name || item.product_name)
-                      updateEditItem(idx, 'unit_price', p?.price_per_unit || 0)
+                      if (e.target.value === 'OTHER') {
+                        updateEditItem(idx, 'product_code', 'OTHER')
+                        updateEditItem(idx, 'product_name', 'Other')
+                        updateEditItem(idx, 'unit_price', 0)
+                      } else {
+                        const p = products.find(p => p.code === e.target.value)
+                        updateEditItem(idx, 'product_code', p?.code || '')
+                        updateEditItem(idx, 'product_name', p?.name || item.product_name)
+                        updateEditItem(idx, 'unit_price', p?.price_per_unit || 0)
+                      }
                     }}>
                     <option value="">{item.product_name || 'Select product...'}</option>
                     {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                    <option value="OTHER">— Other (specify in notes) —</option>
                   </select>
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:4 }}>

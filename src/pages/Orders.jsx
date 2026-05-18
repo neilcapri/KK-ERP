@@ -54,8 +54,10 @@ const S = {
   CAT_GREEN: '2D4A35',
   TOTAL_BG: 'C8E6C9',
   TOTAL_FG: '1B5E20',
+  GRAND_BG: '223824',
+  GRAND_FG: 'E3DDD1',
   DAY_BG: '223824',
-  ALT1: 'F2F5F2',
+  ALT1: 'D6E4D8',
   ALT2: 'FFFFFF',
   QTY_FG: '1A3A20',
   VAL_BG: 'E8F5E9',
@@ -75,8 +77,9 @@ function cellStyle(bg, fg, bold = false, size = 10, wrap = false, halign = 'cent
   }
 }
 
-function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing) {
+function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx) {
   const encode = (r, c) => XLSX.utils.encode_cell({ r, c })
+  const storeArr = [...storeRowIdxs]
 
   for (let r = 0; r < totalRows; r++) {
     for (let c = 0; c < numCols; c++) {
@@ -104,35 +107,50 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         }
         continue
       }
+      // Grand total row
+      if (grandTotalIdx !== undefined && r === grandTotalIdx) {
+        if (c === 0) {
+          ws[addr].s = cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left')
+        } else {
+          ws[addr].s = cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'center')
+        }
+        continue
+      }
       // Day header rows
       if (dayRowIdxs.has(r)) {
         ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 12, false, c === 0 ? 'left' : 'center')
         continue
       }
-      // Total rows
+      // Day total rows
       if (totalRowIdxs.has(r)) {
         if (c === 0) {
-          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 9, false, 'left')
+          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 10, false, 'left')
         } else if (includePricing && c === numCols - 1) {
-          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 9, false, 'center')
+          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 10, false, 'center')
         } else {
-          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 9, false, 'center')
+          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 10, false, 'center')
         }
         continue
       }
-      // Store rows
+      // Store rows — alternate per day block (reset counter per day)
       if (storeRowIdxs.has(r)) {
-        const isAlt = [...storeRowIdxs].indexOf(r) % 2 === 0
-        const rowBg = isAlt ? S.ALT1 : S.ALT2
+        // Find position within current day block
+        const pos = storeArr.indexOf(r)
+        // Count how many store rows precede this in the same day
+        // We alternate based on distance from nearest day header
+        let dayRows = [...dayRowIdxs].sort((a,b)=>a-b)
+        let dayStart = dayRows.filter(d => d < r).pop() || 0
+        let posInDay = storeArr.filter(s => s > dayStart && s <= r).length - 1
+        const rowBg = posInDay % 2 === 0 ? S.ALT2 : S.ALT1
         if (c === 0) {
-          ws[addr].s = cellStyle(rowBg, '000000', true, 9, false, 'left')
+          ws[addr].s = cellStyle(rowBg, '111111', true, 10, false, 'left')
         } else if (includePricing && c === numCols - 1) {
           const hasVal = ws[addr].v && ws[addr].v !== ''
-          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 9, false, 'center')
+          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 10, false, 'center')
         } else if (c > 0 && ws[addr].v) {
-          ws[addr].s = cellStyle(rowBg, S.QTY_FG, true, 9, false, 'center')
+          ws[addr].s = cellStyle(rowBg, S.QTY_FG, true, 10, false, 'center')
         } else {
-          ws[addr].s = cellStyle(rowBg, '999999', false, 9, false, 'center')
+          ws[addr].s = cellStyle(rowBg, 'BBBBBB', false, 10, false, 'center')
         }
         continue
       }
@@ -238,6 +256,29 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     rowIdx += 2
   }
 
+  // ── Grand Total row ──────────────────────────────────────
+  const grandColTotals = new Array(RETAIL_COLS.length).fill(0)
+  let grandOrderTotal = 0
+  for (const order of orders) {
+    const items = order.order_items || []
+    const qtyMap = {}, priceMap = {}
+    for (const item of items) {
+      if (item.product_code) {
+        qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+        priceMap[item.product_code] = item.unit_price || 0
+      }
+    }
+    RETAIL_COLS.forEach((col, ci) => {
+      const qty = qtyMap[col.code] || 0
+      grandColTotals[ci] += qty
+      if (qty && priceMap[col.code]) grandOrderTotal += qty * priceMap[col.code]
+    })
+  }
+  const grandTotalRow = ['GRAND TOTAL', ...grandColTotals.map(v => v || null)]
+  if (includePricing) grandTotalRow.push(grandOrderTotal > 0 ? Math.round(grandOrderTotal * 100) / 100 : null)
+  rows.push(grandTotalRow)
+  const grandTotalIdx = rowIdx
+
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
   const colWidths = [{ wch: 38 }]
@@ -246,7 +287,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   ws['!cols'] = colWidths
   ws['!rows'] = [{ hpt: 28 }, { hpt: 18 }, { hpt: 56 }]
 
-  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing)
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx)
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
 }
 
@@ -308,13 +349,25 @@ function buildBulkSheet(wb, orders, weekLabel) {
     rowIdx += 2
   }
 
+  // ── Grand Total row ──────────────────────────────────────
+  const grandBulkTotals = new Array(BULK_COLS.length).fill(0)
+  for (const order of orders) {
+    const items = order.order_items || []
+    const qtyMap = {}
+    for (const item of items) { if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0) }
+    BULK_COLS.forEach((col, ci) => { grandBulkTotals[ci] += qtyMap[col.code] || 0 })
+  }
+  const grandTotalRow = ['GRAND TOTAL', ...grandBulkTotals.map(v => v || null)]
+  rows.push(grandTotalRow)
+  const grandTotalIdx = rowIdx
+
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
   const colWidths = [{ wch: 38 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 12 })
   ws['!cols'] = colWidths
   ws['!rows'] = [{ hpt: 28 }, { hpt: 56 }]
 
-  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, false)
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, false, grandTotalIdx)
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
 }
 

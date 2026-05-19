@@ -117,7 +117,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         if (c === 0) {
           ws[addr].s = cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left')
         } else {
-          ws[addr].s = cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'center')
+          ws[addr].s = cellStyle(S.GRAND_BG, S.GRAND_FG, true, 20, false, 'center')
         }
         continue
       }
@@ -129,11 +129,11 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       // Day total rows
       if (totalRowIdxs.has(r)) {
         if (c === 0) {
-          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 10, false, 'left')
+          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 20, false, 'left')
         } else if (includePricing && c === numCols - 1) {
-          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 10, false, 'center')
+          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 20, false, 'center')
         } else {
-          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 10, false, 'center')
+          ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 20, false, 'center')
         }
         continue
       }
@@ -145,9 +145,9 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
           ws[addr].s = cellStyle(rowBg, '111111', true, 14, false, 'left')
         } else if (includePricing && c === numCols - 1) {
           const hasVal = ws[addr].v && ws[addr].v !== ''
-          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 10, false, 'center')
+          ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 20, false, 'center')
         } else if (c > 0 && ws[addr].v) {
-          ws[addr].s = cellStyle(rowBg, S.QTY_FG, true, 10, false, 'center')
+          ws[addr].s = cellStyle(rowBg, S.QTY_FG, true, 20, false, 'center')
         } else {
           ws[addr].s = cellStyle(rowBg, 'BBBBBB', false, 10, false, 'center')
         }

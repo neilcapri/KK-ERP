@@ -4,6 +4,20 @@ import { useAuth } from '../context/AuthContext'
 
 const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:54 }
 
+// Pack sizes for display: units per retail pack
+const PACK_SIZE = {
+  PBB:2, PCC:2, KLR:2,          // muffins pack of 2
+  VPCAN:3, PNF:3, VPB:3,        // bars pack of 3
+  KAB:5, KWAL:5, HPCo:5, PVHC:5, KABIS:5,  // cookies pack of 5
+}
+
+function packsDisplay(code, units) {
+  const ps = PACK_SIZE[code]
+  if (!ps || !units) return `${units} units`
+  const packs = Math.round(units / ps)
+  return `${units} units = ${packs} packs`
+}
+
 export default function Production() {
   const { profile, isAdmin } = useAuth()
   const [view, setView] = useState('log')
@@ -310,7 +324,7 @@ export default function Production() {
               </div>
               {form.outputUnits && (
                 <div style={{ background: 'var(--green-l)', padding: 12, borderRadius: 3, marginBottom: 14, fontSize: 12, color: 'var(--green)' }}>
-                  <strong>Output: {form.outputUnits} units</strong>
+                  <strong>Output: {packsDisplay(form.code, parseInt(form.outputUnits))}</strong>
                 </div>
               )}
               {rmWarnings.length > 0 && (
@@ -457,7 +471,7 @@ export default function Production() {
             </div>
             {schedForm.product_code && schedForm.planned_input && (
               <div style={{ background: 'var(--green-l)', padding: 10, borderRadius: 3, marginBottom: 12, fontSize: 12, color: 'var(--green)' }}>
-                <strong>Expected output: {calcOutput(schedForm.product_code, schedForm.input_type, schedForm.planned_input)} units</strong>
+                <strong>Expected output: {packsDisplay(schedForm.product_code, calcOutput(schedForm.product_code, schedForm.input_type, schedForm.planned_input))}</strong>
               </div>
             )}
             {scheduleRMWarnings.length > 0 && (
@@ -509,7 +523,7 @@ export default function Production() {
             </div>
             {editForm.product_code && editForm.planned_input && (
               <div style={{ background: 'var(--green-l)', padding: 10, borderRadius: 3, marginBottom: 12, fontSize: 12, color: 'var(--green)' }}>
-                <strong>Expected output: {calcOutput(editForm.product_code, editForm.input_type, editForm.planned_input)} units</strong>
+                <strong>Expected output: {packsDisplay(editForm.product_code, calcOutput(editForm.product_code, editForm.input_type, editForm.planned_input))}</strong>
               </div>
             )}
             {editRMWarnings.length > 0 && (
@@ -613,7 +627,7 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
     <tr>
       <td><span className="code-tag">{s.product_code}</span> <span style={{fontSize:11,color:'var(--ink2)'}}>{s.product_name}</span></td>
       <td style={{fontSize:12}}>{s.planned_input} {s.input_type}</td>
-      <td style={{fontWeight:500,color:'var(--green)'}}>{s.planned_output} units</td>
+      <td style={{fontWeight:500,color:'var(--green)'}}>{packsDisplay(s.product_code, s.planned_output)}</td>
       <td style={{fontWeight:600, color:'var(--kk-brown)'}}>
         {batchValue === null ? '...' : batchValue > 0 ? `$${batchValue.toFixed(2)}` : <span style={{color:'var(--ink3)'}}>—</span>}
       </td>

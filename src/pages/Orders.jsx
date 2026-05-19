@@ -38,10 +38,12 @@ const BULK_COLS = [
   { code: 'CKHH', label: 'Hazelnut Cup' },
   { code: 'PVBB', label: 'Banana Bread' }, { code: 'PVBBSL', label: 'BB Slice Unfrost' },
   { code: 'PVBBSLF', label: 'BB Slice Frost' },
+  { code: 'PBBBu', label: 'BB Muffin Bulk' }, { code: 'PCCBu', label: 'CC Muffin Bulk' },
+  { code: 'KLRBu', label: 'KLR Muffin Bulk' },
   { code: 'KABBu', label: 'KAB Bulk' }, { code: 'KWALBu', label: 'KWAL Bulk' },
   { code: 'HPCoBu', label: 'HPCo Bulk' }, { code: 'PVHCBu', label: 'PVHC Bulk' },
   { code: 'VPCANBu', label: 'Pecan Bulk' }, { code: 'VPBBu', label: 'Pistachio Bulk' },
-  { code: 'PNFBu', label: "No'tella Bulk" },
+  { code: 'PNFBu', label: "No'tella Bulk" }, { code: 'KABISBu', label: 'Biscotti Bulk' },
 ]
 
 const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
@@ -287,10 +289,10 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
 }
 
-function buildBulkSheet(wb, orders, weekLabel) {
+function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const ws = XLSX.utils.aoa_to_sheet([])
   const title = `KONSCIOUS KITCHEN — BULK ORDERS${weekLabel ? ' — ' + weekLabel : ''}`
-  const numCols = BULK_COLS.length + 1
+  const numCols = BULK_COLS.length + 1 + (includePricing ? 1 : 0)
 
   const rows = []
   const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push('')
@@ -298,6 +300,7 @@ function buildBulkSheet(wb, orders, weekLabel) {
 
   const headerRow = ['Store']
   for (const col of BULK_COLS) headerRow.push(`${col.label}\n(${col.code})`)
+  if (includePricing) headerRow.push('ORDER VALUE ($)')
   rows.push(headerRow)
 
   const byDay = {}
@@ -319,23 +322,45 @@ function buildBulkSheet(wb, orders, weekLabel) {
 
     for (const order of dayOrders) {
       const items = order.order_items || []
-      const qtyMap = {}
-      for (const item of items) { if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0) }
+      const qtyMap = {}, priceMap2 = {}
+      for (const item of items) {
+        if (item.product_code) {
+          qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+          priceMap2[item.product_code] = item.unit_price || 0
+        }
+      }
       const storeRow = [order.customer_name]
-      for (const col of BULK_COLS) storeRow.push(qtyMap[col.code] || null)
+      let rowTotal = 0
+      for (const col of BULK_COLS) {
+        const qty = qtyMap[col.code] || null
+        storeRow.push(qty)
+        if (qty && priceMap2[col.code]) rowTotal += qty * priceMap2[col.code]
+      }
+      if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
       storeRowIdxs.add(rows.length)
       rows.push(storeRow)
     }
 
     // Calculate column totals from store rows
     const bulkTotals = new Array(BULK_COLS.length).fill(0)
+    let dayBulkTotal = 0
     for (const order of dayOrders) {
       const items = order.order_items || []
-      const qtyMap = {}
-      for (const item of items) { if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0) }
-      BULK_COLS.forEach((col, ci) => { bulkTotals[ci] += qtyMap[col.code] || 0 })
+      const qtyMap = {}, priceMap3 = {}
+      for (const item of items) {
+        if (item.product_code) {
+          qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+          priceMap3[item.product_code] = item.unit_price || 0
+        }
+      }
+      BULK_COLS.forEach((col, ci) => {
+        const qty = qtyMap[col.code] || 0
+        bulkTotals[ci] += qty
+        if (qty && priceMap3[col.code]) dayBulkTotal += qty * priceMap3[col.code]
+      })
     }
     const totalRow = ['TOTAL', ...bulkTotals.map(v => v || null)]
+    if (includePricing) totalRow.push(dayBulkTotal > 0 ? Math.round(dayBulkTotal * 100) / 100 : null)
     totalRowIdxs.add(rows.length)
     rows.push(totalRow)
     rows.push([]) // blank gap row
@@ -349,18 +374,27 @@ function buildBulkSheet(wb, orders, weekLabel) {
     for (const item of items) { if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0) }
     BULK_COLS.forEach((col, ci) => { grandBulkTotals[ci] += qtyMap[col.code] || 0 })
   }
+  let grandBulkValue = 0
+  for (const order of orders) {
+    const items = order.order_items || []
+    for (const item of items) {
+      if (BULK_CODES.has(item.product_code)) grandBulkValue += (item.quantity || 0) * (item.unit_price || 0)
+    }
+  }
   const grandTotalRow = ['GRAND TOTAL', ...grandBulkTotals.map(v => v || null)]
+  if (includePricing) grandTotalRow.push(grandBulkValue > 0 ? Math.round(grandBulkValue * 100) / 100 : null)
   const grandTotalIdx = rows.length
   rows.push(grandTotalRow)
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
   const colWidths = [{ wch: 52 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 14 })
+  if (includePricing) colWidths.push({ wch: 14 })
   ws['!cols'] = colWidths
   ws['!rows'] = [{ hpt: 24 }, { hpt: 90 }]
   for (let i = 2; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 45 }
 
-  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, false, grandTotalIdx)
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx)
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
 }
 
@@ -800,7 +834,7 @@ export default function Orders() {
       const weekLabel = getWeekLabel(offset)
       const wb = XLSX.utils.book_new()
       buildRetailSheet(wb, sheetOrders, includePricing, weekLabel)
-      buildBulkSheet(wb, sheetOrders, weekLabel)
+      buildBulkSheet(wb, sheetOrders, weekLabel, includePricing)
       const suffix = includePricing ? 'FULL' : 'TEAM'
       const fileLabel = weekLabel.replace(/[^a-zA-Z0-9]/g, '_')
       XLSX.writeFile(wb, `KK_Order_Sheet_${fileLabel}_${suffix}.xlsx`)

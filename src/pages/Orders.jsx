@@ -450,9 +450,9 @@ function printDispatchSlip(ordersInput) {
       <div class="order-header">
         <div>
           <strong>${order.customer_name}</strong>
-          <div style="font-size:9px;margin-top:1px">${order.order_source}${order.po_number ? ` · PO: ${order.po_number}` : ''} · ${order.slip_number || ''} · <span style="font-weight:600">Inv #: ___________</span></div>
+          <div style="font-size:11px;margin-top:2px;font-weight:600">${order.order_source}${order.po_number ? ` · PO: ${order.po_number}` : ''} · ${order.slip_number || ''} · <span style="font-weight:900">Inv #: ___________</span></div>
         </div>
-        <span>Dispatch: ${order.dispatch_date || order.delivery_day || '—'}</span>
+        <span style="font-size:12px;font-weight:700">Dispatch: ${order.dispatch_date || order.delivery_day || '—'}</span>
       </div>
       <table><thead><tr>
         <th>Product</th>
@@ -462,8 +462,8 @@ function printDispatchSlip(ordersInput) {
       ${(order.order_items || []).map(item => {
         const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
         return `<tr>
-          <td>${item.product_name}${item.product_code ? ` <span style="color:#888;font-size:8px">(${item.product_code})</span>` : ''}</td>
-          <td style="text-align:center;font-weight:700">${cases} cs / ${item.quantity} u</td>
+          <td>${item.product_name}${item.product_code ? ` <span style="color:#333;font-size:11px;font-weight:600">(${item.product_code})</span>` : ''}</td>
+          <td style="text-align:center;font-weight:900;font-size:14px">${cases} cs / ${item.quantity} u</td>
           <td style="background:#fffde7">&nbsp;</td>
         </tr>`}).join('')}
       </tbody></table>
@@ -485,21 +485,21 @@ function printDispatchSlip(ordersInput) {
   const html = `<!DOCTYPE html><html><head><title>KK Dispatch Slips</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; font-size: ${fontSize}; background: #fff; }
+    body { font-family: Arial, sans-serif; font-size: 14px; background: #fff; color: #000; }
     .page { width: 210mm; min-height: 297mm; padding: 8mm; display: flex; flex-direction: column; page-break-after: always; }
-    .page-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #223824; padding-bottom: 6px; margin-bottom: 8px; }
-    .logo { font-size: 16px; font-weight: 900; letter-spacing: 3px; color: #223824; }
-    .logo-sub { font-size: 6px; letter-spacing: 2px; color: #888; }
-    .slip-title { font-size: 12px; font-weight: 700; color: #223824; }
-    .slips-grid { display: grid; grid-template-columns: ${perPage === 1 ? '1fr' : '1fr 1fr'}; gap: 8px; align-content: start; }
-    .order-block { border: 1px solid #ccc; border-radius: 3px; overflow: visible; display: flex; flex-direction: column; break-inside: avoid; }
-    .order-header { background: #223824; color: #fff; padding: 5px 8px; display: flex; justify-content: space-between; align-items: flex-start; flex-shrink: 0; }
-    .order-header strong { font-size: ${perPage === 4 ? '10px' : '11px'}; }
-    .order-header span { font-size: 9px; opacity: 0.85; white-space: nowrap; }
+    .page-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #000; padding-bottom: 6px; margin-bottom: 8px; }
+    .logo { font-size: 18px; font-weight: 900; letter-spacing: 3px; color: #000; }
+    .logo-sub { font-size: 8px; letter-spacing: 2px; color: #333; }
+    .slip-title { font-size: 14px; font-weight: 700; color: #000; }
+    .slips-grid { display: grid; grid-template-columns: ${perPage === 1 ? '1fr' : '1fr 1fr'}; gap: 10px; align-content: start; }
+    .order-block { border: 2px solid #000; border-radius: 3px; overflow: visible; display: flex; flex-direction: column; break-inside: avoid; }
+    .order-header { background: #fff; color: #000; border-bottom: 2px solid #000; padding: 6px 10px; display: flex; justify-content: space-between; align-items: flex-start; flex-shrink: 0; }
+    .order-header strong { font-size: 15px; font-weight: 900; }
+    .order-header span { font-size: 11px; font-weight: 600; white-space: nowrap; }
     table { width: 100%; border-collapse: collapse; }
-    th { background: #f0f4f0; padding: ${tdPad}; text-align: left; font-size: 8px; letter-spacing: 0.5px; text-transform: uppercase; color: #555; border-bottom: 1px solid #ddd; }
-    td { padding: ${tdPad}; border-bottom: 1px solid #eee; font-size: ${fontSize}; vertical-align: middle; }
-    .footer { font-size: 8px; color: #bbb; text-align: center; padding-top: 6px; border-top: 1px solid #eee; margin-top: 6px; }
+    th { background: #e8e8e8; padding: ${tdPad}; text-align: left; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: #000; font-weight: 700; border-bottom: 2px solid #000; }
+    td { padding: ${tdPad}; border-bottom: 1px solid #ccc; font-size: 14px; vertical-align: middle; color: #000; }
+    .footer { font-size: 10px; color: #333; text-align: center; padding-top: 6px; border-top: 1px solid #999; margin-top: 6px; font-weight: 600; }
     @media print { body { margin: 0; } .page { page-break-after: always; } }
   </style></head><body>
     ${pages.map((pg, i) => renderPage(pg, i+1, pages.length)).join('')}

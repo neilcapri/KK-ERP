@@ -56,11 +56,14 @@ const S = {
   TOTAL_FG: '1B5E20',
   GRAND_BG: '223824',
   GRAND_FG: 'E3DDD1',
-  DAY_BG: '223824',
+  DAY_BG: '521B93',
+  DAY_FG: 'F7FFAE',
   ALT1: 'D6E4D8',
   ALT2: 'FFFFFF',
   QTY_FG: '1A3A20',
   VAL_BG: 'E8F5E9',
+  // Store row palette matching reference file
+  STORE_PALETTE: ['F7FFAE','F8C7F1','D4E6FF','C1C985','D19EB9','E8F5E9','FFE4B5','E6E0FF','FFDAB9','C8F5F0'],
 }
 
 function cellStyle(bg, fg, bold = false, size = 10, wrap = false, halign = 'center') {
@@ -118,7 +121,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       }
       // Day header rows
       if (dayRowIdxs.has(r)) {
-        ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 12, false, c === 0 ? 'left' : 'center')
+        ws[addr].s = cellStyle(S.DAY_BG, S.DAY_FG, true, 12, false, c === 0 ? 'left' : 'center')
         continue
       }
       // Day total rows
@@ -132,16 +135,10 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         }
         continue
       }
-      // Store rows — alternate per day block (reset counter per day)
+      // Store rows — each store gets a palette colour, cycling through
       if (storeRowIdxs.has(r)) {
-        // Find position within current day block
-        const pos = storeArr.indexOf(r)
-        // Count how many store rows precede this in the same day
-        // We alternate based on distance from nearest day header
-        let dayRows = [...dayRowIdxs].sort((a,b)=>a-b)
-        let dayStart = dayRows.filter(d => d < r).pop() || 0
-        let posInDay = storeArr.filter(s => s > dayStart && s <= r).length - 1
-        const rowBg = posInDay % 2 === 0 ? S.ALT2 : S.ALT1
+        const storePos = storeArr.indexOf(r)
+        const rowBg = S.STORE_PALETTE[storePos % S.STORE_PALETTE.length]
         if (c === 0) {
           ws[addr].s = cellStyle(rowBg, '111111', true, 10, false, 'left')
         } else if (includePricing && c === numCols - 1) {
@@ -278,11 +275,13 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
-  const colWidths = [{ wch: 38 }]
-  for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 8 })
+  const colWidths = [{ wch: 52 }]
+  for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 9 })
   if (includePricing) colWidths.push({ wch: 14 })
   ws['!cols'] = colWidths
-  ws['!rows'] = [{ hpt: 28 }, { hpt: 18 }, { hpt: 56 }]
+  ws['!rows'] = [{ hpt: 24 }, { hpt: 52 }, { hpt: 90 }]
+  // All data rows at 45pt
+  for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 45 }
 
   applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx)
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
@@ -356,9 +355,10 @@ function buildBulkSheet(wb, orders, weekLabel) {
 
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
   ws['!merges'] = merges
-  const colWidths = [{ wch: 38 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 12 })
+  const colWidths = [{ wch: 52 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 14 })
   ws['!cols'] = colWidths
-  ws['!rows'] = [{ hpt: 28 }, { hpt: 56 }]
+  ws['!rows'] = [{ hpt: 24 }, { hpt: 90 }]
+  for (let i = 2; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 45 }
 
   applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, false, grandTotalIdx)
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')

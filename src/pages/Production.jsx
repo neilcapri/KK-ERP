@@ -9,6 +9,8 @@ const PACK_SIZE = {
   PBB:2, PCC:2, KLR:2,          // muffins pack of 2
   VPCAN:3, PNF:3, VPB:3,        // bars pack of 3
   KAB:5, KWAL:5, HPCo:5, PVHC:5, KABIS:5,  // cookies pack of 5
+  KSCD:4,                        // cinnamon donuts pack of 4
+  VPBD:2, KHD:2,                 // PB & hazelnut donuts pack of 2
 }
 
 function packsDisplay(code, units) {

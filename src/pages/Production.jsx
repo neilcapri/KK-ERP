@@ -18,6 +18,12 @@ function packsDisplay(code, units) {
   return `${units} units = ${packs} packs`
 }
 
+function sellableQty(code, units) {
+  const ps = PACK_SIZE[code]
+  if (!ps || !units) return units
+  return Math.round(units / ps)
+}
+
 export default function Production() {
   const { profile, isAdmin } = useAuth()
   const [view, setView] = useState('log')
@@ -559,7 +565,7 @@ function DailyTotal({ rows, products }) {
       let sum = 0
       for (const s of rows) {
         const { data: p } = await supabase.from('products').select('price_per_unit').eq('code', s.product_code).single()
-        if (p?.price_per_unit) sum += (s.planned_output || 0) * p.price_per_unit
+        if (p?.price_per_unit) sum += sellableQty(s.product_code, s.planned_output || 0) * p.price_per_unit
       }
       setTotal(sum)
     }
@@ -585,7 +591,7 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
       const { data: p } = await supabase.from('products').select('price_per_unit').eq('code', s.product_code).single()
-      setBatchValue(p?.price_per_unit ? out * p.price_per_unit : 0)
+      setBatchValue(p?.price_per_unit ? sellableQty(s.product_code, out) * p.price_per_unit : 0)
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', s.product_code)
       if (!bom?.length) { setRMStatus([]); return }
       const rmNames = bom.map(b => b.rm_name)

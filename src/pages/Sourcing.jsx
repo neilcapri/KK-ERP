@@ -18,6 +18,9 @@ export function Sourcing() {
   const [entries, setEntries] = useState([])
   const [showModal, setShowModal] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
+  const [editingEntry, setEditingEntry] = useState(null)
+  const [editForm, setEditForm] = useState({})
+  const [editSaving, setEditSaving] = useState(false)
   const [lotPhoto, setLotPhoto] = useState(null)
   const [lotPhotoPreview, setLotPhotoPreview] = useState(null)
   const [lotOCR, setLotOCR] = useState('')
@@ -129,6 +132,55 @@ export function Sourcing() {
     }
     setOcrLoading(false)
     photoInputRef.current.value = ''
+  }
+
+  function openEdit(entry) {
+    setEditingEntry(entry)
+    setEditForm({
+      date: entry.date,
+      rm_name: entry.rm_name,
+      supplier: entry.supplier || '',
+      qty_received: String(entry.qty_received),
+      unit: entry.unit,
+      lot_number: entry.lot_number || entry.batch_number || '',
+    })
+  }
+
+  async function saveEdit() {
+    if (!editForm.qty_received) { alert('Please enter a quantity.'); return }
+    setEditSaving(true)
+    try {
+      const oldQty = editingEntry.qty_received
+      const newQty = parseFloat(editForm.qty_received)
+      const diff = newQty - oldQty
+
+      // Adjust stock by the difference
+      if (diff !== 0) {
+        const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', editingEntry.rm_name).single()
+        if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock + diff) }).eq('name', editingEntry.rm_name)
+      }
+
+      await supabase.from('sourcing').update({
+        date: editForm.date,
+        supplier: editForm.supplier,
+        qty_received: newQty,
+        unit: editForm.unit,
+        lot_number: editForm.lot_number,
+        batch_number: editForm.lot_number,
+      }).eq('id', editingEntry.id)
+
+      await supabase.from('activity').insert({
+        type: 'sourcing',
+        title: `${editingEntry.rm_name} entry updated`,
+        description: `Qty: ${oldQty} → ${newQty} ${editForm.unit}${editForm.lot_number ? ` · Lot: ${editForm.lot_number}` : ''}`,
+        created_by_name: profile?.name
+      })
+
+      setEditingEntry(null)
+      setEditForm({})
+      loadData()
+    } catch(err) { alert('Update failed: ' + err.message) }
+    setEditSaving(false)
   }
 
   async function saveSourcing() {
@@ -266,10 +318,14 @@ export function Sourcing() {
                           <a href={e.lot_photo_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 4, fontSize: 10, color: 'var(--kk-green)' }}>📷</a>
                         )}
                       </td>
-                      <td>
+                      <td style={{ display:'flex', gap:4 }}>
+                        <button onClick={() => openEdit(e)}
+                          style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
+                          Edit
+                        </button>
                         <button onClick={() => deleteSourcing(e)} disabled={deletingId === e.id}
                           style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', opacity: deletingId === e.id ? 0.5 : 1 }}>
-                          {deletingId === e.id ? '...' : 'Delete'}
+                          {deletingId === e.id ? '...' : 'Del'}
                         </button>
                       </td>
                     </tr>
@@ -389,6 +445,48 @@ export function Sourcing() {
                 {saving ? 'Saving...' : 'Save Entry'}
               </button>
               <button className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editingEntry && (
+        <div className="modal-bg" onClick={e => e.target === e.currentTarget && setEditingEntry(null)}>
+          <div className="modal">
+            <button className="modal-close" onClick={() => setEditingEntry(null)}>×</button>
+            <div className="modal-title">EDIT RM ENTRY</div>
+            <div style={{ fontSize:13, color:'var(--ink3)', marginBottom:16 }}>{editingEntry.rm_name}</div>
+            <div className="field">
+              <label>Date</label>
+              <input type="date" value={editForm.date} onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label>Supplier</label>
+              <select style={selectStyle} value={editForm.supplier} onChange={e => setEditForm(f => ({ ...f, supplier: e.target.value }))}>
+                <option value="">Select supplier...</option>
+                {suppliers.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="field-row">
+              <div className="field" style={{ margin:0 }}>
+                <label>Qty Received</label>
+                <input type="number" value={editForm.qty_received} onChange={e => setEditForm(f => ({ ...f, qty_received: e.target.value }))} step="0.001" style={{ fontSize:16, padding:'12px 14px' }} />
+              </div>
+              <div className="field" style={{ margin:0 }}>
+                <label>Unit</label>
+                <select style={selectStyle} value={editForm.unit} onChange={e => setEditForm(f => ({ ...f, unit: e.target.value }))}>
+                  <option>kg</option><option>g</option><option>L</option><option>ml</option><option>units</option><option>ea</option><option>lbs</option>
+                </select>
+              </div>
+            </div>
+            <div className="field">
+              <label>Lot #</label>
+              <input type="text" value={editForm.lot_number} onChange={e => setEditForm(f => ({ ...f, lot_number: e.target.value }))} placeholder="e.g. LOT2024-001" />
+            </div>
+            <div style={{ display:'flex', gap:10 }}>
+              <button className="btn btn-amber btn-full" onClick={saveEdit} disabled={editSaving}>
+                {editSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setEditingEntry(null)}>Cancel</button>
             </div>
           </div>
         </div>

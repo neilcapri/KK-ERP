@@ -4,6 +4,13 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Financials from './Financials'
 
+const API_HEADERS = {
+  'Content-Type': 'application/json',
+  'x-api-key': process.env.REACT_APP_ANTHROPIC_KEY,
+  'anthropic-version': '2023-06-01',
+  'anthropic-dangerous-direct-browser-access': 'true',
+}
+
 export function Sourcing() {
   const { profile, isAdmin } = useAuth()
   const [rms, setRMs] = useState([])
@@ -90,9 +97,9 @@ export function Sourcing() {
       // Use Claude vision to read lot number
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: API_HEADERS,
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-5',
           max_tokens: 200,
           messages: [{
             role: 'user',
@@ -103,7 +110,7 @@ export function Sourcing() {
               },
               {
                 type: 'text',
-                text: 'Look at this food ingredient package label. Extract ONLY the lot number, batch number, or lot code. Return just the lot number value with no explanation, no label, no punctuation. If you cannot find a lot number, return the word NOTFOUND.'
+                text: 'Look at this food ingredient package label. Extract ONLY the lot number, batch number, or lot code. It may be labelled as LOT, LOT#, LOT NO, BATCH, BEST BY LOT, or similar. Return just the alphanumeric lot number value with no explanation, no label, no punctuation. If you cannot find a lot number, return the word NOTFOUND.'
               }
             ]
           }]

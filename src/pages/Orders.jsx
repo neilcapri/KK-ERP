@@ -140,7 +140,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         const storePos = storeArr.indexOf(r)
         const rowBg = S.STORE_PALETTE[storePos % S.STORE_PALETTE.length]
         if (c === 0) {
-          ws[addr].s = cellStyle(rowBg, '111111', true, 10, false, 'left')
+          ws[addr].s = cellStyle(rowBg, '111111', true, 14, false, 'left')
         } else if (includePricing && c === numCols - 1) {
           const hasVal = ws[addr].v && ws[addr].v !== ''
           ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 10, false, 'center')
@@ -609,6 +609,7 @@ export default function Orders() {
   const [pasteText, setPasteText] = useState('')
   const [exportLoading, setExportLoading] = useState(false)
   const [exportWeek, setExportWeek] = useState('current')
+  const [selectedOrders, setSelectedOrders] = useState(new Set())
   const fileInputRef = useRef(null)
 
   const [form, setForm] = useState({
@@ -818,6 +819,30 @@ export default function Orders() {
     await loadData()
   }
 
+  function toggleOrder(id) {
+    setSelectedOrders(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll(orderList) {
+    const allIds = orderList.map(o => o.id)
+    const allSelected = allIds.every(id => selectedOrders.has(id))
+    if (allSelected) {
+      setSelectedOrders(prev => { const next = new Set(prev); allIds.forEach(id => next.delete(id)); return next })
+    } else {
+      setSelectedOrders(prev => { const next = new Set(prev); allIds.forEach(id => next.add(id)); return next })
+    }
+  }
+
+  function printSelected() {
+    const toPrint = orders.filter(o => selectedOrders.has(o.id))
+    if (!toPrint.length) { alert('No orders selected.'); return }
+    printDispatchSlip(toPrint)
+  }
+
   const activeOrders = orders.filter(o => o.status !== 'archived')
   const archivedOrders = orders.filter(o => o.status === 'archived')
   const filteredByStatus = filterStatus === 'archived' ? archivedOrders : activeOrders
@@ -828,7 +853,14 @@ export default function Orders() {
     <>
       <div className="page-header">
         <div><h2>ORDERS</h2><p>Incoming order management</p></div>
-        {isAdmin && <button className="btn btn-green" onClick={() => setShowModal(true)}>+ New Order</button>}
+        <div style={{ display:'flex', gap:8 }}>
+          {selectedOrders.size > 0 && (
+            <button className="btn btn-secondary" onClick={printSelected}>
+              🖨️ Print {selectedOrders.size} Slip{selectedOrders.size > 1 ? 's' : ''}
+            </button>
+          )}
+          {isAdmin && <button className="btn btn-green" onClick={() => setShowModal(true)}>+ New Order</button>}
+        </div>
       </div>
 
       <div className="page-body">
@@ -876,13 +908,23 @@ export default function Orders() {
             <div className="table-wrap">
               <table>
                 <thead><tr>
+                  <th style={{width:36}}>
+                    <input type="checkbox" 
+                      checked={filteredByStatus.length > 0 && filteredByStatus.every(o => selectedOrders.has(o.id))}
+                      onChange={() => toggleAll(filteredByStatus)}
+                      style={{cursor:'pointer'}}
+                    />
+                  </th>
                   <th>Slip #</th><th>Order #</th><th>Customer</th><th>Source</th>
                   <th>Dispatch Date</th><th>Items</th>{isAdmin && <th>Value</th>}<th>Status</th><th></th>
                 </tr></thead>
                 <tbody>
-                  {filteredByStatus.length === 0 && <tr><td colSpan={9} style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>No orders</td></tr>}
+                  {filteredByStatus.length === 0 && <tr><td colSpan={10} style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>No orders</td></tr>}
                   {filteredByStatus.map(o => (
-                    <tr key={o.id}>
+                    <tr key={o.id} style={{ background: selectedOrders.has(o.id) ? 'var(--green-l)' : '' }}>
+                      <td>
+                        <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleOrder(o.id)} style={{cursor:'pointer'}} />
+                      </td>
                       <td><span style={{ fontSize:11, color:'var(--ink3)', fontFamily:'var(--mono)' }}>{o.slip_number || '—'}</span></td>
                       <td><span className="code-tag">{o.order_number}</span></td>
                       <td style={{ fontWeight:500 }}>{o.customer_name}</td>

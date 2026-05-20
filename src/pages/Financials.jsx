@@ -14,12 +14,18 @@ function getStartDate(days) {
   return d.toISOString().split('T')[0]
 }
 
+function getWeekLabel(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00')
+  const monday = new Date(d)
+  monday.setDate(d.getDate() - (d.getDay() === 0 ? 6 : d.getDay() - 1))
+  return monday.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+}
+
 export default function Financials() {
   const [dateRange, setDateRange] = useState(30)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
 
-  // Data
   const [revenue, setRevenue] = useState(0)
   const [cogs, setCogs] = useState(0)
   const [revenueByProduct, setRevenueByProduct] = useState([])
@@ -33,92 +39,57 @@ export default function Financials() {
     setLoading(true)
     const since = getStartDate(days)
 
-    // Get all dispatch items in range with their dispatches
-    const { data: items } = await supabase
-      .from('dispatch_items')
-      .select('*, dispatches(date, customer_name, invoice_number)')
-      .gte('dispatches.date', since)
-      .not('dispatches', 'is', null)
+    // ── Pull from orders + order_items ──────────────────────
+    const { data: orders } = await supabase
+      .from('orders')
+      .select('id, customer_name, dispatch_date, created_at, status, order_items(*)')
+      .or(`dispatch_date.gte.${since},created_at.gte.${since}`)
 
-    const filteredItems = (items || []).filter(i => i.dispatches?.date >= since)
-
-    // Get products for pricing
-    const { data: products } = await supabase
-      .from('products')
-      .select('code, name, price_per_unit')
-
-    // Get customer prices
-    const { data: custPrices } = await supabase
-      .from('customer_prices')
-      .select('*')
-
-    // Get dispatches for customer lookup
-    const { data: dispatches } = await supabase
-      .from('dispatches')
-      .select('id, customer_name, customer_id')
-      .gte('date', since)
-
-    const productMap = {}
-    ;(products || []).forEach(p => { productMap[p.code] = p })
-
-    const dispatchMap = {}
-    ;(dispatches || []).forEach(d => { dispatchMap[d.id] = d })
-
-    // Customer price lookup
-    const custPriceMap = {}
-    ;(custPrices || []).forEach(cp => {
-      custPriceMap[`${cp.customer_id}_${cp.product_code}`] = cp.price_per_pack
+    const filteredOrders = (orders || []).filter(o => {
+      const d = o.dispatch_date || o.created_at?.split('T')[0]
+      return d >= since
     })
 
-    // Calculate revenue per line item
     let totalRevenue = 0
     const byProduct = {}
     const byCustomer = {}
     const byDate = {}
 
-    for (const item of filteredItems) {
-      const dispatch = item.dispatches
-      if (!dispatch) continue
+    for (const order of filteredOrders) {
+      const items = order.order_items || []
+      for (const item of items) {
+        const lineRevenue = (item.quantity || 0) * (item.unit_price || 0)
+        totalRevenue += lineRevenue
 
-      const prod = productMap[item.product_code]
-      const dispatchInfo = dispatchMap[item.dispatch_id]
+        // By product
+        const code = item.product_code || 'OTHER'
+        if (!byProduct[code]) {
+          byProduct[code] = { code, name: item.product_name || code, revenue: 0, units: 0 }
+        }
+        byProduct[code].revenue += lineRevenue
+        byProduct[code].units += item.quantity || 0
 
-      // Get price — customer specific or base
-      let price = prod?.price_per_unit || 0
-      if (dispatchInfo?.customer_id) {
-        const cpKey = `${dispatchInfo.customer_id}_${item.product_code}`
-        if (custPriceMap[cpKey]) price = custPriceMap[cpKey]
+        // By customer
+        const cname = order.customer_name || 'Unknown'
+        if (!byCustomer[cname]) byCustomer[cname] = { name: cname, revenue: 0, orders: new Set() }
+        byCustomer[cname].revenue += lineRevenue
+        byCustomer[cname].orders.add(order.id)
+
+        // By week
+        const dateStr = order.dispatch_date || order.created_at?.split('T')[0]
+        const week = getWeekLabel(dateStr)
+        if (!byDate[week]) byDate[week] = { week, date: dateStr, revenue: 0 }
+        byDate[week].revenue += lineRevenue
       }
-
-      const lineRevenue = price * item.units_dispatched
-      totalRevenue += lineRevenue
-
-      // By product
-      if (!byProduct[item.product_code]) {
-        byProduct[item.product_code] = { code: item.product_code, name: item.product_name || prod?.name || item.product_code, revenue: 0, units: 0 }
-      }
-      byProduct[item.product_code].revenue += lineRevenue
-      byProduct[item.product_code].units += item.units_dispatched
-
-      // By customer
-      const cname = dispatch.customer_name || 'Unknown'
-      if (!byCustomer[cname]) byCustomer[cname] = { name: cname, revenue: 0, orders: new Set() }
-      byCustomer[cname].revenue += lineRevenue
-      byCustomer[cname].orders.add(item.dispatch_id)
-
-      // By date (weekly buckets)
-      const week = getWeekLabel(dispatch.date)
-      if (!byDate[week]) byDate[week] = { week, date: dispatch.date, revenue: 0 }
-      byDate[week].revenue += lineRevenue
     }
 
-    // Calculate COGS from productions in range
+    // ── COGS from productions in range ───────────────────────
     const { data: productions } = await supabase
       .from('productions')
       .select('product_code, output_units')
       .gte('date', since)
 
-    const { data: bom } = await supabase.from('bom').select('product_code, rm_name, qty_per_unit')
+    const { data: bom } = await supabase.from('bom').select('product_code, rm_name, qty_per_unit, unit')
     const { data: rms } = await supabase.from('raw_materials').select('name, price_per_unit')
 
     const rmPriceMap = {}
@@ -135,15 +106,9 @@ export default function Financials() {
       const bomItems = bomMap[prod.product_code] || []
       for (const item of bomItems) {
         const rmPrice = rmPriceMap[item.rm_name] || 0
-        let cost = 0
-        if (item.unit === 'ea') {
-          // Packaging: qty_per_unit is count per finished unit
-          cost = rmPrice * item.qty_per_unit * prod.output_units
-        } else {
-          // Ingredients: qty_per_unit is grams per finished unit
-          const qtyKg = (item.qty_per_unit * prod.output_units) / 1000
-          cost = rmPrice * qtyKg
-        }
+        const cost = item.unit === 'ea'
+          ? rmPrice * item.qty_per_unit * prod.output_units
+          : rmPrice * (item.qty_per_unit * prod.output_units) / 1000
         totalCogs += cost
       }
     }
@@ -155,13 +120,6 @@ export default function Financials() {
     setRevenueByDate(Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)))
     setTopProducts(Object.values(byProduct).sort((a, b) => b.revenue - a.revenue).slice(0, 5))
     setLoading(false)
-  }
-
-  function getWeekLabel(dateStr) {
-    const d = new Date(dateStr + 'T12:00:00')
-    const monday = new Date(d)
-    monday.setDate(d.getDate() - d.getDay() + 1)
-    return monday.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
   }
 
   const grossMargin = revenue > 0 ? ((revenue - cogs) / revenue * 100) : 0
@@ -190,7 +148,6 @@ export default function Financials() {
 
   return (
     <div>
-      {/* Date range + tabs */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)' }}>
           {['overview', 'by product', 'by customer', 'by week'].map(t => (
@@ -204,7 +161,6 @@ export default function Financials() {
         </div>
       </div>
 
-      {/* Summary cards — always visible */}
       <div className="grid4" style={{ marginBottom: 20 }}>
         <div className="stat green">
           <div className="stat-label">Revenue</div>
@@ -232,19 +188,18 @@ export default function Financials() {
         </div>
       </div>
 
-      {/* Overview tab */}
       {activeTab === 'overview' && (
         <div className="grid2">
           <div className="card">
             <div className="card-title">Top Products by Revenue</div>
             {topProducts.length === 0
-              ? <div style={{ color: 'var(--ink3)', fontSize: 12 }}>No dispatch data in this period</div>
+              ? <div style={{ color: 'var(--ink3)', fontSize: 12 }}>No order data in this period</div>
               : topProducts.map((p, i) => (
                 <div key={p.code} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
                   <div style={{ fontFamily: 'var(--display)', fontSize: 18, color: 'var(--ink3)', width: 24 }}>{i + 1}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, fontWeight: 500 }}>{p.name}</div>
-                    <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{p.units} units dispatched</div>
+                    <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{p.units} units ordered</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontFamily: 'var(--display)', fontSize: 16, color: 'var(--kk-brown)' }}>${p.revenue.toFixed(2)}</div>
@@ -278,18 +233,12 @@ export default function Financials() {
         </div>
       )}
 
-      {/* By product tab */}
       {activeTab === 'by product' && (
         <div className="card">
           <div className="card-title">Revenue by Product</div>
           <div className="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Code</th><th>Product</th><th>Units Dispatched</th>
-                  <th>Revenue</th><th>% of Total</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Code</th><th>Product</th><th>Units</th><th>Revenue</th><th>% of Total</th></tr></thead>
               <tbody>
                 {revenueByProduct.map(p => (
                   <tr key={p.code}>
@@ -311,7 +260,7 @@ export default function Financials() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface2)' }}>
                   <td colSpan={2} style={{ fontFamily: 'var(--display)', fontSize: 13, letterSpacing: 1 }}>TOTAL</td>
-                  <td style={{ fontWeight: 500 }}>{revenueByProduct.reduce((s, p) => s + p.units, 0).toLocaleString()}</td>
+                  <td>{revenueByProduct.reduce((s, p) => s + p.units, 0).toLocaleString()}</td>
                   <td style={{ fontFamily: 'var(--display)', fontSize: 16, color: 'var(--kk-green)' }}>${revenue.toFixed(2)}</td>
                   <td>100%</td>
                 </tr>
@@ -321,18 +270,12 @@ export default function Financials() {
         </div>
       )}
 
-      {/* By customer tab */}
       {activeTab === 'by customer' && (
         <div className="card">
           <div className="card-title">Revenue by Customer</div>
           <div className="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Customer</th><th>Dispatches</th><th>Revenue</th>
-                  <th>Avg per Dispatch</th><th>% of Total</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Customer</th><th>Orders</th><th>Revenue</th><th>Avg per Order</th><th>% of Total</th></tr></thead>
               <tbody>
                 {revenueByCustomer.map((c, i) => (
                   <tr key={i}>
@@ -364,15 +307,12 @@ export default function Financials() {
         </div>
       )}
 
-      {/* By week tab */}
       {activeTab === 'by week' && (
         <div className="card">
           <div className="card-title">Weekly Revenue Breakdown</div>
           <div className="table-wrap">
             <table>
-              <thead>
-                <tr><th>Week of</th><th>Revenue</th><th>vs Total</th></tr>
-              </thead>
+              <thead><tr><th>Week of</th><th>Revenue</th><th>vs Total</th></tr></thead>
               <tbody>
                 {revenueByDate.slice().reverse().map((w, i) => (
                   <tr key={i}>

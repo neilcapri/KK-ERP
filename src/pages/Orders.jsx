@@ -44,6 +44,7 @@ const BULK_COLS = [
   { code: 'HPCoBu', label: 'HPCo Bulk' }, { code: 'PVHCBu', label: 'PVHC Bulk' },
   { code: 'VPCANBu', label: 'Pecan Bulk' }, { code: 'VPBBu', label: 'Pistachio Bulk' },
   { code: 'PNFBu', label: "No'tella Bulk" }, { code: 'KABISBu', label: 'Biscotti Bulk' },
+  { code: 'KSCDBu', label: 'Cinnamon Donut Bulk' },
 ]
 
 const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
@@ -52,6 +53,7 @@ const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
 const BULK_MAP = {
   PBB: 'PBBBu', PCC: 'PCCBu', KLR: 'KLRBu',
   KAB: 'KABBu', KWAL: 'KWALBu', HPCo: 'HPCoBu', PVHC: 'PVHCBu', KABIS: 'KABISBu',
+  KSCD: 'KSCDBu',
   VPCAN: 'VPCANBu', VPB: 'VPBBu', PNF: 'PNFBu',
 }
 

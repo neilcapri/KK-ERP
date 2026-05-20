@@ -48,6 +48,13 @@ const BULK_COLS = [
 
 const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
 
+// Maps retail pack code → bulk single code
+const BULK_MAP = {
+  PBB: 'PBBBu', PCC: 'PCCBu', KLR: 'KLRBu',
+  KAB: 'KABBu', KWAL: 'KWALBu', HPCo: 'HPCoBu', PVHC: 'PVHCBu', KABIS: 'KABISBu',
+  VPCAN: 'VPCANBu', VPB: 'VPBBu', PNF: 'PNFBu',
+}
+
 // ── Style helpers ─────────────────────────────────────────────
 const S = {
   KK_GREEN: '223824',
@@ -687,13 +694,30 @@ export default function Orders() {
   function processAIItems(items) {
     const matched = items.filter(i => i.matched)
     const unmatched = items.filter(i => !i.matched)
+    const orderMode = form.order_input_mode || 'cases'
     const enriched = matched.map(i => {
-      const p = products.find(p => p.code === i.product_code)
+      let productCode = i.product_code
+      let itemMode = orderMode === 'mix' ? 'pack' : orderMode  // mix defaults per-item to pack
+
+      // For bulk mode, auto-switch to Bu code if available
+      if (orderMode === 'bulk') {
+        productCode = BULK_MAP[i.product_code] || i.product_code
+        itemMode = 'bulk'
+      }
+
+      const p = products.find(p => p.code === productCode)
       const upc = getUnitsPerCase(p)
-      const imode = form.order_input_mode || 'cases'
+      const imode = (itemMode === 'bulk') ? 'units' : (orderMode === 'units' ? 'units' : 'cases')
       const qty = imode === 'cases' ? parseFloat(i.quantity) * upc : parseFloat(i.quantity)
       const cs = imode === 'cases' ? i.quantity : null
-      return { product_code: i.product_code, product_name: p?.name || i.product_name, input_mode: imode, cases: cs, quantity: qty, units_per_case: upc, unit_price: p?.price_per_unit || 0, notes: '' }
+      return {
+        product_code: productCode,
+        product_name: p?.name || i.product_name,
+        input_mode: imode,
+        item_type: itemMode === 'bulk' ? 'bulk' : 'pack',  // pack or bulk per item
+        cases: cs, quantity: qty, units_per_case: upc,
+        unit_price: p?.price_per_unit || 0, notes: ''
+      }
     })
     setOrderItems(enriched)
     setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
@@ -734,7 +758,19 @@ export default function Orders() {
 
   function updateItem(idx, field, val) { setOrderItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeItem(idx) { setOrderItems(prev => prev.filter((_, i) => i !== idx)) }
-  function addManualItem() { const m = form.order_input_mode || 'cases'; setOrderItems(prev => [...prev, { product_code: '', product_name: '', input_mode: m, cases: m === 'cases' ? 1 : null, quantity: m === 'cases' ? 6 : 1, units_per_case: 6, unit_price: 0, notes: '' }]) }
+  function addManualItem() {
+    const m = form.order_input_mode || 'cases'
+    const isBulk = m === 'bulk'
+    const imode = isBulk ? 'units' : (m === 'units' ? 'units' : 'cases')
+    setOrderItems(prev => [...prev, {
+      product_code: '', product_name: '',
+      input_mode: imode,
+      item_type: isBulk ? 'bulk' : 'pack',
+      cases: imode === 'cases' ? 1 : null,
+      quantity: imode === 'cases' ? 6 : 1,
+      units_per_case: 6, unit_price: 0, notes: ''
+    }])
+  }
   function updateEditItem(idx, field, val) { setEditItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeEditItem(idx) { setEditItems(prev => prev.filter((_, i) => i !== idx)) }
   function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'cases', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '', isNew: true }]) }
@@ -1018,18 +1054,30 @@ export default function Orders() {
             <div className="field">
               <label>Order Type</label>
               <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', marginBottom: form.order_input_mode ? 16 : 0 }}>
-                {['cases','units'].map(m => (
-                  <button key={m} onClick={() => setForm(f => ({ ...f, order_input_mode: m }))} style={{
-                    flex:1, padding:'10px 12px', border:'none', cursor:'pointer', fontSize:13,
-                    fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',
-                    background: form.order_input_mode === m ? 'var(--kk-green)' : 'var(--surface)',
-                    color: form.order_input_mode === m ? 'var(--kk-cream)' : 'var(--ink3)',
-                    fontWeight: form.order_input_mode === m ? 700 : 400,
-                  }}>{m === 'cases' ? '📦 Order in Cases' : '🔢 Order in Units'}</button>
+                {[
+                  { key:'cases', label:'📦 Cases' },
+                  { key:'units', label:'🔢 Units' },
+                  { key:'bulk',  label:'🧺 Bulk' },
+                  { key:'mix',   label:'🔀 Mix' },
+                ].map(m => (
+                  <button key={m.key} onClick={() => setForm(f => ({ ...f, order_input_mode: m.key }))} style={{
+                    flex:1, padding:'10px 8px', border:'none', cursor:'pointer', fontSize:12,
+                    fontFamily:'var(--display)', letterSpacing:0.5, textTransform:'uppercase',
+                    background: form.order_input_mode === m.key ? 'var(--kk-green)' : 'var(--surface)',
+                    color: form.order_input_mode === m.key ? 'var(--kk-cream)' : 'var(--ink3)',
+                    fontWeight: form.order_input_mode === m.key ? 700 : 400,
+                    borderRight: '1px solid var(--border)',
+                  }}>{m.label}</button>
                 ))}
               </div>
               {!form.order_input_mode && (
                 <div style={{ fontSize:11, color:'var(--amber)', marginTop:4 }}>⚠️ Select order type to continue</div>
+              )}
+              {form.order_input_mode === 'bulk' && (
+                <div style={{ fontSize:11, color:'var(--ink3)', marginTop:4 }}>🧺 Bulk = single units. Products auto-switch to bulk codes (Bu).</div>
+              )}
+              {form.order_input_mode === 'mix' && (
+                <div style={{ fontSize:11, color:'var(--ink3)', marginTop:4 }}>🔀 Mix = set Pack or Bulk per item. Pack items use Cases/Units toggle.</div>
               )}
             </div>
             {form.order_input_mode && (
@@ -1101,6 +1149,37 @@ export default function Orders() {
                 {orderItems.map((item, idx) => (
                   <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
                     <div style={{ flex:3, minWidth:180 }}>
+                      {/* Pack/Bulk toggle for Mix mode */}
+                      {form.order_input_mode === 'mix' && (
+                        <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden', marginBottom:4 }}>
+                          {['pack','bulk'].map(t => (
+                            <button key={t} onClick={() => {
+                              const newType = t
+                              const isBulk = newType === 'bulk'
+                              // Switch product code if bulk map exists
+                              const currentCode = item.product_code
+                              let newCode = currentCode
+                              if (isBulk && BULK_MAP[currentCode]) newCode = BULK_MAP[currentCode]
+                              if (!isBulk) {
+                                // reverse lookup
+                                const reverseEntry = Object.entries(BULK_MAP).find(([, v]) => v === currentCode)
+                                if (reverseEntry) newCode = reverseEntry[0]
+                              }
+                              const p = products.find(p => p.code === newCode)
+                              updateItem(idx, 'item_type', newType)
+                              updateItem(idx, 'input_mode', isBulk ? 'units' : 'cases')
+                              updateItem(idx, 'product_code', newCode)
+                              updateItem(idx, 'product_name', p?.name || item.product_name)
+                              updateItem(idx, 'unit_price', p?.price_per_unit || 0)
+                            }} style={{
+                              flex:1, padding:'3px 8px', border:'none', cursor:'pointer', fontSize:10,
+                              fontFamily:'var(--display)', textTransform:'uppercase',
+                              background: (item.item_type || 'pack') === t ? '#E79B81' : 'var(--surface)',
+                              color: (item.item_type || 'pack') === t ? '#fff' : 'var(--ink3)',
+                            }}>{t}</button>
+                          ))}
+                        </div>
+                      )}
                       <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''}
                         onChange={e => {
                           if (e.target.value === 'OTHER') {
@@ -1120,31 +1199,37 @@ export default function Orders() {
                       </select>
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
-                      <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden', fontSize:11 }}>
-                        {['cases','units'].map(m => (
-                          <button key={m} onClick={() => {
-                            updateItem(idx, 'input_mode', m)
-                            if (m === 'units') {
-                              updateItem(idx, 'cases', null)
-                            } else {
-                              const p = products.find(p => p.code === item.product_code)
-                              const upc = getUnitsPerCase(p)
-                              const cs = item.quantity ? Math.round(item.quantity / upc) : 1
-                              updateItem(idx, 'cases', cs)
-                              updateItem(idx, 'quantity', cs * upc)
-                            }
-                          }} style={{
-                            padding:'4px 8px', border:'none', cursor:'pointer', fontSize:11,
-                            background: (item.input_mode || 'cases') === m ? 'var(--kk-green)' : 'var(--surface)',
-                            color: (item.input_mode || 'cases') === m ? 'var(--kk-cream)' : 'var(--ink3)',
-                            fontFamily:'var(--display)', letterSpacing:0.5, textTransform:'uppercase',
-                          }}>{m}</button>
-                        ))}
-                      </div>
-                      <input type="number" value={(item.input_mode || 'cases') === 'cases' ? (item.cases || 1) : item.quantity}
+                      {/* Cases/Units toggle — hidden for bulk items */}
+                      {(item.item_type !== 'bulk' && form.order_input_mode !== 'bulk') && (
+                        <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden', fontSize:11 }}>
+                          {['cases','units'].map(m => (
+                            <button key={m} onClick={() => {
+                              updateItem(idx, 'input_mode', m)
+                              if (m === 'units') {
+                                updateItem(idx, 'cases', null)
+                              } else {
+                                const p = products.find(p => p.code === item.product_code)
+                                const upc = getUnitsPerCase(p)
+                                const cs = item.quantity ? Math.round(item.quantity / upc) : 1
+                                updateItem(idx, 'cases', cs)
+                                updateItem(idx, 'quantity', cs * upc)
+                              }
+                            }} style={{
+                              padding:'4px 8px', border:'none', cursor:'pointer', fontSize:11,
+                              background: (item.input_mode || 'cases') === m ? 'var(--kk-green)' : 'var(--surface)',
+                              color: (item.input_mode || 'cases') === m ? 'var(--kk-cream)' : 'var(--ink3)',
+                              fontFamily:'var(--display)', letterSpacing:0.5, textTransform:'uppercase',
+                            }}>{m}</button>
+                          ))}
+                        </div>
+                      )}
+                      {(item.item_type === 'bulk' || form.order_input_mode === 'bulk') && (
+                        <span style={{ fontSize:10, color:'#E79B81', fontFamily:'var(--display)', letterSpacing:1, padding:'4px 8px', background:'#fff3ee', borderRadius:4 }}>BULK</span>
+                      )}
+                      <input type="number" value={(item.input_mode === 'cases') ? (item.cases || 1) : item.quantity}
                         onChange={e => {
                           const val = parseFloat(e.target.value) || 0
-                          if ((item.input_mode || 'cases') === 'cases') {
+                          if (item.input_mode === 'cases') {
                             const p = products.find(p => p.code === item.product_code)
                             const upc = getUnitsPerCase(p)
                             updateItem(idx, 'cases', e.target.value)
@@ -1155,7 +1240,7 @@ export default function Orders() {
                             updateItem(idx, 'cases', null)
                           }
                         }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
-                      {(item.input_mode || 'cases') === 'cases' && (
+                      {item.input_mode === 'cases' && (
                         <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>
                       )}
                     </div>

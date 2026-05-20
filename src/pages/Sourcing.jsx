@@ -102,7 +102,7 @@ export function Sourcing() {
         method: 'POST',
         headers: API_HEADERS,
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5',
+          model: 'claude-sonnet-4-5-20251001',
           max_tokens: 200,
           messages: [{
             role: 'user',
@@ -421,12 +421,18 @@ export function Sourcing() {
             {/* Lot # Photo */}
             <div className="field">
               <label>📷 Lot # Photo</label>
-              <input ref={photoInputRef} type="file" accept="image/*" capture="environment"
+              <input ref={photoInputRef} type="file" accept="image/*"
                 onChange={handleLotPhoto} style={{ display: 'none' }} />
-              <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginBottom: 8 }}
-                onClick={() => photoInputRef.current.click()}>
-                {lotPhotoPreview ? '📷 Retake Photo' : '📷 Take Photo of Lot #'}
-              </button>
+              <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+                <button className="btn btn-secondary" style={{ flex:1 }}
+                  onClick={() => { photoInputRef.current.removeAttribute('capture'); photoInputRef.current.click() }}>
+                  📁 Upload Photo
+                </button>
+                <button className="btn btn-secondary" style={{ flex:1 }}
+                  onClick={() => { photoInputRef.current.setAttribute('capture','environment'); photoInputRef.current.click() }}>
+                  📷 Take Photo
+                </button>
+              </div>
               {lotPhotoPreview && (
                 <img src={lotPhotoPreview} alt="Lot label" style={{ width: '100%', borderRadius: 8, maxHeight: 150, objectFit: 'contain', background: '#f5f5f5', marginBottom: 8 }} />
               )}

@@ -261,6 +261,19 @@ export default function Production() {
     loadData()
   }
 
+  function startFromSchedule(s) {
+    setForm({
+      date: new Date().toISOString().split('T')[0],
+      code: s.product_code,
+      inputType: s.input_type || 'trays',
+      inputQty: String(s.planned_input),
+      outputUnits: String(s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)),
+      notes: s.notes || '',
+    })
+    setView('log')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function deleteSchedule(id, productCode) {
     if (!window.confirm(`Delete this scheduled production for ${productCode}?`)) return
     await supabase.from('production_schedule').delete().eq('id', id)
@@ -409,7 +422,7 @@ export default function Production() {
                             {rows.map(s => (
                               <ScheduleRow key={s.id} s={s} allSchedule={schedule} statusColors={statusColors}
                                 onStatusChange={updateScheduleStatus} onDelete={deleteSchedule}
-                                onEdit={openEditModal} calcOutput={calcOutput} />
+                                onEdit={openEditModal} calcOutput={calcOutput} onStart={startFromSchedule} />
                             ))}
                           </tbody>
                         </table>
@@ -585,7 +598,7 @@ function DailyTotal({ rows, products }) {
   )
 }
 
-function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, onEdit, calcOutput }) {
+function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, onEdit, calcOutput, onStart }) {
   const [rmStatus, setRMStatus] = useState(null)
   const [batchValue, setBatchValue] = useState(null)
 
@@ -666,14 +679,20 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
         </select>
       </td>
       <td>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {(s.status === 'planned' || s.status === 'in_progress') && (
+            <button onClick={() => onStart(s)}
+              style={{ background: '#E79B81', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)', fontWeight: 700 }}>
+              ▶ Run
+            </button>
+          )}
           <button onClick={() => onEdit(s)}
             style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
             Edit
           </button>
           <button onClick={() => onDelete(s.id, s.product_code)}
             style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
-            Delete
+            Del
           </button>
         </div>
       </td>

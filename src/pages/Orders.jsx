@@ -902,7 +902,7 @@ export default function Orders() {
     setExportLoading(true)
     try {
       const offset = exportWeek === 'next' ? 1 : 0
-      const sheetOrders = orders.filter(o => o.status !== 'archived' && isWeekOrder(o, offset))
+      const sheetOrders = orders.filter(o => isWeekOrder(o, offset))
       if (!sheetOrders.length) { alert(`No active orders for ${exportWeek === 'next' ? 'next' : 'this'} week.`); setExportLoading(false); return }
       const weekLabel = getWeekLabel(offset)
       const wb = XLSX.utils.book_new()
@@ -1027,8 +1027,10 @@ export default function Orders() {
                 </tr></thead>
                 <tbody>
                   {filteredByStatus.length === 0 && <tr><td colSpan={10} style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>No orders</td></tr>}
-                  {filteredByStatus.map(o => (
-                    <tr key={o.id} style={{ background: selectedOrders.has(o.id) ? 'var(--green-l)' : '' }}>
+                  {filteredByStatus.map(o => {
+                    const isStale = o.status !== 'archived' && o.dispatch_date && !isWeekOrder(o, 0) && !isWeekOrder(o, 1)
+                    return (
+                    <tr key={o.id} style={{ background: selectedOrders.has(o.id) ? 'var(--green-l)' : isStale ? '#FFF8E1' : '' }}>
                       <td>
                         <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleOrder(o.id)} style={{cursor:'pointer'}} />
                       </td>
@@ -1040,13 +1042,21 @@ export default function Orders() {
                       <td style={{ fontSize:11 }}>{o.order_items?.length || 0}</td>
                       {isAdmin && <td style={{ fontWeight:600, color:'var(--kk-green)', fontSize:12 }}>${(o.total_value||0).toFixed(2)}</td>}
                       <td><span className={`badge badge-${STATUS_COLORS[o.status]}`}>{STATUS_LABELS[o.status]}</span></td>
-                      <td style={{ display:'flex', gap:4 }}>
+                      <td style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
                         <button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button>
                         {isAdmin && <button onClick={() => startEditOrder(o)} className="btn btn-secondary btn-sm">Edit</button>}
+                        {isAdmin && (
+                          <button onClick={() => updateStatus(o.id, o.status === 'archived' ? 'order_sheet' : 'archived')}
+                            className="btn btn-sm"
+                            style={{ background: o.status === 'archived' ? '#7e57c2' : 'var(--surface)', color: o.status === 'archived' ? '#fff' : 'var(--ink3)', border: '1px solid var(--border)' }}>
+                            {o.status === 'archived' ? '↩' : '🗄'}
+                          </button>
+                        )}
                         {isAdmin && <button onClick={async () => { if(window.confirm('Delete order ' + o.order_number + '?')) { await supabase.from('orders').delete().eq('id', o.id); await loadData(); }}} className="btn btn-red btn-sm">Del</button>}
                       </td>
                     </tr>
-                  ))}
+                  )})
+                  }
                 </tbody>
               </table>
             </div>
@@ -1377,7 +1387,8 @@ export default function Orders() {
                       {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${((item.packs || (item.cases ? item.cases*(item.packs_per_case||6) : item.quantity)) * (item.price_per_pack||0)).toFixed(2)}</td>}
                       <td style={{ fontSize:11, color:'var(--ink3)' }}>{item.notes || '—'}</td>
                     </tr>
-                  ))}
+                  )})
+                  }
                 </tbody>
               </table>
             </div>

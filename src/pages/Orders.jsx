@@ -1030,7 +1030,7 @@ export default function Orders() {
                   {filteredByStatus.map(o => {
                     const isStale = o.status !== 'archived' && o.dispatch_date && !isWeekOrder(o, 0) && !isWeekOrder(o, 1)
                     return (
-                    <tr key={o.id} style={{ background: selectedOrders.has(o.id) ? 'var(--green-l)' : isStale ? '#FFF8E1' : '' }}>
+                      <tr key={o.id} style={{ background: selectedOrders.has(o.id) ? 'var(--green-l)' : isStale ? '#FFF8E1' : '' }}>
                       <td>
                         <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleOrder(o.id)} style={{cursor:'pointer'}} />
                       </td>
@@ -1055,8 +1055,8 @@ export default function Orders() {
                         {isAdmin && <button onClick={async () => { if(window.confirm('Delete order ' + o.order_number + '?')) { await supabase.from('orders').delete().eq('id', o.id); await loadData(); }}} className="btn btn-red btn-sm">Del</button>}
                       </td>
                     </tr>
-                  )})
-                  }
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1387,8 +1387,8 @@ export default function Orders() {
                       {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${((item.packs || (item.cases ? item.cases*(item.packs_per_case||6) : item.quantity)) * (item.price_per_pack||0)).toFixed(2)}</td>}
                       <td style={{ fontSize:11, color:'var(--ink3)' }}>{item.notes || '—'}</td>
                     </tr>
-                  )})
-                  }
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

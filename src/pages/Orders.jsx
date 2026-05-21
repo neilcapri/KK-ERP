@@ -556,7 +556,7 @@ function printDispatchSlip(ordersInput) {
     .page { width: 210mm; height: 297mm; padding: 4mm; display: grid; grid-template-rows: auto 1fr; page-break-after: always; overflow: hidden; }
     .page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 2px; margin-bottom: 3px; }
     .logo { font-size: 12px; font-weight: 900; letter-spacing: 2px; }
-    .slips-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; height: 100%; }
+    .slips-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; height: 70%; }
     .order-block { border: 1.5px solid #000; display: flex; flex-direction: column; overflow: hidden; }
     .order-header { border-bottom: 1.5px solid #000; padding: 3px 6px; flex-shrink: 0; }
     .order-header strong { font-size: 15px; font-weight: 900; display: block; line-height: 1.3; }

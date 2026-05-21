@@ -898,6 +898,78 @@ export default function Orders() {
     if (viewOrder?.id === id) setViewOrder(v => ({ ...v, status }))
   }
 
+  async function exportManifest() {
+    if (!selectedOrders.size) { alert('Select orders first.'); return }
+    const toExport = orders.filter(o => selectedOrders.has(o.id))
+
+    // Fetch customer addresses for selected orders
+    const customerNames = [...new Set(toExport.map(o => o.customer_name))]
+    const { data: custData } = await supabase
+      .from('customers')
+      .select('name, street_address, city, province, postal_code, phone')
+      .in('name', customerNames)
+    const custMap = {}
+    ;(custData || []).forEach(c => { custMap[c.name] = c })
+
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.aoa_to_sheet([])
+
+    const rows = []
+    // Title
+    rows.push([`KONSCIOUS KITCHEN — DELIVERY MANIFEST — ${new Date().toLocaleDateString('en-CA')}`])
+    rows.push([])
+
+    // Header
+    rows.push(['#', 'Store Name', 'Address', 'City', 'Special Notes'])
+
+    toExport.forEach((order, i) => {
+      const cust = custMap[order.customer_name] || {}
+      const addr = [cust.street_address, cust.province, cust.postal_code].filter(Boolean).join(', ')
+      rows.push([
+        i + 1,
+        order.customer_name,
+        addr || '—',
+        cust.city || '—',
+        order.notes || '—',
+      ])
+    })
+
+    XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
+
+    // Column widths
+    ws['!cols'] = [{ wch: 4 }, { wch: 32 }, { wch: 40 }, { wch: 18 }, { wch: 35 }]
+
+    // Style title row
+    const encode = (r, c) => XLSX.utils.encode_cell({ r, c })
+    for (let c = 0; c < 5; c++) {
+      const addr2 = encode(0, c)
+      if (!ws[addr2]) ws[addr2] = { v: '', t: 's' }
+      ws[addr2].s = { font: { bold: true, sz: 13, color: { rgb: 'E3DDD1' } }, fill: { fgColor: { rgb: '223824' } }, alignment: { horizontal: 'left' } }
+    }
+    // Style header row
+    for (let c = 0; c < 5; c++) {
+      const addr2 = encode(2, c)
+      if (!ws[addr2]) ws[addr2] = { v: '', t: 's' }
+      ws[addr2].s = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '2D4A35' } }, alignment: { horizontal: 'left' } }
+    }
+    // Style data rows
+    for (let r = 3; r < rows.length; r++) {
+      const bg = r % 2 === 0 ? 'F5F5F5' : 'FFFFFF'
+      for (let c = 0; c < 5; c++) {
+        const addr2 = encode(r, c)
+        if (!ws[addr2]) ws[addr2] = { v: '', t: 's' }
+        ws[addr2].s = { font: { sz: 12 }, fill: { fgColor: { rgb: bg } }, alignment: { horizontal: 'left', wrapText: true } }
+      }
+    }
+
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }]
+    ws['!rows'] = [{ hpt: 24 }, { hpt: 6 }, { hpt: 20 }]
+    for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 40 }
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Delivery Manifest')
+    XLSX.writeFile(wb, `KK_Delivery_Manifest_${new Date().toISOString().split('T')[0]}.xlsx`)
+  }
+
   async function exportOrderSheet(includePricing) {
     setExportLoading(true)
     try {
@@ -962,9 +1034,14 @@ export default function Orders() {
         <div><h2>ORDERS</h2><p>Incoming order management</p></div>
         <div style={{ display:'flex', gap:8 }}>
           {selectedOrders.size > 0 && (
-            <button className="btn btn-secondary" onClick={printSelected}>
-              🖨️ Print {selectedOrders.size} Slip{selectedOrders.size > 1 ? 's' : ''}
-            </button>
+            <>
+              <button className="btn btn-secondary" onClick={printSelected}>
+                🖨️ Print {selectedOrders.size} Slip{selectedOrders.size > 1 ? 's' : ''}
+              </button>
+              <button className="btn btn-secondary" onClick={exportManifest}>
+                📋 Manifest ({selectedOrders.size})
+              </button>
+            </>
           )}
           {isAdmin && <button className="btn btn-green" onClick={() => setShowModal(true)}>+ New Order</button>}
         </div>

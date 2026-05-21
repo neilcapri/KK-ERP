@@ -738,8 +738,8 @@ export default function Orders() {
       }
 
       const p = products.find(p => p.code === productCode)
-      const ppc = getPacksPerCase(p)
-      const upp = getUnitsPerPack(p)
+      const ppc = parseInt(p?.packs_per_case) || 6
+      const upp = UNITS_PER_PACK_MAP[productCode] || parseInt(p?.units_per_pack) || 1
       const upc = ppc * upp
       const imode = (itemMode === 'bulk') ? 'units' : (orderMode === 'units' ? 'units' : 'cases')
       const cases = imode === 'cases' ? parseFloat(i.quantity) : null
@@ -1231,8 +1231,8 @@ export default function Orders() {
                             updateItem(idx, 'price_per_pack', 0)
                           } else {
                             const p = products.find(p => p.code === e.target.value)
-                            const ppc = getPacksPerCase(p)
-                            const upp = getUnitsPerPack(p)
+                            const ppc = parseInt(p?.packs_per_case) || 6
+                            const upp = UNITS_PER_PACK_MAP[p?.code] || parseInt(p?.units_per_pack) || 1
                             const upc = ppc * upp
                             updateItem(idx, 'product_code', p?.code || '')
                             updateItem(idx, 'product_name', p?.name || item.product_name)
@@ -1285,8 +1285,8 @@ export default function Orders() {
                           const val = parseFloat(e.target.value) || 0
                           if (item.input_mode === 'cases') {
                             const p = products.find(p => p.code === item.product_code)
-                            const ppc = getPacksPerCase(p)
-                            const upp = getUnitsPerPack(p)
+                            const ppc = parseInt(p?.packs_per_case) || 6
+                            const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1
                             const upc = ppc * upp
                             updateItem(idx, 'cases', e.target.value)
                             updateItem(idx, 'packs', val * ppc)

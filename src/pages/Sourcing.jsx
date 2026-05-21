@@ -27,6 +27,7 @@ export function Sourcing() {
   const [ocrLoading, setOcrLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const photoInputRef = useRef(null)
+  const cameraInputRef = useRef(null)
 
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -131,7 +132,8 @@ export function Sourcing() {
       console.error('OCR failed', err)
     }
     setOcrLoading(false)
-    photoInputRef.current.value = ''
+    if (photoInputRef.current) photoInputRef.current.value = ''
+      if (cameraInputRef.current) cameraInputRef.current.value = ''
   }
 
   function openEdit(entry) {
@@ -423,13 +425,15 @@ export function Sourcing() {
               <label>📷 Lot # Photo</label>
               <input ref={photoInputRef} type="file" accept="image/*"
                 onChange={handleLotPhoto} style={{ display: 'none' }} />
+              <input ref={cameraInputRef} type="file" accept="image/*" capture="environment"
+                onChange={handleLotPhoto} style={{ display: 'none' }} />
               <div style={{ display:'flex', gap:8, marginBottom:8 }}>
                 <button className="btn btn-secondary" style={{ flex:1 }}
-                  onClick={() => { photoInputRef.current.removeAttribute('capture'); photoInputRef.current.click() }}>
+                  onClick={() => photoInputRef.current.click()}>
                   📁 Upload Photo
                 </button>
                 <button className="btn btn-secondary" style={{ flex:1 }}
-                  onClick={() => { photoInputRef.current.setAttribute('capture','environment'); photoInputRef.current.click() }}>
+                  onClick={() => cameraInputRef.current.click()}>
                   📷 Take Photo
                 </button>
               </div>
@@ -650,7 +654,7 @@ export function Reports() {
           <div className="card">
             <div className="card-title">
               Raw Material Stock — {new Date().toLocaleDateString('en-CA')}
-              <button className="btn btn-secondary btn-sm" onClick={() => exportCSV(rms.map(r=>({name:r.name,category:r.category,stock:r.stock,unit:r.unit,supplier:r.supplier,price:r.price_per_unit,status:r.stock<=0?'OUT':r.stock<=r.min_stock?'LOW':'OK'})),'KK_RM_'+new Date().toISOString().split('T')[0]+'.csv')}>Export CSV</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => exportCSV(rms.map(r=>({name:r.name,category:r.category,stock:r.stock,unit:r.unit,supplier:r.supplier,price:r.price_per_pack,status:r.stock<=0?'OUT':r.stock<=r.min_stock?'LOW':'OK'})),'KK_RM_'+new Date().toISOString().split('T')[0]+'.csv')}>Export CSV</button>
             </div>
             <div className="table-wrap">
               <table>
@@ -665,7 +669,7 @@ export function Reports() {
                         <td style={{ fontWeight: 600, color: `var(--${s})` }}>{r.stock?.toFixed(3)}</td>
                         <td style={{ color: 'var(--ink3)' }}>{r.unit}</td>
                         <td style={{ fontSize: 11 }}>{r.supplier}</td>
-                        <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{r.price_per_unit > 0 ? `$${r.price_per_unit.toFixed(2)}` : '—'}</td>
+                        <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{r.price_per_pack > 0 ? `$${r.price_per_pack.toFixed(2)}` : '—'}</td>
                         <td><span className={`badge badge-${s}`}>{r.stock<=0?'OUT':r.stock<=r.min_stock?'LOW':'OK'}</span></td>
                       </tr>
                     )

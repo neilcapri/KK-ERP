@@ -525,10 +525,10 @@ function printDispatchSlip(ordersInput) {
         <strong>${order.customer_name}</strong>
         <div class="order-meta">${order.slip_number || ''} · <b>Inv #: ___________</b> · ${order.dispatch_date || order.delivery_day || '—'}</div>
       </div>
-      <table><thead><tr>
+      <div class="table-wrap"><table><thead><tr>
         <th>Product</th>
-        <th style="width:85px;text-align:center">Cs / Units</th>
-        <th style="width:85px;background:#fffde7">Prod. Date</th>
+        <th style="width:90px;text-align:center">Cs / Units</th>
+        <th style="width:90px;background:#fffde7">Prod. Date</th>
       </tr></thead><tbody>
       ${(order.order_items || []).map(item => {
         const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
@@ -537,7 +537,7 @@ function printDispatchSlip(ordersInput) {
           <td style="text-align:center;font-weight:900">${cases} / ${item.quantity}</td>
           <td style="background:#fffde7">&nbsp;</td>
         </tr>`}).join('')}
-      </tbody></table>
+      </tbody></table></div>
     </div>`
 
   const renderPage = (pageOrders, pageNum, total) => `
@@ -553,17 +553,18 @@ function printDispatchSlip(ordersInput) {
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; background: #fff; color: #000; }
-    .page { width: 210mm; min-height: 297mm; padding: 4mm; display: flex; flex-direction: column; page-break-after: always; }
+    .page { width: 210mm; height: 297mm; padding: 4mm; display: grid; grid-template-rows: auto 1fr; page-break-after: always; overflow: hidden; }
     .page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 2px; margin-bottom: 3px; }
     .logo { font-size: 12px; font-weight: 900; letter-spacing: 2px; }
-    .slips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; align-content: start; }
-    .order-block { border: 1.5px solid #000; break-inside: avoid; }
-    .order-header { border-bottom: 1.5px solid #000; padding: 2px 4px; }
-    .order-header strong { font-size: 14px; font-weight: 900; display: block; line-height: 1.2; }
-    .order-meta { font-size: 10px; font-weight: 600; color: #333; }
-    table { width: 100%; border-collapse: collapse; }
-    th { background: #e8e8e8; padding: 1px 4px; font-size: 9px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }
-    td { padding: 1px 4px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: middle; }
+    .slips-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; height: 100%; }
+    .order-block { border: 1.5px solid #000; display: flex; flex-direction: column; overflow: hidden; }
+    .order-header { border-bottom: 1.5px solid #000; padding: 3px 6px; flex-shrink: 0; }
+    .order-header strong { font-size: 15px; font-weight: 900; display: block; line-height: 1.3; }
+    .order-meta { font-size: 11px; font-weight: 600; color: #333; }
+    .table-wrap { flex: 1; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; height: 100%; }
+    th { background: #e8e8e8; padding: 3px 6px; font-size: 10px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }
+    td { padding: 4px 6px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: middle; }
     @media print { body { margin: 0; } .page { page-break-after: always; } }
   </style></head><body>
     ${pages.map((pg, i) => renderPage(pg, i+1, pages.length)).join('')}

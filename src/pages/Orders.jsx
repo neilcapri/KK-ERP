@@ -1087,7 +1087,7 @@ export default function Orders() {
             </div>
             <div className="field-row">
               <div className="field" style={{ margin:0 }}>
-                <label>Delivery Day</label>
+                <label>Packing Day</label>
                 <select style={sel} value={form.delivery_day} onChange={e => setForm(f=>({...f,delivery_day:e.target.value}))}>
                   <option value="">Select day...</option>
                   {DELIVERY_DAYS.map(d => <option key={d}>{d}</option>)}
@@ -1362,7 +1362,7 @@ export default function Orders() {
               </div>
             )}
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16, fontSize:12 }}>
-              <div><span style={{ color:'var(--ink3)' }}>Delivery Day:</span> <strong>{viewOrder.delivery_day || '—'}</strong></div>
+              <div><span style={{ color:'var(--ink3)' }}>Packing Day:</span> <strong>{viewOrder.delivery_day || '—'}</strong></div>
               <div><span style={{ color:'var(--ink3)' }}>Dispatch Date:</span> <strong>{viewOrder.dispatch_date || '—'}</strong></div>
               {isAdmin && <div><span style={{ color:'var(--ink3)' }}>Total Value:</span> <strong style={{ color:'var(--kk-green)' }}>${(viewOrder.total_value||0).toFixed(2)}</strong></div>}
               <div><span style={{ color:'var(--ink3)' }}>Created by:</span> <strong>{viewOrder.created_by_name}</strong></div>
@@ -1420,7 +1420,7 @@ export default function Orders() {
             </div>
             <div className="field-row">
               <div className="field" style={{ margin:0 }}>
-                <label>Delivery Day</label>
+                <label>Packing Day</label>
                 <select style={sel} value={editingOrder.delivery_day || ''} onChange={e => setEditingOrder(o=>({...o,delivery_day:e.target.value}))}>
                   <option value="">Select day...</option>
                   {DELIVERY_DAYS.map(d => <option key={d}>{d}</option>)}

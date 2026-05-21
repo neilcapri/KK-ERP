@@ -437,8 +437,16 @@ function isWeekOrder(order, offset = 0) {
 
 // ── Case / Pack / Unit helpers ───────────────────────────────
 function getPacksPerCase(product) { return product?.packs_per_case || 6 }
-function getUnitsPerPack(product) { return product?.units_per_pack || 1 }
-function getUnitsPerCase(product) { return (product?.packs_per_case || 6) * (product?.units_per_pack || 1) }
+function getUnitsPerPack(product) {
+  if (product?.units_per_pack && product.units_per_pack > 1) return product.units_per_pack
+  // Derive from units_per_case / packs_per_case if available
+  if (product?.units_per_case && product?.packs_per_case) return Math.round(product.units_per_case / product.packs_per_case)
+  return 1
+}
+function getUnitsPerCase(product) {
+  if (product?.units_per_case) return product.units_per_case
+  return getPacksPerCase(product) * getUnitsPerPack(product)
+}
 function packsFromCases(product, cases) { return (parseFloat(cases) || 0) * getPacksPerCase(product) }
 
 // ── Customer Combobox ─────────────────────────────────────────
@@ -603,6 +611,7 @@ SPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):
 - carrot mini cake = CMC
 - lemon mini cake = LMC
 - truffle mini cake = TMC
+- almond biscotti / keto biscotti / biscotti shelf stable / almond biscottis = KABIS
 - Use semantic understanding for anything not listed above
 - If 60% confident it matches, mark matched: true
 

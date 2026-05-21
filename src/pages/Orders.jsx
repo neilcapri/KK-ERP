@@ -516,32 +516,25 @@ function CustomerSelect({ customers, value, onChange, onAddNew }) {
 
 // ── Dispatch Slip Print ───────────────────────────────────────
 function printDispatchSlip(ordersInput) {
-  const totalItems = ordersInput.reduce((s, o) => s + (o.order_items?.length || 0), 0)
-  const perPage = totalItems <= 16 ? 4 : totalItems <= 24 ? 3 : 2
   const pages = []
-  for (let i = 0; i < ordersInput.length; i += perPage) pages.push(ordersInput.slice(i, i + perPage))
-  const fontSize = perPage === 4 ? '9px' : '10px'
-  const tdPad = perPage === 4 ? '4px 8px' : '6px 10px'
+  for (let i = 0; i < ordersInput.length; i += 4) pages.push(ordersInput.slice(i, i + 4))
 
   const renderOrder = (order) => `
     <div class="order-block">
       <div class="order-header">
-        <div>
-          <strong>${order.customer_name}</strong>
-          <div style="font-size:11px;margin-top:2px;font-weight:600">${order.order_source}${order.po_number ? ` · PO: ${order.po_number}` : ''} · ${order.slip_number || ''} · <span style="font-weight:900">Inv #: ___________</span></div>
-        </div>
-        <span style="font-size:12px;font-weight:700">Dispatch: ${order.dispatch_date || order.delivery_day || '—'}</span>
+        <strong>${order.customer_name}</strong>
+        <div class="order-meta">${order.slip_number || ''} · <b>Inv #: ___________</b> · ${order.dispatch_date || order.delivery_day || '—'}</div>
       </div>
       <table><thead><tr>
         <th>Product</th>
-        <th style="width:70px;text-align:center">Qty</th>
-        <th style="width:110px;background:#fffde7">Prod. Date</th>
+        <th style="width:85px;text-align:center">Cs / Units</th>
+        <th style="width:85px;background:#fffde7">Prod. Date</th>
       </tr></thead><tbody>
       ${(order.order_items || []).map(item => {
         const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
         return `<tr>
-          <td>${item.product_name}${item.product_code ? ` <span style="color:#333;font-size:11px;font-weight:600">(${item.product_code})</span>` : ''}</td>
-          <td style="text-align:center;font-weight:900;font-size:14px">${cases} cs / ${item.quantity} u</td>
+          <td>${item.product_name} <span style="font-weight:700">(${item.product_code})</span></td>
+          <td style="text-align:center;font-weight:900">${cases} / ${item.quantity}</td>
           <td style="background:#fffde7">&nbsp;</td>
         </tr>`}).join('')}
       </tbody></table>
@@ -550,44 +543,38 @@ function printDispatchSlip(ordersInput) {
   const renderPage = (pageOrders, pageNum, total) => `
     <div class="page">
       <div class="page-header">
-        <div><div class="logo">KK ERP</div><div class="logo-sub">KONSCIOUS KITCHEN</div></div>
-        <div style="text-align:right">
-          <div class="slip-title">DISPATCH SLIP</div>
-          <div style="font-size:9px;color:#888">Page ${pageNum}/${total} · ${new Date().toLocaleDateString('en-CA')}</div>
-        </div>
+        <span class="logo">KONSCIOUS KITCHEN</span>
+        <span style="font-size:10px;color:#555">DISPATCH · Page ${pageNum}/${total} · ${new Date().toLocaleDateString('en-CA')}</span>
       </div>
       <div class="slips-grid">${pageOrders.map(renderOrder).join('')}</div>
-      <div class="footer">Konscious Kitchen · MAD CLEAN INGREDIENTS · konsciouskitchen.com</div>
     </div>`
 
-  const html = `<!DOCTYPE html><html><head><title>KK Dispatch Slips</title>
+  const html = \`<!DOCTYPE html><html><head><title>KK Dispatch Slips</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; font-size: 14px; background: #fff; color: #000; }
-    .page { width: 210mm; min-height: 297mm; padding: 8mm; display: flex; flex-direction: column; page-break-after: always; }
-    .page-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #000; padding-bottom: 6px; margin-bottom: 8px; }
-    .logo { font-size: 18px; font-weight: 900; letter-spacing: 3px; color: #000; }
-    .logo-sub { font-size: 8px; letter-spacing: 2px; color: #333; }
-    .slip-title { font-size: 14px; font-weight: 700; color: #000; }
-    .slips-grid { display: grid; grid-template-columns: ${perPage === 1 ? '1fr' : '1fr 1fr'}; gap: 10px; align-content: start; }
-    .order-block { border: 2px solid #000; border-radius: 3px; overflow: visible; display: flex; flex-direction: column; break-inside: avoid; }
-    .order-header { background: #fff; color: #000; border-bottom: 2px solid #000; padding: 6px 10px; display: flex; justify-content: space-between; align-items: flex-start; flex-shrink: 0; }
-    .order-header strong { font-size: 15px; font-weight: 900; }
-    .order-header span { font-size: 11px; font-weight: 600; white-space: nowrap; }
+    body { font-family: Arial, sans-serif; background: #fff; color: #000; }
+    .page { width: 210mm; min-height: 297mm; padding: 4mm; display: flex; flex-direction: column; page-break-after: always; }
+    .page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 2px; margin-bottom: 3px; }
+    .logo { font-size: 12px; font-weight: 900; letter-spacing: 2px; }
+    .slips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; align-content: start; }
+    .order-block { border: 1.5px solid #000; break-inside: avoid; }
+    .order-header { border-bottom: 1.5px solid #000; padding: 2px 4px; }
+    .order-header strong { font-size: 14px; font-weight: 900; display: block; line-height: 1.2; }
+    .order-meta { font-size: 10px; font-weight: 600; color: #333; }
     table { width: 100%; border-collapse: collapse; }
-    th { background: #e8e8e8; padding: ${tdPad}; text-align: left; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; color: #000; font-weight: 700; border-bottom: 2px solid #000; }
-    td { padding: ${tdPad}; border-bottom: 1px solid #ccc; font-size: 14px; vertical-align: middle; color: #000; }
-    .footer { font-size: 10px; color: #333; text-align: center; padding-top: 6px; border-top: 1px solid #999; margin-top: 6px; font-weight: 600; }
+    th { background: #e8e8e8; padding: 1px 4px; font-size: 9px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }
+    td { padding: 1px 4px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: middle; }
     @media print { body { margin: 0; } .page { page-break-after: always; } }
   </style></head><body>
-    ${pages.map((pg, i) => renderPage(pg, i+1, pages.length)).join('')}
-  </body></html>`
+    \${pages.map((pg, i) => renderPage(pg, i+1, pages.length)).join('')}
+  </body></html>\`
 
   const w = window.open('', '_blank')
   w.document.write(html)
   w.document.close()
   w.print()
 }
+
 
 // ── AI helper ─────────────────────────────────────────────────
 async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '') {

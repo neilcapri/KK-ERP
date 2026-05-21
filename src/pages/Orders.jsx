@@ -436,16 +436,32 @@ function isWeekOrder(order, offset = 0) {
 }
 
 // ── Case / Pack / Unit helpers ───────────────────────────────
+
+const UNITS_PER_PACK_MAP = {
+  PBB: 2, PCC: 2, KLR: 2,
+  KAB: 5, KWAL: 5, HPCo: 5, PVHC: 5, KABIS: 5,
+  VPCAN: 3, VPB: 3, PNF: 3,
+  KSCD: 4, KHD: 2, VPBD: 2,
+  PVBRG: 1, KCOC: 1, PVBR: 1,
+  CMC: 1, LMC: 1, PRMC: 1, TMC: 1, KCC: 1, KLRCKE: 1,
+}
+
 function getPacksPerCase(product) { return product?.packs_per_case || 6 }
 function getUnitsPerPack(product) {
+  // First trust DB value if > 1
   if (product?.units_per_pack && product.units_per_pack > 1) return product.units_per_pack
-  // Derive from units_per_case / packs_per_case if available
-  if (product?.units_per_case && product?.packs_per_case) return Math.round(product.units_per_case / product.packs_per_case)
-  return 1
+  // Try deriving from units_per_case / packs_per_case
+  if (product?.units_per_case && product?.packs_per_case && product.units_per_case !== product.packs_per_case) {
+    return Math.round(product.units_per_case / product.packs_per_case)
+  }
+  // Fall back to known map
+  return UNITS_PER_PACK_MAP[product?.code] || 1
 }
 function getUnitsPerCase(product) {
-  if (product?.units_per_case) return product.units_per_case
-  return getPacksPerCase(product) * getUnitsPerPack(product)
+  const ppc = getPacksPerCase(product)
+  const upp = getUnitsPerPack(product)
+  if (product?.units_per_case && product.units_per_case > product.packs_per_case) return product.units_per_case
+  return ppc * upp
 }
 function packsFromCases(product, cases) { return (parseFloat(cases) || 0) * getPacksPerCase(product) }
 

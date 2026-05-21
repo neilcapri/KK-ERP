@@ -221,7 +221,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
       for (const item of items) {
         if (item.product_code) {
           qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
-          priceMap[item.product_code] = item.unit_price || 0
+          priceMap[item.product_code] = item.price_per_pack || 0
         }
       }
       const storeRow = [order.customer_name]
@@ -245,7 +245,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
       for (const item of items) {
         if (item.product_code) {
           qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
-          priceMap[item.product_code] = item.unit_price || 0
+          priceMap[item.product_code] = item.price_per_pack || 0
         }
       }
       RETAIL_COLS.forEach((col, ci) => {
@@ -270,7 +270,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     for (const item of items) {
       if (item.product_code) {
         qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
-        priceMap[item.product_code] = item.unit_price || 0
+        priceMap[item.product_code] = item.price_per_pack || 0
       }
     }
     RETAIL_COLS.forEach((col, ci) => {
@@ -335,7 +335,7 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
       for (const item of items) {
         if (item.product_code) {
           qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
-          priceMap2[item.product_code] = item.unit_price || 0
+          priceMap2[item.product_code] = item.price_per_pack || 0
         }
       }
       const storeRow = [order.customer_name]
@@ -359,7 +359,7 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
       for (const item of items) {
         if (item.product_code) {
           qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
-          priceMap3[item.product_code] = item.unit_price || 0
+          priceMap3[item.product_code] = item.price_per_pack || 0
         }
       }
       BULK_COLS.forEach((col, ci) => {
@@ -387,7 +387,7 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   for (const order of orders) {
     const items = order.order_items || []
     for (const item of items) {
-      if (BULK_CODES.has(item.product_code)) grandBulkValue += (item.quantity || 0) * (item.unit_price || 0)
+      if (BULK_CODES.has(item.product_code)) grandBulkValue += (item.quantity || 0) * (item.price_per_pack || 0)
     }
   }
   const grandTotalRow = ['GRAND TOTAL', ...grandBulkTotals.map(v => v || null)]
@@ -674,7 +674,7 @@ export default function Orders() {
     const [o, c, p] = await Promise.all([
       supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).limit(200),
       supabase.from('customers').select('*').order('name'),
-      supabase.from('products').select('code,name,category,price_per_unit,units_per_case,packs_per_case,units_per_pack').not('code','like','WIP%').order('code'),
+      supabase.from('products').select('code,name,category,price_per_pack,units_per_case,packs_per_case,units_per_pack').not('code','like','WIP%').order('code'),
     ])
     setOrders(o.data || [])
     setCustomers(c.data || [])
@@ -725,7 +725,7 @@ export default function Orders() {
         item_type: itemMode === 'bulk' ? 'bulk' : 'pack',
         cases, packs, quantity: qty,
         packs_per_case: ppc, units_per_pack: upp, units_per_case: upc,
-        unit_price: p?.price_per_unit || 0, notes: ''
+        price_per_pack: p?.price_per_pack || 0, notes: ''
       }
     })
     setOrderItems(enriched)
@@ -761,7 +761,7 @@ export default function Orders() {
   function handleUnmatchedSelect(idx, code) {
     const p = products.find(p => p.code === code)
     if (!p) return
-    setOrderItems(prev => [...prev, { product_code: code, product_name: p.name, quantity: unmatchedItems[idx].quantity, unit_price: p.price_per_unit || 0, notes: '' }])
+    setOrderItems(prev => [...prev, { product_code: code, product_name: p.name, quantity: unmatchedItems[idx].quantity, price_per_pack: p.price_per_pack || 0, notes: '' }])
     setUnmatchedItems(prev => prev.filter((_, i) => i !== idx))
   }
 
@@ -779,12 +779,12 @@ export default function Orders() {
       packs: imode === 'cases' ? 6 : null,
       quantity: imode === 'cases' ? 6 : 1,
       packs_per_case: 6, units_per_pack: 1, units_per_case: 6,
-      unit_price: 0, notes: ''
+      price_per_pack: 0, notes: ''
     }])
   }
   function updateEditItem(idx, field, val) { setEditItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeEditItem(idx) { setEditItems(prev => prev.filter((_, i) => i !== idx)) }
-  function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'cases', cases: 1, quantity: 6, units_per_case: 6, unit_price: 0, notes: '', isNew: true }]) }
+  function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'cases', cases: 1, quantity: 6, units_per_case: 6, price_per_pack: 0, notes: '', isNew: true }]) }
 
   function startEditOrder(order) {
     setEditingOrder({ ...order })
@@ -796,7 +796,7 @@ export default function Orders() {
     if (editItems.length === 0) { alert('Please add at least one product'); return }
     setEditSaving(true)
     try {
-      const total = editItems.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price || 0)), 0)
+      const total = editItems.reduce((sum, i) => { const packs = i.packs || (i.cases ? parseFloat(i.cases) * (i.packs_per_case || 6) : parseFloat(i.quantity)); return sum + (packs * parseFloat(i.price_per_pack || 0)) }, 0)
       await supabase.from('orders').update({
         delivery_day: editingOrder.delivery_day || null, dispatch_date: editingOrder.dispatch_date || null,
         po_number: editingOrder.po_number || null, order_source: editingOrder.order_source,
@@ -807,7 +807,7 @@ export default function Orders() {
       await supabase.from('order_items').insert(editItems.map(i => ({
         order_id: editingOrder.id, product_code: i.product_code || null, product_name: i.product_name,
         cases: parseFloat(i.cases || 1), quantity: parseFloat(i.quantity),
-        units_per_case: parseInt(i.units_per_case || 6), unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
+        units_per_case: parseInt(i.units_per_case || 6), price_per_pack: parseFloat(i.price_per_pack || 0), notes: i.notes || null,
       })))
       setEditingOrder(null); setEditItems([])
       await loadData()
@@ -832,7 +832,7 @@ export default function Orders() {
       }
       const { data: numData } = await supabase.rpc('generate_order_number')
       const order_number = numData || `KK${Date.now()}`
-      const total = orderItems.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price || 0)), 0)
+      const total = orderItems.reduce((sum, i) => { const packs = i.packs || (i.cases ? parseFloat(i.cases) * (i.packs_per_case || 6) : parseFloat(i.quantity)); return sum + (packs * parseFloat(i.price_per_pack || 0)) }, 0)
       const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true })
       const slipNum = 'SLIP-' + String((count || 0) + 1).padStart(3, '0')
       const { data: order, error } = await supabase.from('orders').insert({
@@ -851,7 +851,7 @@ export default function Orders() {
         packs_per_case: parseInt(i.packs_per_case || 6),
         units_per_pack: parseInt(i.units_per_pack || 1),
         units_per_case: parseInt(i.units_per_case || 6),
-        unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
+        price_per_pack: parseFloat(i.price_per_pack || 0), notes: i.notes || null,
       })))
       if (form.customer_id && form.delivery_day) {
         await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
@@ -1186,7 +1186,7 @@ export default function Orders() {
                               updateItem(idx, 'input_mode', isBulk ? 'units' : 'cases')
                               updateItem(idx, 'product_code', newCode)
                               updateItem(idx, 'product_name', p?.name || item.product_name)
-                              updateItem(idx, 'unit_price', p?.price_per_unit || 0)
+                              updateItem(idx, 'price_per_pack', p?.price_per_pack || 0)
                             }} style={{
                               flex:1, padding:'3px 8px', border:'none', cursor:'pointer', fontSize:10,
                               fontFamily:'var(--display)', textTransform:'uppercase',
@@ -1201,7 +1201,7 @@ export default function Orders() {
                           if (e.target.value === 'OTHER') {
                             updateItem(idx, 'product_code', 'OTHER')
                             updateItem(idx, 'product_name', 'Other')
-                            updateItem(idx, 'unit_price', 0)
+                            updateItem(idx, 'price_per_pack', 0)
                           } else {
                             const p = products.find(p => p.code === e.target.value)
                             const ppc = getPacksPerCase(p)
@@ -1209,7 +1209,7 @@ export default function Orders() {
                             const upc = ppc * upp
                             updateItem(idx, 'product_code', p?.code || '')
                             updateItem(idx, 'product_name', p?.name || item.product_name)
-                            updateItem(idx, 'unit_price', p?.price_per_unit || 0)
+                            updateItem(idx, 'price_per_pack', p?.price_per_pack || 0)
                             updateItem(idx, 'packs_per_case', ppc)
                             updateItem(idx, 'units_per_pack', upp)
                             updateItem(idx, 'units_per_case', upc)
@@ -1352,8 +1352,8 @@ export default function Orders() {
                       <td style={{ fontWeight:600 }}>{item.cases || '—'}</td>
                       <td style={{ fontWeight:600, color:'var(--ink2)' }}>{item.packs || (item.cases ? (item.cases * (item.packs_per_case||6)) : '—')}</td>
                       <td style={{ fontWeight:600, color:'var(--kk-green)' }}>{item.quantity}</td>
-                      {isAdmin && <td style={{ fontSize:11, color:'var(--ink3)' }}>${(item.unit_price||0).toFixed(2)}</td>}
-                      {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${((item.packs || (item.cases ? item.cases*(item.packs_per_case||6) : item.quantity)) * (item.unit_price||0)).toFixed(2)}</td>}
+                      {isAdmin && <td style={{ fontSize:11, color:'var(--ink3)' }}>${(item.price_per_pack||0).toFixed(2)}</td>}
+                      {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${((item.packs || (item.cases ? item.cases*(item.packs_per_case||6) : item.quantity)) * (item.price_per_pack||0)).toFixed(2)}</td>}
                       <td style={{ fontSize:11, color:'var(--ink3)' }}>{item.notes || '—'}</td>
                     </tr>
                   ))}
@@ -1418,12 +1418,12 @@ export default function Orders() {
                       if (e.target.value === 'OTHER') {
                         updateEditItem(idx, 'product_code', 'OTHER')
                         updateEditItem(idx, 'product_name', 'Other')
-                        updateEditItem(idx, 'unit_price', 0)
+                        updateEditItem(idx, 'price_per_pack', 0)
                       } else {
                         const p = products.find(p => p.code === e.target.value)
                         updateEditItem(idx, 'product_code', p?.code || '')
                         updateEditItem(idx, 'product_name', p?.name || item.product_name)
-                        updateEditItem(idx, 'unit_price', p?.price_per_unit || 0)
+                        updateEditItem(idx, 'price_per_pack', p?.price_per_pack || 0)
                       }
                     }}>
                     <option value="">{item.product_name || 'Select product...'}</option>

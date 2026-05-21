@@ -549,7 +549,7 @@ function printDispatchSlip(ordersInput) {
       <div class="slips-grid">${pageOrders.map(renderOrder).join('')}</div>
     </div>`
 
-  const html = \`<!DOCTYPE html><html><head><title>KK Dispatch Slips</title>
+  const html = `<!DOCTYPE html><html><head><title>KK Dispatch Slips</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; background: #fff; color: #000; }
@@ -566,8 +566,8 @@ function printDispatchSlip(ordersInput) {
     td { padding: 1px 4px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: middle; }
     @media print { body { margin: 0; } .page { page-break-after: always; } }
   </style></head><body>
-    \${pages.map((pg, i) => renderPage(pg, i+1, pages.length)).join('')}
-  </body></html>\`
+    ${pages.map((pg, i) => renderPage(pg, i+1, pages.length)).join('')}
+  </body></html>`
 
   const w = window.open('', '_blank')
   w.document.write(html)

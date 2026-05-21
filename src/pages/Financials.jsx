@@ -58,7 +58,7 @@ export default function Financials() {
     for (const order of filteredOrders) {
       const items = order.order_items || []
       for (const item of items) {
-        const lineRevenue = (item.quantity || 0) * (item.unit_price || 0)
+        const lineRevenue = (item.quantity || 0) * (item.price_per_pack || 0)
         totalRevenue += lineRevenue
 
         // By product
@@ -90,10 +90,10 @@ export default function Financials() {
       .gte('date', since)
 
     const { data: bom } = await supabase.from('bom').select('product_code, rm_name, qty_per_unit, unit')
-    const { data: rms } = await supabase.from('raw_materials').select('name, price_per_unit')
+    const { data: rms } = await supabase.from('raw_materials').select('name, price_per_pack')
 
     const rmPriceMap = {}
-    ;(rms || []).forEach(r => { rmPriceMap[r.name] = r.price_per_unit || 0 })
+    ;(rms || []).forEach(r => { rmPriceMap[r.name] = r.price_per_pack || 0 })
 
     const bomMap = {}
     ;(bom || []).forEach(b => {

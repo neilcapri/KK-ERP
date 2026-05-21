@@ -448,19 +448,21 @@ const UNITS_PER_PACK_MAP = {
 
 function getPacksPerCase(product) { return product?.packs_per_case || 6 }
 function getUnitsPerPack(product) {
-  // First trust DB value if > 1
-  if (product?.units_per_pack && product.units_per_pack > 1) return product.units_per_pack
+  // Coerce to number — Supabase may return strings
+  const upp = parseInt(product?.units_per_pack) || 0
+  if (upp > 1) return upp
   // Try deriving from units_per_case / packs_per_case
-  if (product?.units_per_case && product?.packs_per_case && product.units_per_case !== product.packs_per_case) {
-    return Math.round(product.units_per_case / product.packs_per_case)
-  }
+  const upc = parseInt(product?.units_per_case) || 0
+  const ppc = parseInt(product?.packs_per_case) || 6
+  if (upc > ppc) return Math.round(upc / ppc)
   // Fall back to known map
   return UNITS_PER_PACK_MAP[product?.code] || 1
 }
 function getUnitsPerCase(product) {
+  const upc = parseInt(product?.units_per_case) || 0
   const ppc = getPacksPerCase(product)
   const upp = getUnitsPerPack(product)
-  if (product?.units_per_case && product.units_per_case > product.packs_per_case) return product.units_per_case
+  if (upc > ppc) return upc
   return ppc * upp
 }
 function packsFromCases(product, cases) { return (parseFloat(cases) || 0) * getPacksPerCase(product) }

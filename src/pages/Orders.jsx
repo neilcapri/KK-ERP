@@ -435,8 +435,11 @@ function isWeekOrder(order, offset = 0) {
   return d >= monday && d <= sunday
 }
 
-// ── Case → Units helper ───────────────────────────────────────
-function getUnitsPerCase(product) { return product?.units_per_case || 6 }
+// ── Case / Pack / Unit helpers ───────────────────────────────
+function getPacksPerCase(product) { return product?.packs_per_case || 6 }
+function getUnitsPerPack(product) { return product?.units_per_pack || 1 }
+function getUnitsPerCase(product) { return (product?.packs_per_case || 6) * (product?.units_per_pack || 1) }
+function packsFromCases(product, cases) { return (parseFloat(cases) || 0) * getPacksPerCase(product) }
 
 // ── Customer Combobox ─────────────────────────────────────────
 function CustomerSelect({ customers, value, onChange, onAddNew }) {
@@ -671,7 +674,7 @@ export default function Orders() {
     const [o, c, p] = await Promise.all([
       supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).limit(200),
       supabase.from('customers').select('*').order('name'),
-      supabase.from('products').select('code,name,category,price_per_unit,units_per_case').not('code','like','WIP%').order('code'),
+      supabase.from('products').select('code,name,category,price_per_unit,units_per_case,packs_per_case,units_per_pack').not('code','like','WIP%').order('code'),
     ])
     setOrders(o.data || [])
     setCustomers(c.data || [])
@@ -708,16 +711,20 @@ export default function Orders() {
       }
 
       const p = products.find(p => p.code === productCode)
-      const upc = getUnitsPerCase(p)
+      const ppc = getPacksPerCase(p)
+      const upp = getUnitsPerPack(p)
+      const upc = ppc * upp
       const imode = (itemMode === 'bulk') ? 'units' : (orderMode === 'units' ? 'units' : 'cases')
+      const cases = imode === 'cases' ? parseFloat(i.quantity) : null
+      const packs = imode === 'cases' ? parseFloat(i.quantity) * ppc : null
       const qty = imode === 'cases' ? parseFloat(i.quantity) * upc : parseFloat(i.quantity)
-      const cs = imode === 'cases' ? i.quantity : null
       return {
         product_code: productCode,
         product_name: p?.name || i.product_name,
         input_mode: imode,
-        item_type: itemMode === 'bulk' ? 'bulk' : 'pack',  // pack or bulk per item
-        cases: cs, quantity: qty, units_per_case: upc,
+        item_type: itemMode === 'bulk' ? 'bulk' : 'pack',
+        cases, packs, quantity: qty,
+        packs_per_case: ppc, units_per_pack: upp, units_per_case: upc,
         unit_price: p?.price_per_unit || 0, notes: ''
       }
     })
@@ -769,8 +776,10 @@ export default function Orders() {
       input_mode: imode,
       item_type: isBulk ? 'bulk' : 'pack',
       cases: imode === 'cases' ? 1 : null,
+      packs: imode === 'cases' ? 6 : null,
       quantity: imode === 'cases' ? 6 : 1,
-      units_per_case: 6, unit_price: 0, notes: ''
+      packs_per_case: 6, units_per_pack: 1, units_per_case: 6,
+      unit_price: 0, notes: ''
     }])
   }
   function updateEditItem(idx, field, val) { setEditItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
@@ -836,8 +845,13 @@ export default function Orders() {
       if (error) throw error
       await supabase.from('order_items').insert(orderItems.map(i => ({
         order_id: order.id, product_code: i.product_code || null, product_name: i.product_name,
-        cases: parseFloat(i.cases || 1), quantity: parseFloat(i.quantity),
-        units_per_case: parseInt(i.units_per_case || 6), unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
+        cases: i.cases ? parseFloat(i.cases) : null,
+        packs: i.packs ? parseFloat(i.packs) : null,
+        quantity: parseFloat(i.quantity),
+        packs_per_case: parseInt(i.packs_per_case || 6),
+        units_per_pack: parseInt(i.units_per_pack || 1),
+        units_per_case: parseInt(i.units_per_case || 6),
+        unit_price: parseFloat(i.unit_price || 0), notes: i.notes || null,
       })))
       if (form.customer_id && form.delivery_day) {
         await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
@@ -1190,9 +1204,20 @@ export default function Orders() {
                             updateItem(idx, 'unit_price', 0)
                           } else {
                             const p = products.find(p => p.code === e.target.value)
+                            const ppc = getPacksPerCase(p)
+                            const upp = getUnitsPerPack(p)
+                            const upc = ppc * upp
                             updateItem(idx, 'product_code', p?.code || '')
                             updateItem(idx, 'product_name', p?.name || item.product_name)
                             updateItem(idx, 'unit_price', p?.price_per_unit || 0)
+                            updateItem(idx, 'packs_per_case', ppc)
+                            updateItem(idx, 'units_per_pack', upp)
+                            updateItem(idx, 'units_per_case', upc)
+                            // recalc if already has cases
+                            if (item.input_mode === 'cases' && item.cases) {
+                              updateItem(idx, 'packs', parseFloat(item.cases) * ppc)
+                              updateItem(idx, 'quantity', parseFloat(item.cases) * upc)
+                            }
                           }
                         }}>
                         <option value="">{item.product_name || 'Select product...'}</option>
@@ -1233,16 +1258,25 @@ export default function Orders() {
                           const val = parseFloat(e.target.value) || 0
                           if (item.input_mode === 'cases') {
                             const p = products.find(p => p.code === item.product_code)
-                            const upc = getUnitsPerCase(p)
+                            const ppc = getPacksPerCase(p)
+                            const upp = getUnitsPerPack(p)
+                            const upc = ppc * upp
                             updateItem(idx, 'cases', e.target.value)
+                            updateItem(idx, 'packs', val * ppc)
                             updateItem(idx, 'quantity', val * upc)
+                            updateItem(idx, 'packs_per_case', ppc)
+                            updateItem(idx, 'units_per_pack', upp)
                             updateItem(idx, 'units_per_case', upc)
                           } else {
                             updateItem(idx, 'quantity', val)
                             updateItem(idx, 'cases', null)
+                            updateItem(idx, 'packs', null)
                           }
                         }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
-                      {item.input_mode === 'cases' && (
+                      {item.input_mode === 'cases' && item.packs_per_case > 1 && (
+                        <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.packs || (item.cases||1) * (item.packs_per_case||6)} pks / {item.quantity} u</span>
+                      )}
+                      {item.input_mode === 'cases' && (item.packs_per_case||6) === 1 && (
                         <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>
                       )}
                     </div>
@@ -1309,16 +1343,17 @@ export default function Orders() {
             )}
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Product</th><th>Code</th><th>Cases</th><th>Units</th>{isAdmin && <th>Unit $</th>}{isAdmin && <th>Line Total</th>}<th>Notes</th></tr></thead>
+                <thead><tr><th>Product</th><th>Code</th><th>Cases</th><th>Packs</th><th>Units</th>{isAdmin && <th>Pack $</th>}{isAdmin && <th>Line Total</th>}<th>Notes</th></tr></thead>
                 <tbody>
                   {(viewOrder.order_items || []).map(item => (
                     <tr key={item.id}>
                       <td style={{ fontWeight:500, fontSize:12 }}>{item.product_name}</td>
                       <td>{item.product_code ? <span className="code-tag">{item.product_code}</span> : '—'}</td>
-                      <td style={{ fontWeight:600 }}>{item.cases || Math.round(item.quantity / (item.units_per_case || 6))}</td>
+                      <td style={{ fontWeight:600 }}>{item.cases || '—'}</td>
+                      <td style={{ fontWeight:600, color:'var(--ink2)' }}>{item.packs || (item.cases ? (item.cases * (item.packs_per_case||6)) : '—')}</td>
                       <td style={{ fontWeight:600, color:'var(--kk-green)' }}>{item.quantity}</td>
                       {isAdmin && <td style={{ fontSize:11, color:'var(--ink3)' }}>${(item.unit_price||0).toFixed(2)}</td>}
-                      {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${((item.quantity||0) * (item.unit_price||0)).toFixed(2)}</td>}
+                      {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${((item.packs || (item.cases ? item.cases*(item.packs_per_case||6) : item.quantity)) * (item.unit_price||0)).toFixed(2)}</td>}
                       <td style={{ fontSize:11, color:'var(--ink3)' }}>{item.notes || '—'}</td>
                     </tr>
                   ))}

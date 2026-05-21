@@ -1387,8 +1387,7 @@ export default function Orders() {
                       {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${((item.packs || (item.cases ? item.cases*(item.packs_per_case||6) : item.quantity)) * (item.price_per_pack||0)).toFixed(2)}</td>}
                       <td style={{ fontSize:11, color:'var(--ink3)' }}>{item.notes || '—'}</td>
                     </tr>
-                    )
-                  })}
+                  ))}
                 </tbody>
               </table>
             </div>

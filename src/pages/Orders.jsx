@@ -217,10 +217,12 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
 
     for (const order of dayOrders) {
       const items = order.order_items || []
-      const qtyMap = {}, priceMap = {}
+      const qtyMap = {}, packsMap = {}, priceMap = {}
       for (const item of items) {
         if (item.product_code) {
           qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+          const packs = item.packs || (item.cases ? item.cases * (item.packs_per_case || 6) : item.quantity)
+          packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
           priceMap[item.product_code] = item.price_per_pack || 0
         }
       }
@@ -229,7 +231,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
       for (const col of RETAIL_COLS) {
         const qty = qtyMap[col.code]
         storeRow.push(qty || null)
-        if (qty && priceMap[col.code]) rowTotal += qty * priceMap[col.code]
+        if (qty && priceMap[col.code]) rowTotal += packsMap[col.code] * priceMap[col.code]
       }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
       storeRowIdxs.add(rows.length)
@@ -241,17 +243,19 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     let grandTotal = 0
     for (const order of dayOrders) {
       const items = order.order_items || []
-      const qtyMap = {}, priceMap = {}
+      const qtyMap = {}, packsMap = {}, priceMap = {}
       for (const item of items) {
         if (item.product_code) {
           qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+          const packs = item.packs || (item.cases ? item.cases * (item.packs_per_case || 6) : item.quantity)
+          packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
           priceMap[item.product_code] = item.price_per_pack || 0
         }
       }
       RETAIL_COLS.forEach((col, ci) => {
         const qty = qtyMap[col.code] || 0
         colTotals[ci] += qty
-        if (qty && priceMap[col.code]) grandTotal += qty * priceMap[col.code]
+        if (qty && priceMap[col.code]) grandTotal += packsMap[col.code] * priceMap[col.code]
       })
     }
     const totalRow = ['TOTAL', ...colTotals.map(v => v || null)]
@@ -266,17 +270,19 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   let grandOrderTotal = 0
   for (const order of orders) {
     const items = order.order_items || []
-    const qtyMap = {}, priceMap = {}
+    const qtyMap = {}, packsMap = {}, priceMap = {}
     for (const item of items) {
       if (item.product_code) {
         qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
+        const packs = item.packs || (item.cases ? item.cases * (item.packs_per_case || 6) : item.quantity)
+        packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
         priceMap[item.product_code] = item.price_per_pack || 0
       }
     }
     RETAIL_COLS.forEach((col, ci) => {
       const qty = qtyMap[col.code] || 0
       grandColTotals[ci] += qty
-      if (qty && priceMap[col.code]) grandOrderTotal += qty * priceMap[col.code]
+      if (qty && priceMap[col.code]) grandOrderTotal += packsMap[col.code] * priceMap[col.code]
     })
   }
   const grandTotalRow = ['GRAND TOTAL', ...grandColTotals.map(v => v || null)]

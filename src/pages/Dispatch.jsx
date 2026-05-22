@@ -8,25 +8,27 @@ const AI_PROMPT = `You are reading Konscious Kitchen packing slips. Each slip is
 
 The form has these labeled fields at the top:
 - "Date of Packing" — the dispatch date (e.g. May 11)
-- "Customer" — the store/customer name (e.g. BC Danforth)
-- "Invoice Number" — a 4-digit number (e.g. 4664). Look carefully at the handwritten value in the "Invoice Number" row.
+- "Customer" — the store/customer name (e.g. BC Danforth, Natures Emporium Southcore)
+- "Invoice Number" — a 4-digit number (e.g. 4702). Look carefully at the handwritten value.
 
-Below those fields is a table with columns: Product Name | Date | Qty
-Each row has a product code, a DATE (this is the PRODUCTION DATE — when the product was made), and a quantity number.
-IMPORTANT: Capture the Date column for each line item — this is when that product was produced.
+Below is a table with columns: Product Name | Cs/Units | Prod. Date
+- The Cs/Units column shows "X/Y" where X = cases and Y = units (e.g. "1/6" = 1 case, 6 units). Extract qty as the UNITS number (Y).
+- The Prod. Date column has the PRODUCTION DATE — capture it exactly as written.
 
-Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPC, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB.
-Also: HPCo/HPCO = HPC, PCRT = skip, PVBBS = PVBB slice type.
+Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC.
+Also: HPC/HPCO = HPCo, PCRT = skip.
 
 Rules:
-- (BULK) after code = type "bulk"; default = "pack"
+- (BULK) written after code or qty = type "bulk"; no label = "pack"
 - PVBBS or "PVBB Slice" = type "slice"
-- Crossed out items = skip
+- Crossed out items = skip entirely (do not include)
 - Arrow pointing down = same slip continues below
 - Multiple separate slips = extract each separately
+- If qty column shows a standalone number (no X/Y format) treat it as units directly
+- Do NOT confuse pack type — only mark "bulk" if explicitly written
 
 Return ONLY valid JSON:
-{"slips":[{"date":"May 11","customer":"BC Danforth","invoice":"4664","items":[{"code":"PBB","qty":6,"type":"pack","production_date":"May 08","note":""}],"flags":[]}]}`
+{"slips":[{"date":"May 11","customer":"BC Danforth","invoice":"4702","items":[{"code":"PBB","qty":6,"cases":1,"type":"pack","production_date":"May 08","note":""}],"flags":[]}]}`
 
 function parseSlipDate(dateStr) {
   if (!dateStr) return new Date().toISOString().split('T')[0]
@@ -45,6 +47,7 @@ export default function Dispatch() {
   const [files, setFiles] = useState([])
   const [processing, setProcessing] = useState(false)
   const [extracted, setExtracted] = useState([])
+  const [editingExtracted, setEditingExtracted] = useState(false)
   const [verifiedItems, setVerifiedItems] = useState({})
   const [log, setLog] = useState([])
   const [products, setProducts] = useState([])
@@ -56,6 +59,12 @@ export default function Dispatch() {
   const [manCode, setManCode] = useState('')
   const [manQty, setManQty] = useState('')
   const [manType, setManType] = useState('pack')
+
+  // ── Edit state ────────────────────────────────────────────
+  const [editingDispatch, setEditingDispatch] = useState(null)
+  const [editForm, setEditForm] = useState({ date: '', customer_name: '', invoice_number: '' })
+  const [editItems, setEditItems] = useState([])
+  const [editSaving, setEditSaving] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -240,12 +249,100 @@ export default function Dispatch() {
     setDeletingId(null)
   }
 
+  // ── Edit functions ────────────────────────────────────────
+  function openEdit(dispatch) {
+    setEditingDispatch(dispatch)
+    setEditForm({
+      date: dispatch.date,
+      customer_name: dispatch.customer_name,
+      invoice_number: dispatch.invoice_number || '',
+    })
+    setEditItems((dispatch.dispatch_items || []).map(i => ({ ...i })))
+  }
+
+  function updateEditItem(idx, field, val) {
+    setEditItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item
+      const updated = { ...item, [field]: val }
+      // Recalculate units if qty or type changes
+      if (field === 'qty' || field === 'dispatch_type') {
+        updated.units_dispatched = calcUnits(
+          updated.product_code,
+          parseFloat(field === 'qty' ? val : updated.qty) || 0,
+          field === 'dispatch_type' ? val : updated.dispatch_type
+        )
+      }
+      return updated
+    }))
+  }
+
+  function removeEditItem(idx) {
+    setEditItems(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  function addEditItem() {
+    setEditItems(prev => [...prev, { product_code: '', product_name: '', qty: 1, dispatch_type: 'pack', units_dispatched: 0, production_date: '', isNew: true }])
+  }
+
+  async function saveEdit() {
+    if (!editForm.customer_name) { alert('Customer name required'); return }
+    setEditSaving(true)
+    try {
+      // Restore old stock
+      for (const item of editingDispatch.dispatch_items || []) {
+        const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
+        if (prod) await supabase.from('products').update({ units: prod.units + item.units_dispatched }).eq('code', item.product_code)
+      }
+
+      // Update dispatch header
+      await supabase.from('dispatches').update({
+        date: editForm.date,
+        customer_name: editForm.customer_name,
+        invoice_number: editForm.invoice_number,
+      }).eq('id', editingDispatch.id)
+
+      // Replace all items
+      await supabase.from('dispatch_items').delete().eq('dispatch_id', editingDispatch.id)
+      for (const item of editItems) {
+        if (!item.product_code) continue
+        const units = calcUnits(item.product_code, parseFloat(item.qty) || 0, item.dispatch_type)
+        await supabase.from('dispatch_items').insert({
+          dispatch_id: editingDispatch.id,
+          product_code: item.product_code,
+          product_name: products.find(p => p.code === item.product_code)?.name || item.product_code,
+          qty: parseFloat(item.qty) || 0,
+          dispatch_type: item.dispatch_type,
+          units_dispatched: units,
+          production_date: item.production_date || null,
+          production_verified: item.production_verified || null,
+        })
+        // Deduct updated stock
+        const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
+        if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', item.product_code)
+      }
+
+      await supabase.from('activity').insert({
+        type: 'dispatch',
+        title: `Dispatch Updated: ${editForm.customer_name}`,
+        description: `Inv #${editForm.invoice_number || '—'} — edited`,
+        created_by_name: profile?.name || 'admin'
+      })
+
+      setEditingDispatch(null)
+      setEditItems([])
+      loadData()
+    } catch(err) { alert('Update failed: ' + err.message) }
+    setEditSaving(false)
+  }
+
   const prodBadge = (verified) => {
     if (verified === null || verified === undefined) return null
     return verified
       ? <span style={{ fontSize: 10, background: 'var(--green-l)', color: 'var(--green)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)' }}>✓ prod</span>
       : <span style={{ fontSize: 10, background: 'var(--red-l)', color: 'var(--red)', padding: '1px 5px', borderRadius: 2, fontFamily: 'var(--mono)' }}>✗ prod</span>
   }
+
+  const sel = { width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--ink)', fontSize: 12 }
 
   return (
     <>
@@ -302,9 +399,15 @@ export default function Dispatch() {
               {extracted.length > 0 && (
                 <div className="card">
                   <div className="card-title">✅ Review Extracted Data</div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                    <span style={{fontSize:12,color:'var(--ink3)'}}>Review and correct before saving</span>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setEditingExtracted(e => !e)}>
+                      {editingExtracted ? '✓ Done Editing' : '✏️ Edit'}
+                    </button>
+                  </div>
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Customer</th><th>Inv #</th><th>Code</th><th>Qty</th><th>Type</th><th>Units</th><th>Prod Date</th></tr></thead>
+                      <thead><tr><th>Customer</th><th>Inv #</th><th>Code</th><th>Qty</th><th>Type</th><th>Units</th><th>Prod Date</th>{editingExtracted && <th></th>}</tr></thead>
                       <tbody>
                         {extracted.map((slip, si) => (slip.items || []).map((item, ii) => {
                           const prodDateStr = item.production_date ? parseSlipDate(item.production_date) : null
@@ -312,16 +415,45 @@ export default function Dispatch() {
                           const verified = prodDateStr ? verifiedItems[key] : undefined
                           return (
                             <tr key={`${si}-${ii}`}>
-                              <td style={{fontSize:11}}>{ii === 0 ? slip.customer : ''}</td>
-                              <td style={{fontSize:11,color:'var(--ink3)'}}>{ii === 0 ? (slip.invoice || '—') : ''}</td>
-                              <td><span className="code-tag">{item.code}</span></td>
-                              <td>{item.qty}</td>
-                              <td><span className={`badge badge-${item.type==='pack'?'amber':'blue'}`}>{item.type}</span></td>
-                              <td style={{color:'var(--green)',fontWeight:500}}>{calcUnits(item.code,item.qty,item.type)}</td>
-                              <td style={{fontSize:11}}>
-                                {item.production_date || '—'}
-                                {prodDateStr && verified !== undefined && <span style={{marginLeft:4}}>{prodBadge(verified)}</span>}
+                              <td style={{fontSize:11}}>{ii === 0 ? (editingExtracted
+                                ? <input defaultValue={slip.customer} onChange={e => { const s = [...extracted]; s[si].customer = e.target.value; setExtracted(s) }}
+                                    style={{width:'100%',fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                : slip.customer) : ''}
                               </td>
+                              <td style={{fontSize:11,color:'var(--ink3)'}}>{ii === 0 ? (editingExtracted
+                                ? <input defaultValue={slip.invoice} onChange={e => { const s = [...extracted]; s[si].invoice = e.target.value; setExtracted(s) }}
+                                    style={{width:60,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                : (slip.invoice || '—')) : ''}
+                              </td>
+                              <td>{editingExtracted
+                                ? <input defaultValue={item.code} onChange={e => { const s = [...extracted]; s[si].items[ii].code = e.target.value.toUpperCase(); setExtracted(s) }}
+                                    style={{width:70,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3,fontFamily:'var(--mono)'}} />
+                                : <span className="code-tag">{item.code}</span>}
+                              </td>
+                              <td>{editingExtracted
+                                ? <input type="number" defaultValue={item.qty} onChange={e => { const s = [...extracted]; s[si].items[ii].qty = parseInt(e.target.value)||0; setExtracted(s) }}
+                                    style={{width:50,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                : item.qty}
+                              </td>
+                              <td>{editingExtracted
+                                ? <select defaultValue={item.type} onChange={e => { const s = [...extracted]; s[si].items[ii].type = e.target.value; setExtracted(s) }}
+                                    style={{fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}}>
+                                    <option value="pack">pack</option>
+                                    <option value="bulk">bulk</option>
+                                    <option value="slice">slice</option>
+                                  </select>
+                                : <span className={`badge badge-${item.type==='pack'?'amber':'blue'}`}>{item.type}</span>}
+                              </td>
+                              <td style={{color:'var(--green)',fontWeight:500}}>{calcUnits(item.code,item.qty,item.type)}</td>
+                              <td style={{fontSize:11}}>{editingExtracted
+                                ? <input defaultValue={item.production_date} onChange={e => { const s = [...extracted]; s[si].items[ii].production_date = e.target.value; setExtracted(s) }}
+                                    style={{width:80,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                : <>{item.production_date || '—'}{prodDateStr && verified !== undefined && <span style={{marginLeft:4}}>{prodBadge(verified)}</span>}</>}
+                              </td>
+                              {editingExtracted && <td>
+                                <button onClick={() => { const s = [...extracted]; s[si].items.splice(ii,1); setExtracted([...s]) }}
+                                  style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:14}}>×</button>
+                              </td>}
                             </tr>
                           )
                         }))}
@@ -330,7 +462,7 @@ export default function Dispatch() {
                   </div>
                   <div style={{display:'flex',gap:10,marginTop:12}}>
                     <button className="btn btn-primary btn-full" onClick={saveExtracted}>Save All to Inventory</button>
-                    <button className="btn btn-secondary" onClick={() => { setExtracted([]); setVerifiedItems({}) }}>Discard</button>
+                    <button className="btn btn-secondary" onClick={() => { setExtracted([]); setVerifiedItems({}); setEditingExtracted(false) }}>Discard</button>
                   </div>
                 </div>
               )}
@@ -375,7 +507,7 @@ export default function Dispatch() {
                   <tr>
                     <th style={{width:20}}></th>
                     <th>Date</th><th>Customer</th><th>Invoice</th><th>Lines</th><th>By</th>
-                    <th style={{width:60}}></th>
+                    <th style={{width:120}}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -391,10 +523,16 @@ export default function Dispatch() {
                         <td style={{cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.dispatch_items?.length || 0}</td>
                         <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.created_by_name}</td>
                         <td>
-                          <button onClick={() => deleteDispatch(d)} disabled={deletingId === d.id}
-                            style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === d.id ? 0.5 : 1 }}>
-                            {deletingId === d.id ? '...' : 'Delete'}
-                          </button>
+                          <div style={{ display:'flex', gap:4 }}>
+                            <button onClick={() => openEdit(d)}
+                              style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}>
+                              Edit
+                            </button>
+                            <button onClick={() => deleteDispatch(d)} disabled={deletingId === d.id}
+                              style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === d.id ? 0.5 : 1 }}>
+                              {deletingId === d.id ? '...' : 'Del'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                       {expandedId === d.id && (
@@ -445,6 +583,73 @@ export default function Dispatch() {
           </div>
         )}
       </div>
+
+      {/* ── EDIT MODAL ── */}
+      {editingDispatch && (
+        <div className="modal-bg" onClick={e => e.target === e.currentTarget && setEditingDispatch(null)}>
+          <div className="modal" style={{ maxWidth: 680 }}>
+            <button className="modal-close" onClick={() => setEditingDispatch(null)}>×</button>
+            <div className="modal-title">EDIT DISPATCH</div>
+            <div style={{ fontSize:13, color:'var(--ink3)', marginBottom:16 }}>
+              Original: {editingDispatch.customer_name} · Inv #{editingDispatch.invoice_number || '—'}
+            </div>
+
+            <div className="field-row">
+              <div className="field" style={{margin:0}}>
+                <label>Date</label>
+                <input type="date" value={editForm.date} onChange={e => setEditForm(f => ({...f, date: e.target.value}))} />
+              </div>
+              <div className="field" style={{margin:0}}>
+                <label>Invoice #</label>
+                <input type="text" value={editForm.invoice_number} onChange={e => setEditForm(f => ({...f, invoice_number: e.target.value}))} placeholder="e.g. 4664" />
+              </div>
+            </div>
+            <div className="field">
+              <label>Customer</label>
+              <input type="text" value={editForm.customer_name} onChange={e => setEditForm(f => ({...f, customer_name: e.target.value}))} />
+            </div>
+
+            <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
+              Line Items ({editItems.length})
+            </div>
+
+            {editItems.map((item, idx) => (
+              <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
+                <select style={{...sel, flex:2, minWidth:120}} value={item.product_code}
+                  onChange={e => {
+                    const p = products.find(p => p.code === e.target.value)
+                    setEditItems(prev => prev.map((it, i) => i === idx ? { ...it, product_code: e.target.value, product_name: p?.name || e.target.value } : it))
+                  }}>
+                  <option value="">Select...</option>
+                  {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                </select>
+                <input type="number" value={item.qty} onChange={e => updateEditItem(idx, 'qty', e.target.value)}
+                  style={{...sel, width:64}} placeholder="Qty" />
+                <select style={{...sel, width:90}} value={item.dispatch_type} onChange={e => updateEditItem(idx, 'dispatch_type', e.target.value)}>
+                  <option value="pack">Pack</option>
+                  <option value="bulk">Bulk</option>
+                  <option value="slice">Slice</option>
+                </select>
+                <input type="date" value={item.production_date || ''} onChange={e => updateEditItem(idx, 'production_date', e.target.value)}
+                  style={{...sel, flex:1, minWidth:120}} />
+                <span style={{ fontSize:11, color:'var(--kk-green)', fontWeight:600, whiteSpace:'nowrap' }}>
+                  = {calcUnits(item.product_code, parseFloat(item.qty)||0, item.dispatch_type)} u
+                </span>
+                <button onClick={() => removeEditItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18 }}>×</button>
+              </div>
+            ))}
+
+            <button className="btn btn-secondary btn-sm" onClick={addEditItem} style={{ marginBottom:16 }}>+ Add Line</button>
+
+            <div style={{ display:'flex', gap:10 }}>
+              <button className="btn btn-green btn-full" onClick={saveEdit} disabled={editSaving}>
+                {editSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setEditingDispatch(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

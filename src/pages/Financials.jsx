@@ -90,10 +90,10 @@ export default function Financials() {
       .gte('date', since)
 
     const { data: bom } = await supabase.from('bom').select('product_code, rm_name, qty_per_unit, unit')
-    const { data: rms } = await supabase.from('raw_materials').select('name, price_per_pack')
+    const { data: rms } = await supabase.from('raw_materials').select('name, price_per_unit')
 
     const rmPriceMap = {}
-    ;(rms || []).forEach(r => { rmPriceMap[r.name] = r.price_per_pack || 0 })
+    ;(rms || []).forEach(r => { rmPriceMap[r.name] = r.price_per_unit || 0 })
 
     const bomMap = {}
     ;(bom || []).forEach(b => {

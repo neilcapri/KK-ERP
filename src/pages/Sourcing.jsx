@@ -571,6 +571,14 @@ export function Reports() {
   const [loading, setLoading] = useState(true)
   const [activeReport, setActiveReport] = useState('fg')
 
+  // Labour vs Production state
+  const [labourRange, setLabourRange] = useState('week')
+  const [labourDate, setLabourDate] = useState(new Date().toISOString().split('T')[0].slice(0,7))
+  const [labourCustomStart, setLabourCustomStart] = useState('')
+  const [labourCustomEnd, setLabourCustomEnd] = useState('')
+  const [labourData, setLabourData] = useState([])
+  const [labourLoading, setLabourLoading] = useState(false)
+
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
@@ -584,6 +592,73 @@ export function Reports() {
     setLoading(false)
   }
 
+  function getLabourDateRange() {
+    if (labourRange === 'custom' && labourCustomStart && labourCustomEnd) {
+      return { start: labourCustomStart, end: labourCustomEnd }
+    }
+    if (labourRange === 'month') {
+      const [y, m] = labourDate.split('-').map(Number)
+      const start = `${y}-${String(m).padStart(2,'0')}-01`
+      const lastDay = new Date(y, m, 0).getDate()
+      const end = `${y}-${String(m).padStart(2,'0')}-${lastDay}`
+      return { start, end }
+    }
+    // week
+    const d = new Date(labourDate + '-01' || new Date())
+    const day = d.getDay()
+    const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
+    return {
+      start: mon.toISOString().split('T')[0],
+      end: sun.toISOString().split('T')[0]
+    }
+  }
+
+  async function loadLabourVsProduction() {
+    setLabourLoading(true)
+    const { start, end } = getLabourDateRange()
+
+    const [prodRes, timeRes, empRes] = await Promise.all([
+      supabase.from('productions').select('date, product_code, output_units').gte('date', start).lte('date', end).order('date'),
+      supabase.from('time_entries').select('clock_in, clock_out, hours_worked, employee_id').gte('clock_in', start + 'T00:00:00').lte('clock_in', end + 'T23:59:59'),
+      supabase.from('employees').select('id, hourly_rate'),
+    ])
+
+    const empRateMap = {}
+    ;(empRes.data || []).forEach(e => { empRateMap[e.id] = e.hourly_rate || 0 })
+
+    // Group by day
+    const dayMap = {}
+
+    // Add production data
+    ;(prodRes.data || []).forEach(p => {
+      if (!dayMap[p.date]) dayMap[p.date] = { date: p.date, units: 0, labour_hours: 0, labour_cost: 0 }
+      dayMap[p.date].units += p.output_units || 0
+    })
+
+    // Add labour data
+    ;(timeRes.data || []).forEach(t => {
+      const day = t.clock_in.split('T')[0]
+      if (!dayMap[day]) dayMap[day] = { date: day, units: 0, labour_hours: 0, labour_cost: 0 }
+      const hrs = parseFloat(t.hours_worked || 0)
+      const rate = empRateMap[t.employee_id] || 0
+      dayMap[day].labour_hours += hrs
+      dayMap[day].labour_cost += hrs * rate
+    })
+
+    const rows = Object.values(dayMap).sort((a,b) => a.date.localeCompare(b.date)).map(d => ({
+      ...d,
+      cost_per_unit: d.units > 0 ? d.labour_cost / d.units : null
+    }))
+
+    setLabourData(rows)
+    setLabourLoading(false)
+  }
+
+  useEffect(() => {
+    if (activeReport === 'labour') loadLabourVsProduction()
+  }, [activeReport, labourRange, labourDate, labourCustomStart, labourCustomEnd])
+
   function exportCSV(data, filename) {
     const rows = data.map(r => Object.values(r).join(','))
     const headers = Object.keys(data[0]).join(',')
@@ -594,7 +669,22 @@ export function Reports() {
     a.click()
   }
 
-  const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,PRMC:1,CMC:1,LMC:1 }
+  const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPCo:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,PRMC:1,CMC:1,LMC:1 }
+
+  const tabStyle = (key) => ({
+    padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer',
+    fontFamily: 'var(--display)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase',
+    color: activeReport===key ? 'var(--ink)' : 'var(--ink3)',
+    borderBottom: activeReport===key ? '2px solid var(--kk-green)' : '2px solid transparent',
+    marginBottom: -1
+  })
+
+  const sel = { padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, background: 'var(--surface)', color: 'var(--ink)' }
+
+  const totalLabourHours = labourData.reduce((s,d) => s + d.labour_hours, 0)
+  const totalLabourCost = labourData.reduce((s,d) => s + d.labour_cost, 0)
+  const totalUnits = labourData.reduce((s,d) => s + d.units, 0)
+  const avgCostPerUnit = totalUnits > 0 ? totalLabourCost / totalUnits : null
 
   return (
     <>
@@ -606,9 +696,12 @@ export function Reports() {
           {[
             { key: 'fg', label: '📦 Finished Goods' },
             { key: 'rm', label: '🌿 Raw Materials' },
-            ...(isAdmin || profile?.role === 'analyst' ? [{ key: 'financials', label: '💰 Financials' }] : [])
+            ...(isAdmin || profile?.role === 'analyst' ? [
+              { key: 'financials', label: '💰 Financials' },
+              { key: 'labour', label: '👷 Labour vs Production' },
+            ] : [])
           ].map(r => (
-            <button key={r.key} onClick={() => setActiveReport(r.key)} style={{ padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--display)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: activeReport===r.key?'var(--ink)':'var(--ink3)', borderBottom: activeReport===r.key?'2px solid var(--kk-green)':'2px solid transparent', marginBottom: -1 }}>
+            <button key={r.key} onClick={() => setActiveReport(r.key)} style={tabStyle(r.key)}>
               {r.label}
             </button>
           ))}
@@ -658,7 +751,7 @@ export function Reports() {
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Material</th><th>Category</th><th>Stock</th><th>Unit</th><th>Supplier</th><th>$/Unit</th><th>Status</th></tr></thead>
+                <thead><tr><th>Material</th><th>Category</th><th>Stock</th><th>Unit</th><th>Supplier</th><th>$/Pack</th><th>Status</th></tr></thead>
                 <tbody>
                   {rms.map(r => {
                     const s = r.stock <= 0 ? 'red' : r.stock <= r.min_stock ? 'amber' : 'green'
@@ -687,6 +780,121 @@ export function Reports() {
 
         {activeReport === 'financials' && (isAdmin || profile?.role === 'analyst') && (
           <Financials />
+        )}
+
+        {activeReport === 'labour' && (isAdmin || profile?.role === 'analyst') && (
+          <div>
+            {/* Date range controls */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                {['week','month','custom'].map(r => (
+                  <button key={r} onClick={() => setLabourRange(r)} style={{
+                    padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 12,
+                    fontFamily: 'var(--display)', textTransform: 'uppercase', letterSpacing: 1,
+                    background: labourRange === r ? 'var(--kk-green)' : 'var(--surface)',
+                    color: labourRange === r ? 'var(--kk-cream)' : 'var(--ink3)',
+                    fontWeight: labourRange === r ? 700 : 400,
+                  }}>{r}</button>
+                ))}
+              </div>
+              {labourRange !== 'custom' && (
+                <input type="month" value={labourDate} onChange={e => setLabourDate(e.target.value)} style={sel} />
+              )}
+              {labourRange === 'custom' && <>
+                <input type="date" value={labourCustomStart} onChange={e => setLabourCustomStart(e.target.value)} style={sel} />
+                <span style={{ color: 'var(--ink3)' }}>to</span>
+                <input type="date" value={labourCustomEnd} onChange={e => setLabourCustomEnd(e.target.value)} style={sel} />
+              </>}
+              <button className="btn btn-secondary btn-sm" onClick={loadLabourVsProduction}>↻ Refresh</button>
+            </div>
+
+            {/* Summary cards */}
+            <div className="grid4" style={{ marginBottom: 16 }}>
+              <div className="stat green">
+                <div className="stat-label">Total Units</div>
+                <div className="stat-value">{totalUnits.toLocaleString()}</div>
+                <div className="stat-sub">Produced</div>
+              </div>
+              <div className="stat amber">
+                <div className="stat-label">Labour Hours</div>
+                <div className="stat-value">{Math.floor(totalLabourHours)}h {Math.round((totalLabourHours % 1) * 60)}m</div>
+                <div className="stat-sub">Total worked</div>
+              </div>
+              <div className="stat blue">
+                <div className="stat-label">Labour Cost</div>
+                <div className="stat-value">${totalLabourCost.toFixed(0)}</div>
+                <div className="stat-sub">Total spend</div>
+              </div>
+              <div className="stat" style={{ borderTop: '3px solid var(--kk-peach)' }}>
+                <div className="stat-label">Labour / Unit</div>
+                <div className="stat-value">{avgCostPerUnit != null ? `$${avgCostPerUnit.toFixed(2)}` : '—'}</div>
+                <div className="stat-sub">Avg cost per unit</div>
+              </div>
+            </div>
+
+            {/* Daily breakdown */}
+            <div className="card">
+              <div className="card-title">Daily Breakdown</div>
+              {labourLoading ? (
+                <div style={{ textAlign: 'center', padding: 32, color: 'var(--ink3)' }}>Loading...</div>
+              ) : labourData.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 32, color: 'var(--ink3)' }}>No data for this period</div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Units Produced</th>
+                        <th>Labour Hours</th>
+                        <th>Labour Cost</th>
+                        <th>Cost / Unit</th>
+                        <th>Efficiency</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {labourData.map(d => {
+                        const effColor = d.cost_per_unit == null ? 'var(--ink3)'
+                          : d.cost_per_unit < 0.5 ? 'var(--green)'
+                          : d.cost_per_unit < 1.0 ? 'var(--amber)'
+                          : 'var(--red)'
+                        const hrs = Math.floor(d.labour_hours)
+                        const mins = Math.round((d.labour_hours % 1) * 60)
+                        return (
+                          <tr key={d.date}>
+                            <td style={{ fontWeight: 500 }}>{new Date(d.date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}</td>
+                            <td style={{ fontWeight: 600, color: 'var(--kk-green)' }}>{d.units > 0 ? d.units.toLocaleString() : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
+                            <td>{d.labour_hours > 0 ? `${hrs}h ${mins}m` : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
+                            <td style={{ fontWeight: 600 }}>{d.labour_cost > 0 ? `$${d.labour_cost.toFixed(2)}` : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
+                            <td style={{ fontWeight: 700, color: effColor }}>{d.cost_per_unit != null ? `$${d.cost_per_unit.toFixed(2)}` : '—'}</td>
+                            <td>
+                              {d.units > 0 && d.labour_hours > 0 ? (
+                                <span style={{ fontSize: 11, color: 'var(--ink2)' }}>
+                                  {(d.units / d.labour_hours).toFixed(1)} units/hr
+                                </span>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface2)' }}>
+                        <td style={{ fontFamily: 'var(--display)', fontSize: 13, letterSpacing: 1 }}>TOTAL</td>
+                        <td style={{ fontWeight: 700, color: 'var(--kk-green)' }}>{totalUnits.toLocaleString()}</td>
+                        <td style={{ fontWeight: 700 }}>{Math.floor(totalLabourHours)}h {Math.round((totalLabourHours % 1) * 60)}m</td>
+                        <td style={{ fontWeight: 700 }}>${totalLabourCost.toFixed(2)}</td>
+                        <td style={{ fontWeight: 700 }}>{avgCostPerUnit != null ? `$${avgCostPerUnit.toFixed(2)}` : '—'}</td>
+                        <td style={{ fontSize: 11, color: 'var(--ink2)' }}>
+                          {totalUnits > 0 && totalLabourHours > 0 ? `${(totalUnits / totalLabourHours).toFixed(1)} units/hr avg` : ''}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </>

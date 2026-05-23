@@ -531,10 +531,12 @@ function printDispatchSlip(ordersInput) {
         <th style="width:90px;background:#fffde7">Prod. Date</th>
       </tr></thead><tbody>
       ${(order.order_items || []).map(item => {
+        const isBulk = item.item_type === 'bulk' || (item.product_code && item.product_code.endsWith('Bu'))
         const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
+        const qtyDisplay = isBulk ? item.quantity : `${cases} / ${item.quantity}`
         return `<tr>
           <td>${item.product_name} <span style="font-weight:700">(${item.product_code})</span></td>
-          <td style="text-align:center;font-weight:900">${cases} / ${item.quantity}</td>
+          <td style="text-align:center;font-weight:900">${qtyDisplay}</td>
           <td style="background:#fffde7">&nbsp;</td>
         </tr>`}).join('')}
       </tbody></table></div>

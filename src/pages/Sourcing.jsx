@@ -563,6 +563,116 @@ export function Activity() {
   )
 }
 
+
+// ── BACKUP & EXPORT ──────────────────────────────────────────
+function BackupExport() {
+  const [exporting, setExporting] = useState({})
+
+  const tables = [
+    { key: 'orders',       label: 'Orders',           icon: '🛒', desc: 'All customer orders with items', query: () => supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }) },
+    { key: 'customers',    label: 'Customers',        icon: '🏪', desc: 'Customer list with addresses',   query: () => supabase.from('customers').select('*').order('name') },
+    { key: 'products',     label: 'Products',         icon: '📦', desc: 'Product catalog with pricing',   query: () => supabase.from('products').select('*').order('code') },
+    { key: 'productions',  label: 'Productions',      icon: '🏭', desc: 'All production batch logs',      query: () => supabase.from('productions').select('*').order('date', { ascending: false }) },
+    { key: 'dispatches',   label: 'Dispatches',       icon: '🚚', desc: 'Dispatch history with items',    query: () => supabase.from('dispatches').select('*, dispatch_items(*)').order('created_at', { ascending: false }) },
+    { key: 'sourcing',     label: 'Sourcing / RM',    icon: '🌿', desc: 'Raw material receipts',          query: () => supabase.from('sourcing').select('*').order('date', { ascending: false }) },
+    { key: 'raw_materials',label: 'Raw Materials',    icon: '🧪', desc: 'RM stock levels and pricing',    query: () => supabase.from('raw_materials').select('*').order('name') },
+    { key: 'bom',          label: 'Bill of Materials', icon: '📋', desc: 'BOM for all products',          query: () => supabase.from('bom').select('*').order('product_code') },
+    { key: 'time_entries', label: 'Time Entries',     icon: '⏱', desc: 'All employee time records',      query: () => supabase.from('time_entries').select('*, employees(name)').order('clock_in', { ascending: false }) },
+  ]
+
+  async function exportTable(table) {
+    setExporting(e => ({ ...e, [table.key]: true }))
+    try {
+      const { data, error } = await table.query()
+      if (error) throw error
+      if (!data || data.length === 0) { alert('No data to export.'); return }
+
+      // Flatten nested objects
+      const flat = data.map(row => {
+        const result = {}
+        for (const [k, v] of Object.entries(row)) {
+          if (Array.isArray(v)) {
+            result[k] = JSON.stringify(v)
+          } else if (v && typeof v === 'object') {
+            for (const [k2, v2] of Object.entries(v)) {
+              result[`${k}_${k2}`] = v2
+            }
+          } else {
+            result[k] = v
+          }
+        }
+        return result
+      })
+
+      const headers = Object.keys(flat[0])
+      const csvRows = [
+        headers.join(','),
+        ...flat.map(row => headers.map(h => {
+          const val = row[h] ?? ''
+          const str = String(val).replace(/"/g, '""')
+          return str.includes(',') || str.includes('\n') || str.includes('"') ? `"${str}"` : str
+        }).join(','))
+      ]
+
+      const csv = csvRows.join('\n')
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `KK_${table.key}_${new Date().toISOString().split('T')[0]}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch(err) {
+      alert('Export failed: ' + err.message)
+    }
+    setExporting(e => ({ ...e, [table.key]: false }))
+  }
+
+  async function exportAll() {
+    for (const table of tables) {
+      await exportTable(table)
+      await new Promise(r => setTimeout(r, 300))
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>Export & Backup</div>
+          <div style={{ fontSize: 12, color: 'var(--ink3)', marginTop: 2 }}>Download your data as CSV files for backup or analysis</div>
+        </div>
+        <button className="btn btn-green" onClick={exportAll}>⬇️ Export All Tables</button>
+      </div>
+
+      <div className="grid2">
+        {tables.map(table => (
+          <div key={table.key} className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px' }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+              <span style={{ fontSize: 24 }}>{table.icon}</span>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{table.label}</div>
+                <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{table.desc}</div>
+              </div>
+            </div>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => exportTable(table)}
+              disabled={exporting[table.key]}
+              style={{ whiteSpace: 'nowrap' }}>
+              {exporting[table.key] ? '⏳...' : '⬇️ CSV'}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--amber-l)', borderRadius: 8, fontSize: 12, color: 'var(--ink2)' }}>
+        💡 <strong>Tip:</strong> Run "Export All Tables" weekly and save the files to Google Drive or Dropbox as a backup. All data is stored in Supabase — regular exports protect against accidental deletion.
+      </div>
+    </div>
+  )
+}
+
 // ── REPORTS ──────────────────────────────────────────────────
 export function Reports() {
   const { profile, isAdmin } = useAuth()
@@ -699,6 +809,7 @@ export function Reports() {
             ...(isAdmin || profile?.role === 'analyst' ? [
               { key: 'financials', label: '💰 Financials' },
               { key: 'labour', label: '👷 Labour vs Production' },
+              { key: 'backup', label: '📦 Export & Backup' },
             ] : [])
           ].map(r => (
             <button key={r.key} onClick={() => setActiveReport(r.key)} style={tabStyle(r.key)}>
@@ -780,6 +891,10 @@ export function Reports() {
 
         {activeReport === 'financials' && (isAdmin || profile?.role === 'analyst') && (
           <Financials />
+        )}
+
+        {activeReport === 'backup' && isAdmin && (
+          <BackupExport />
         )}
 
         {activeReport === 'labour' && (isAdmin || profile?.role === 'analyst') && (

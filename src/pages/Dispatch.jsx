@@ -27,6 +27,18 @@ Rules:
 - If qty column shows a standalone number (no X/Y format) treat it as units directly
 - Do NOT confuse pack type — only mark "bulk" if explicitly written
 
+SPECIAL RULES FOR NATURES EMPORIUM (when customer name contains "Natures Emporium"):
+The following items are ALWAYS bulk (single units) for Natures Emporium — mark type as "bulk":
+- Pecan / Vegan Pecan Bars → VPCAN, bulk
+- Pistachio / Vegan Pistachio Bars → VPB, bulk
+- Brownie Ganache / PVBRG → PVBRG, bulk
+- Notella / No'tella Fudge → PNF, bulk
+- Almond Butter Cookie / KAB → KAB, bulk
+- Walnut Cookie / KWAL → KWAL, bulk
+- Banana Bread Slice Frosted / PVBBSLF → PVBBSLF, slice
+The following are ALWAYS pack for Natures Emporium (in 6s):
+- Keto Cups (CKTC, CKTV, CKLR, CKAC, CKHH) → pack
+
 Return ONLY valid JSON:
 {"slips":[{"date":"May 11","customer":"BC Danforth","invoice":"4702","items":[{"code":"PBB","qty":6,"cases":1,"type":"pack","production_date":"May 08","note":""}],"flags":[]}]}`
 

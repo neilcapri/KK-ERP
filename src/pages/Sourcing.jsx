@@ -90,7 +90,6 @@ export function Sourcing() {
     setLotOCR('')
 
     try {
-      // Convert to base64
       const base64 = await new Promise((res, rej) => {
         const reader = new FileReader()
         reader.onload = () => res(reader.result.split(',')[1])
@@ -98,7 +97,13 @@ export function Sourcing() {
         reader.readAsDataURL(file)
       })
 
-      // Use Claude vision to read lot number
+      // Build context string using regular concatenation — no backtick nesting
+      const rmContext = form.rm_name
+        ? ' This label is for: ' + form.rm_name + (form.supplier ? ' from supplier ' + form.supplier : '') + '.'
+        : ''
+
+      const promptText = 'You are reading a food ingredient package label to extract the lot or batch number.' + rmContext + ' Study the entire image carefully.\n\nLook for these patterns (in order of priority):\n1. LOT: or LOT# or LOT followed by numbers/letters (e.g. "LOT:26 069", "LOT #261222", "LOT 21926")\n2. B.NO: or BATCH NO or Batch No: (e.g. "B.NO:CNC-2573-2025", "Batch No:173J72110216")\n3. A standalone alphanumeric code near best before date (e.g. "AP26073" above a best before line)\n4. Long barcode-style strings starting with letters then hyphens (e.g. "R-915-F-020-BP-25-...")\n5. Inkjet/dot-matrix printed codes on packaging seams\n\nRules:\n- Return ONLY the lot number value itself, no labels, no punctuation\n- If lot has spaces like "26 069" return it as "26 069"\n- If multiple codes exist, prefer the one labeled LOT or BATCH\n- Do NOT return best before dates or expiry dates\n- If you truly cannot find any lot or batch number, return NOTFOUND\n\nReturn just the lot number, nothing else.'
+
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: API_HEADERS,
@@ -114,23 +119,7 @@ export function Sourcing() {
               },
               {
                 type: 'text',
-                text: `You are reading a food ingredient package label to extract the lot or batch number.${form.rm_name ? \` This label is for: ${form.rm_name}${form.supplier ? \` from supplier ${form.supplier}\` : ''}.\` : ''} Study the entire image carefully.
-
-Look for these patterns (in order of priority):
-1. LOT: or LOT# or LOT followed by numbers/letters (e.g. "LOT:26 069", "LOT #261222", "LOT 21926")
-2. B.NO: or BATCH NO or Batch No: (e.g. "B.NO:CNC-2573-2025", "Batch No:173J72110216")
-3. A standalone alphanumeric code near best before date (e.g. "AP26073" above a best before line)
-4. Long barcode-style strings starting with letters then hyphens (e.g. "R-915-F-020-BP-25-...")
-5. Inkjet/dot-matrix printed codes on packaging seams
-
-Rules:
-- Return ONLY the lot number value itself, no labels, no punctuation
-- If lot has spaces like "26 069" return it as "26 069"
-- If multiple codes exist, prefer the one labeled LOT or BATCH
-- Do NOT return best before dates or expiry dates
-- If you truly cannot find any lot or batch number, return NOTFOUND
-
-Return just the lot number, nothing else.\`
+                text: promptText
               }
             ]
           }]
@@ -149,7 +138,7 @@ Return just the lot number, nothing else.\`
     }
     setOcrLoading(false)
     if (photoInputRef.current) photoInputRef.current.value = ''
-      if (cameraInputRef.current) cameraInputRef.current.value = ''
+    if (cameraInputRef.current) cameraInputRef.current.value = ''
   }
 
   function openEdit(entry) {
@@ -172,7 +161,6 @@ Return just the lot number, nothing else.\`
       const newQty = parseFloat(editForm.qty_received)
       const diff = newQty - oldQty
 
-      // Adjust stock by the difference
       if (diff !== 0) {
         const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', editingEntry.rm_name).single()
         if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock + diff) }).eq('name', editingEntry.rm_name)
@@ -189,8 +177,8 @@ Return just the lot number, nothing else.\`
 
       await supabase.from('activity').insert({
         type: 'sourcing',
-        title: `${editingEntry.rm_name} entry updated`,
-        description: `Qty: ${oldQty} → ${newQty} ${editForm.unit}${editForm.lot_number ? ` · Lot: ${editForm.lot_number}` : ''}`,
+        title: editingEntry.rm_name + ' entry updated',
+        description: 'Qty: ' + oldQty + ' → ' + newQty + ' ' + editForm.unit + (editForm.lot_number ? ' · Lot: ' + editForm.lot_number : ''),
         created_by_name: profile?.name
       })
 
@@ -207,11 +195,10 @@ Return just the lot number, nothing else.\`
     setSaving(true)
 
     try {
-      // Upload lot photo if present
       let lot_photo_url = null
       if (lotPhoto) {
         const ext = lotPhoto.name.split('.').pop()
-        const path = `lot-photos/${Date.now()}-${rm_name.replace(/\s+/g, '-')}.${ext}`
+        const path = 'lot-photos/' + Date.now() + '-' + rm_name.replace(/\s+/g, '-') + '.' + ext
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('sourcing-photos')
           .upload(path, lotPhoto, { contentType: lotPhoto.type })
@@ -238,12 +225,11 @@ Return just the lot number, nothing else.\`
 
       await supabase.from('activity').insert({
         type: 'sourcing',
-        title: `${rm_name} received`,
-        description: `${q} ${unit} from ${supplier}${lot_number ? ` · Lot: ${lot_number}` : ''}`,
+        title: rm_name + ' received',
+        description: q + ' ' + unit + ' from ' + supplier + (lot_number ? ' · Lot: ' + lot_number : ''),
         created_by_name: profile?.name
       })
 
-      // Reset
       setShowModal(false)
       setForm({ date: new Date().toISOString().split('T')[0], rm_name: '', supplier: '', qty_bags: '', qty_kg: '', unit: 'kg', manual_entry: false, lot_number: '' })
       setLotPhoto(null)
@@ -257,15 +243,15 @@ Return just the lot number, nothing else.\`
   }
 
   async function deleteSourcing(entry) {
-    if (!window.confirm(`Delete sourcing entry for ${entry.rm_name} (+${entry.qty_received} ${entry.unit}) on ${entry.date}?\n\nThis will reverse the stock change.`)) return
+    if (!window.confirm('Delete sourcing entry for ' + entry.rm_name + ' (+' + entry.qty_received + ' ' + entry.unit + ') on ' + entry.date + '?\n\nThis will reverse the stock change.')) return
     setDeletingId(entry.id)
     try {
       const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', entry.rm_name).single()
       if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - entry.qty_received) }).eq('name', entry.rm_name)
       await supabase.from('sourcing').delete().eq('id', entry.id)
       await supabase.from('activity').insert({
-        type: 'sourcing', title: `Sourcing Deleted: ${entry.rm_name}`,
-        description: `${entry.qty_received} ${entry.unit} reversed · ${entry.date}`,
+        type: 'sourcing', title: 'Sourcing Deleted: ' + entry.rm_name,
+        description: entry.qty_received + ' ' + entry.unit + ' reversed · ' + entry.date,
         created_by_name: profile?.name || 'admin'
       })
       loadData()
@@ -306,10 +292,10 @@ Return just the lot number, nothing else.\`
                     return (
                       <tr key={r.name}>
                         <td style={{ fontWeight: 500, fontSize: 12 }}>{r.name}</td>
-                        <td style={{ fontWeight: 600, color: `var(--${s})` }}>{r.stock?.toFixed(2)}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--' + s + ')' }}>{r.stock?.toFixed(2)}</td>
                         <td style={{ color: 'var(--ink3)', fontSize: 11 }}>{r.unit}</td>
                         <td style={{ fontSize: 11, color: 'var(--ink2)' }}>{r.supplier}</td>
-                        <td><span className={`badge badge-${s}`}>{label}</span></td>
+                        <td><span className={'badge badge-' + s}>{label}</span></td>
                       </tr>
                     )
                   })}
@@ -361,26 +347,23 @@ Return just the lot number, nothing else.\`
             <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
             <div className="modal-title">LOG RM RECEIPT</div>
 
-            {/* Date */}
             <div className="field">
               <label>Date</label>
               <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </div>
 
-            {/* RM Dropdown */}
             <div className="field">
               <label>Raw Material</label>
               <select style={selectStyle} value={form.rm_name} onChange={e => handleRMChange(e.target.value)}>
                 <option value="">Select RM...</option>
                 {rms.map(r => (
                   <option key={r.name} value={r.name}>
-                    {r.name}{r.package_label ? ` (${r.package_label})` : ''}
+                    {r.name}{r.package_label ? ' (' + r.package_label + ')' : ''}
                   </option>
                 ))}
               </select>
             </div>
 
-            {/* Supplier Dropdown */}
             <div className="field">
               <label>Supplier</label>
               <select style={selectStyle} value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))}>
@@ -389,7 +372,6 @@ Return just the lot number, nothing else.\`
               </select>
             </div>
 
-            {/* Qty — package count or manual */}
             {selectedRM?.package_size && !form.manual_entry ? (
               <div>
                 <div className="field">
@@ -436,7 +418,6 @@ Return just the lot number, nothing else.\`
               </div>
             )}
 
-            {/* Lot # Photo */}
             <div className="field">
               <label>📷 Lot # Photo</label>
               <input ref={photoInputRef} type="file" accept="image/*"
@@ -460,7 +441,6 @@ Return just the lot number, nothing else.\`
               {lotOCR && <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 8 }}>✅ Lot # detected: <strong>{lotOCR}</strong></div>}
             </div>
 
-            {/* Lot # field (auto-filled or manual) */}
             <div className="field">
               <label>Lot # {lotOCR ? '(auto-filled — edit if needed)' : '(type manually)'}</label>
               <input type="text" value={form.lot_number} onChange={e => setForm(f => ({ ...f, lot_number: e.target.value }))} placeholder="e.g. LOT2024-001" />
@@ -475,6 +455,7 @@ Return just the lot number, nothing else.\`
           </div>
         </div>
       )}
+
       {editingEntry && (
         <div className="modal-bg" onClick={e => e.target === e.currentTarget && setEditingEntry(null)}>
           <div className="modal">
@@ -550,7 +531,7 @@ export function Activity() {
       <div className="page-body">
         <div className="filter-bar" style={{ marginBottom: 16 }}>
           {filters.map(f => (
-            <button key={f} className={`filter-btn ${filter===f?'active':''}`} onClick={() => setFilter(f)}>
+            <button key={f} className={'filter-btn ' + (filter===f ? 'active' : '')} onClick={() => setFilter(f)}>
               {icons[f] || ''} {f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
@@ -560,11 +541,11 @@ export function Activity() {
             activities.length === 0 ? <div style={{ textAlign: 'center', padding: 32, color: 'var(--ink3)' }}>No activity yet.</div> :
             activities.map(a => (
               <div key={a.id} className="activity-item">
-                <div className={`activity-icon ${a.type}`}>{icons[a.type] || '•'}</div>
+                <div className={'activity-icon ' + a.type}>{icons[a.type] || '•'}</div>
                 <div className="activity-body">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div className="activity-title">{a.title}</div>
-                    <span className={`badge badge-${a.type==='dispatch'||a.type==='dispatch_deleted'?'blue':a.type==='production'||a.type==='production_deleted'?'green':a.type==='sourcing'?'amber':'purple'}`}>{a.type}</span>
+                    <span className={'badge badge-' + (a.type==='dispatch'||a.type==='dispatch_deleted'?'blue':a.type==='production'||a.type==='production_deleted'?'green':a.type==='sourcing'?'amber':'purple')}>{a.type}</span>
                   </div>
                   <div className="activity-meta">
                     {a.description} · {new Date(a.created_at).toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} · {a.created_by_name || '—'}
@@ -603,7 +584,6 @@ function BackupExport() {
       if (error) throw error
       if (!data || data.length === 0) { alert('No data to export.'); return }
 
-      // Flatten nested objects
       const flat = data.map(row => {
         const result = {}
         for (const [k, v] of Object.entries(row)) {
@@ -611,7 +591,7 @@ function BackupExport() {
             result[k] = JSON.stringify(v)
           } else if (v && typeof v === 'object') {
             for (const [k2, v2] of Object.entries(v)) {
-              result[`${k}_${k2}`] = v2
+              result[k + '_' + k2] = v2
             }
           } else {
             result[k] = v
@@ -626,7 +606,7 @@ function BackupExport() {
         ...flat.map(row => headers.map(h => {
           const val = row[h] ?? ''
           const str = String(val).replace(/"/g, '""')
-          return str.includes(',') || str.includes('\n') || str.includes('"') ? `"${str}"` : str
+          return str.includes(',') || str.includes('\n') || str.includes('"') ? '"' + str + '"' : str
         }).join(','))
       ]
 
@@ -635,7 +615,7 @@ function BackupExport() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `KK_${table.key}_${new Date().toISOString().split('T')[0]}.csv`
+      a.download = 'KK_' + table.key + '_' + new Date().toISOString().split('T')[0] + '.csv'
       a.click()
       URL.revokeObjectURL(url)
     } catch(err) {
@@ -697,7 +677,6 @@ export function Reports() {
   const [loading, setLoading] = useState(true)
   const [activeReport, setActiveReport] = useState('fg')
 
-  // Labour vs Production state
   const [labourRange, setLabourRange] = useState('week')
   const [labourDate, setLabourDate] = useState(new Date().toISOString().split('T')[0].slice(0,7))
   const [labourCustomStart, setLabourCustomStart] = useState('')
@@ -724,12 +703,11 @@ export function Reports() {
     }
     if (labourRange === 'month') {
       const [y, m] = labourDate.split('-').map(Number)
-      const start = `${y}-${String(m).padStart(2,'0')}-01`
+      const start = y + '-' + String(m).padStart(2,'0') + '-01'
       const lastDay = new Date(y, m, 0).getDate()
-      const end = `${y}-${String(m).padStart(2,'0')}-${lastDay}`
+      const end = y + '-' + String(m).padStart(2,'0') + '-' + lastDay
       return { start, end }
     }
-    // week
     const d = new Date(labourDate + '-01' || new Date())
     const day = d.getDay()
     const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
@@ -753,16 +731,13 @@ export function Reports() {
     const empRateMap = {}
     ;(empRes.data || []).forEach(e => { empRateMap[e.id] = e.hourly_rate || 0 })
 
-    // Group by day
     const dayMap = {}
 
-    // Add production data
     ;(prodRes.data || []).forEach(p => {
       if (!dayMap[p.date]) dayMap[p.date] = { date: p.date, units: 0, labour_hours: 0, labour_cost: 0 }
       dayMap[p.date].units += p.output_units || 0
     })
 
-    // Add labour data
     ;(timeRes.data || []).forEach(t => {
       const day = t.clock_in.split('T')[0]
       if (!dayMap[day]) dayMap[day] = { date: day, units: 0, labour_hours: 0, labour_cost: 0 }
@@ -852,10 +827,10 @@ export function Reports() {
                         <td><span className="code-tag">{p.code}</span></td>
                         <td style={{ fontWeight: 500 }}>{p.name}</td>
                         <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.category}</td>
-                        <td style={{ fontWeight: 600, color: `var(--${s})` }}>{p.units}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--' + s + ')' }}>{p.units}</td>
                         <td>{Math.floor(p.units / ps)}</td>
                         <td style={{ color: 'var(--ink3)' }}>{p.min_stock}</td>
-                        <td><span className={`badge badge-${s}`}>{p.units<=0?'OUT':p.units<=p.min_stock?'LOW':'OK'}</span></td>
+                        <td><span className={'badge badge-' + s}>{p.units<=0?'OUT':p.units<=p.min_stock?'LOW':'OK'}</span></td>
                       </tr>
                     )
                   })}
@@ -886,11 +861,11 @@ export function Reports() {
                       <tr key={r.name}>
                         <td style={{ fontWeight: 500, fontSize: 12 }}>{r.name}</td>
                         <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{r.category}</td>
-                        <td style={{ fontWeight: 600, color: `var(--${s})` }}>{r.stock?.toFixed(3)}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--' + s + ')' }}>{r.stock?.toFixed(3)}</td>
                         <td style={{ color: 'var(--ink3)' }}>{r.unit}</td>
                         <td style={{ fontSize: 11 }}>{r.supplier}</td>
-                        <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{r.price_per_pack > 0 ? `$${r.price_per_pack.toFixed(2)}` : '—'}</td>
-                        <td><span className={`badge badge-${s}`}>{r.stock<=0?'OUT':r.stock<=r.min_stock?'LOW':'OK'}</span></td>
+                        <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{r.price_per_pack > 0 ? '$' + r.price_per_pack.toFixed(2) : '—'}</td>
+                        <td><span className={'badge badge-' + s}>{r.stock<=0?'OUT':r.stock<=r.min_stock?'LOW':'OK'}</span></td>
                       </tr>
                     )
                   })}
@@ -915,7 +890,6 @@ export function Reports() {
 
         {activeReport === 'labour' && (isAdmin || profile?.role === 'analyst') && (
           <div>
-            {/* Date range controls */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
                 {['week','month','custom'].map(r => (
@@ -939,7 +913,6 @@ export function Reports() {
               <button className="btn btn-secondary btn-sm" onClick={loadLabourVsProduction}>↻ Refresh</button>
             </div>
 
-            {/* Summary cards */}
             <div className="grid4" style={{ marginBottom: 16 }}>
               <div className="stat green">
                 <div className="stat-label">Total Units</div>
@@ -958,12 +931,11 @@ export function Reports() {
               </div>
               <div className="stat" style={{ borderTop: '3px solid var(--kk-peach)' }}>
                 <div className="stat-label">Labour / Unit</div>
-                <div className="stat-value">{avgCostPerUnit != null ? `$${avgCostPerUnit.toFixed(2)}` : '—'}</div>
+                <div className="stat-value">{avgCostPerUnit != null ? '$' + avgCostPerUnit.toFixed(2) : '—'}</div>
                 <div className="stat-sub">Avg cost per unit</div>
               </div>
             </div>
 
-            {/* Daily breakdown */}
             <div className="card">
               <div className="card-title">Daily Breakdown</div>
               {labourLoading ? (
@@ -995,9 +967,9 @@ export function Reports() {
                           <tr key={d.date}>
                             <td style={{ fontWeight: 500 }}>{new Date(d.date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })}</td>
                             <td style={{ fontWeight: 600, color: 'var(--kk-green)' }}>{d.units > 0 ? d.units.toLocaleString() : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
-                            <td>{d.labour_hours > 0 ? `${hrs}h ${mins}m` : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
-                            <td style={{ fontWeight: 600 }}>{d.labour_cost > 0 ? `$${d.labour_cost.toFixed(2)}` : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
-                            <td style={{ fontWeight: 700, color: effColor }}>{d.cost_per_unit != null ? `$${d.cost_per_unit.toFixed(2)}` : '—'}</td>
+                            <td>{d.labour_hours > 0 ? hrs + 'h ' + mins + 'm' : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
+                            <td style={{ fontWeight: 600 }}>{d.labour_cost > 0 ? '$' + d.labour_cost.toFixed(2) : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
+                            <td style={{ fontWeight: 700, color: effColor }}>{d.cost_per_unit != null ? '$' + d.cost_per_unit.toFixed(2) : '—'}</td>
                             <td>
                               {d.units > 0 && d.labour_hours > 0 ? (
                                 <span style={{ fontSize: 11, color: 'var(--ink2)' }}>
@@ -1015,9 +987,9 @@ export function Reports() {
                         <td style={{ fontWeight: 700, color: 'var(--kk-green)' }}>{totalUnits.toLocaleString()}</td>
                         <td style={{ fontWeight: 700 }}>{Math.floor(totalLabourHours)}h {Math.round((totalLabourHours % 1) * 60)}m</td>
                         <td style={{ fontWeight: 700 }}>${totalLabourCost.toFixed(2)}</td>
-                        <td style={{ fontWeight: 700 }}>{avgCostPerUnit != null ? `$${avgCostPerUnit.toFixed(2)}` : '—'}</td>
+                        <td style={{ fontWeight: 700 }}>{avgCostPerUnit != null ? '$' + avgCostPerUnit.toFixed(2) : '—'}</td>
                         <td style={{ fontSize: 11, color: 'var(--ink2)' }}>
-                          {totalUnits > 0 && totalLabourHours > 0 ? `${(totalUnits / totalLabourHours).toFixed(1)} units/hr avg` : ''}
+                          {totalUnits > 0 && totalLabourHours > 0 ? (totalUnits / totalLabourHours).toFixed(1) + ' units/hr avg' : ''}
                         </td>
                       </tr>
                     </tfoot>

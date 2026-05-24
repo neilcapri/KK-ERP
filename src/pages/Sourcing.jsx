@@ -114,7 +114,23 @@ export function Sourcing() {
               },
               {
                 type: 'text',
-                text: 'Look at this food ingredient package label. Extract ONLY the lot number, batch number, or lot code. It may be labelled as LOT, LOT#, LOT NO, BATCH, BEST BY LOT, or similar. Return just the alphanumeric lot number value with no explanation, no label, no punctuation. If you cannot find a lot number, return the word NOTFOUND.'
+                text: `You are reading a food ingredient package label to extract the lot or batch number.${form.rm_name ? \` This label is for: ${form.rm_name}${form.supplier ? \` from supplier ${form.supplier}\` : ''}.\` : ''} Study the entire image carefully.
+
+Look for these patterns (in order of priority):
+1. LOT: or LOT# or LOT followed by numbers/letters (e.g. "LOT:26 069", "LOT #261222", "LOT 21926")
+2. B.NO: or BATCH NO or Batch No: (e.g. "B.NO:CNC-2573-2025", "Batch No:173J72110216")
+3. A standalone alphanumeric code near best before date (e.g. "AP26073" above a best before line)
+4. Long barcode-style strings starting with letters then hyphens (e.g. "R-915-F-020-BP-25-...")
+5. Inkjet/dot-matrix printed codes on packaging seams
+
+Rules:
+- Return ONLY the lot number value itself, no labels, no punctuation
+- If lot has spaces like "26 069" return it as "26 069"
+- If multiple codes exist, prefer the one labeled LOT or BATCH
+- Do NOT return best before dates or expiry dates
+- If you truly cannot find any lot or batch number, return NOTFOUND
+
+Return just the lot number, nothing else.\`
               }
             ]
           }]

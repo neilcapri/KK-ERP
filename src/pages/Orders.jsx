@@ -49,7 +49,6 @@ const BULK_COLS = [
 
 const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
 
-// Maps retail pack code → bulk single code
 const BULK_MAP = {
   PBB: 'PBBBu', PCC: 'PCCBu', KLR: 'KLRBu',
   KAB: 'KABBu', KWAL: 'KWALBu', HPCo: 'HPCoBu', PVHC: 'PVHCBu', KABIS: 'KABISBu',
@@ -73,7 +72,6 @@ const S = {
   ALT2: 'FFFFFF',
   QTY_FG: '1A3A20',
   VAL_BG: 'E8F5E9',
-  // Store row palette matching reference file
   STORE_PALETTE: ['F7FFAE','F8C7F1','D4E6FF','C1C985','D19EB9','E8F5E9','FFE4B5','E6E0FF','FFDAB9','C8F5F0'],
 }
 
@@ -100,17 +98,14 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       const addr = encode(r, c)
       if (!ws[addr]) ws[addr] = { v: '', t: 's' }
 
-      // Row 0: Title
       if (r === 0) {
         ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 14, false, c === 0 ? 'left' : 'center')
         continue
       }
-      // Row 1: Category headers
       if (r === 1) {
         ws[addr].s = cellStyle(S.CAT_GREEN, S.KK_CREAM, true, 10, false, 'center')
         continue
       }
-      // Row 2: Column headers
       if (r === 2) {
         if (c === 0) {
           ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'left')
@@ -121,7 +116,6 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         }
         continue
       }
-      // Grand total row
       if (grandTotalIdx !== undefined && r === grandTotalIdx) {
         if (c === 0) {
           ws[addr].s = cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left')
@@ -130,12 +124,10 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         }
         continue
       }
-      // Day header rows
       if (dayRowIdxs.has(r)) {
         ws[addr].s = cellStyle(S.DAY_BG, S.DAY_FG, true, 12, false, c === 0 ? 'left' : 'center')
         continue
       }
-      // Day total rows
       if (totalRowIdxs.has(r)) {
         if (c === 0) {
           ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 20, false, 'left')
@@ -146,7 +138,6 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         }
         continue
       }
-      // Store rows — each store gets a palette colour, cycling through
       if (storeRowIdxs.has(r)) {
         const storePos = storeArr.indexOf(r)
         const rowBg = S.STORE_PALETTE[storePos % S.STORE_PALETTE.length]
@@ -162,7 +153,6 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         }
         continue
       }
-      // Blank gap rows
       ws[addr].s = { fill: { fgColor: { rgb: 'FFFFFF' } } }
     }
   }
@@ -170,7 +160,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
 
 function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const ws = XLSX.utils.aoa_to_sheet([])
-  const title = `KONSCIOUS KITCHEN — ORDER SHEET${weekLabel ? ' — ' + weekLabel : ''}`
+  const title = 'KONSCIOUS KITCHEN — ORDER SHEET' + (weekLabel ? ' — ' + weekLabel : '')
   const numCols = RETAIL_COLS.length + 1 + (includePricing ? 1 : 0)
 
   const rows = []
@@ -188,7 +178,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   rows.push(catRow)
 
   const headerRow = ['Store']
-  for (const col of RETAIL_COLS) headerRow.push(`${col.label}\n(${col.code})`)
+  for (const col of RETAIL_COLS) headerRow.push(col.label + '\n(' + col.code + ')')
   if (includePricing) headerRow.push('ORDER VALUE ($)')
   rows.push(headerRow)
 
@@ -238,7 +228,6 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
       rows.push(storeRow)
     }
 
-    // Calculate column totals from store rows
     const colTotals = new Array(RETAIL_COLS.length).fill(0)
     let grandTotal = 0
     for (const order of dayOrders) {
@@ -262,10 +251,9 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     if (includePricing) totalRow.push(grandTotal > 0 ? Math.round(grandTotal * 100) / 100 : null)
     totalRowIdxs.add(rows.length)
     rows.push(totalRow)
-    rows.push([]) // blank gap row
+    rows.push([])
   }
 
-  // ── Grand Total row ──────────────────────────────────────
   const grandColTotals = new Array(RETAIL_COLS.length).fill(0)
   let grandOrderTotal = 0
   for (const order of orders) {
@@ -297,7 +285,6 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   if (includePricing) colWidths.push({ wch: 14 })
   ws['!cols'] = colWidths
   ws['!rows'] = [{ hpt: 24 }, { hpt: 52 }, { hpt: 90 }]
-  // All data rows at 45pt
   for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 45 }
 
   applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx)
@@ -306,7 +293,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
 
 function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const ws = XLSX.utils.aoa_to_sheet([])
-  const title = `KONSCIOUS KITCHEN — BULK ORDERS${weekLabel ? ' — ' + weekLabel : ''}`
+  const title = 'KONSCIOUS KITCHEN — BULK ORDERS' + (weekLabel ? ' — ' + weekLabel : '')
   const numCols = BULK_COLS.length + 1 + (includePricing ? 1 : 0)
 
   const rows = []
@@ -314,7 +301,7 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   rows.push(titleRow)
 
   const headerRow = ['Store']
-  for (const col of BULK_COLS) headerRow.push(`${col.label}\n(${col.code})`)
+  for (const col of BULK_COLS) headerRow.push(col.label + '\n(' + col.code + ')')
   if (includePricing) headerRow.push('ORDER VALUE ($)')
   rows.push(headerRow)
 
@@ -356,7 +343,6 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
       rows.push(storeRow)
     }
 
-    // Calculate column totals from store rows
     const bulkTotals = new Array(BULK_COLS.length).fill(0)
     let dayBulkTotal = 0
     for (const order of dayOrders) {
@@ -378,10 +364,9 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
     if (includePricing) totalRow.push(dayBulkTotal > 0 ? Math.round(dayBulkTotal * 100) / 100 : null)
     totalRowIdxs.add(rows.length)
     rows.push(totalRow)
-    rows.push([]) // blank gap row
+    rows.push([])
   }
 
-  // ── Grand Total row ──────────────────────────────────────
   const grandBulkTotals = new Array(BULK_COLS.length).fill(0)
   for (const order of orders) {
     const items = order.order_items || []
@@ -414,7 +399,6 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
 }
 
 
-
 // ── Week helpers ──────────────────────────────────────────────
 function getWeekBounds(offset = 0) {
   const now = new Date()
@@ -431,12 +415,12 @@ function getWeekBounds(offset = 0) {
 function getWeekLabel(offset = 0) {
   const { monday, sunday } = getWeekBounds(offset)
   const fmt = d => d.toLocaleString('en-CA', { month: 'short', day: 'numeric' })
-  return `${fmt(monday)}–${fmt(sunday)}, ${monday.getFullYear()}`
+  return fmt(monday) + '\u2013' + fmt(sunday) + ', ' + monday.getFullYear()
 }
 
 function isWeekOrder(order, offset = 0) {
   const { monday, sunday } = getWeekBounds(offset)
-  if (!order.dispatch_date) return offset === 0 // no date = current week only
+  if (!order.dispatch_date) return offset === 0
   const d = new Date(order.dispatch_date + 'T00:00:00')
   return d >= monday && d <= sunday
 }
@@ -454,14 +438,11 @@ const UNITS_PER_PACK_MAP = {
 
 function getPacksPerCase(product) { return product?.packs_per_case || 6 }
 function getUnitsPerPack(product) {
-  // Coerce to number — Supabase may return strings
   const upp = parseInt(product?.units_per_pack) || 0
   if (upp > 1) return upp
-  // Try deriving from units_per_case / packs_per_case
   const upc = parseInt(product?.units_per_case) || 0
   const ppc = parseInt(product?.packs_per_case) || 6
   if (upc > ppc) return Math.round(upc / ppc)
-  // Fall back to known map
   return UNITS_PER_PACK_MAP[product?.code] || 1
 }
 function getUnitsPerCase(product) {
@@ -515,62 +496,84 @@ function CustomerSelect({ customers, value, onChange, onAddNew }) {
 }
 
 // ── Dispatch Slip Print ───────────────────────────────────────
+// 2 customers per page, unlimited rows per customer
 function printDispatchSlip(ordersInput) {
   const pages = []
   for (let i = 0; i < ordersInput.length; i += 2) pages.push(ordersInput.slice(i, i + 2))
 
-  const renderOrder = (order) => `
-    <div class="order-block">
-      <div class="order-header">
-        <strong>${order.customer_name}</strong>
-        <div class="order-meta">${order.slip_number || ''} · <b>Inv #: ___________</b> · ${order.dispatch_date || order.delivery_day || '—'}</div>
-      </div>
-      <div class="table-wrap"><table><thead><tr>
-        <th>Product</th>
-        <th style="width:90px;text-align:center">Cs / Units</th>
-        <th style="width:90px;background:#fffde7">Prod. Date</th>
-      </tr></thead><tbody>
-      ${(order.order_items || []).map(item => {
-        const isBulk = item.item_type === 'bulk' || (item.product_code && item.product_code.endsWith('Bu'))
-        const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
-        const qtyDisplay = isBulk ? item.quantity : `${cases} / ${item.quantity}`
-        return `<tr>
-          <td>${item.product_name} <span style="font-weight:700">(${item.product_code})</span></td>
-          <td style="text-align:center;font-weight:900">${qtyDisplay}</td>
-          <td style="background:#fffde7">&nbsp;</td>
-        </tr>`}).join('')}
-      </tbody></table></div>
-    </div>`
+  function renderOrder(order) {
+    const itemRows = (order.order_items || []).map(function(item) {
+      const isBulk = item.item_type === 'bulk' || (item.product_code && item.product_code.endsWith('Bu'))
+      const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
+      const qtyDisplay = isBulk ? String(item.quantity) : (String(cases) + ' / ' + String(item.quantity))
+      return '<tr>' +
+        '<td>' + (item.product_name || '') + ' <span style="font-weight:700">(' + (item.product_code || '') + ')</span></td>' +
+        '<td style="text-align:center;font-weight:900">' + qtyDisplay + '</td>' +
+        '<td style="background:#fffde7">&nbsp;</td>' +
+        '</tr>'
+    }).join('')
 
-  const renderPage = (pageOrders, pageNum, total) => `
-    <div class="page">
-      <div class="page-header">
-        <span class="logo">KONSCIOUS KITCHEN</span>
-        <span style="font-size:10px;color:#555">DISPATCH · Page ${pageNum}/${total} · ${new Date().toLocaleDateString('en-CA')}</span>
-      </div>
-      <div class="slips-grid">${pageOrders.map(renderOrder).join('')}</div>
-    </div>`
+    return '<div class="order-block">' +
+      '<div class="order-header">' +
+        '<strong>' + (order.customer_name || '') + '</strong>' +
+        '<div class="order-meta">' +
+          (order.slip_number || '') +
+          ' &middot; <b>Inv #: ___________</b> &middot; ' +
+          (order.dispatch_date || order.delivery_day || '&mdash;') +
+        '</div>' +
+      '</div>' +
+      '<div class="table-wrap">' +
+        '<table>' +
+          '<thead><tr>' +
+            '<th>Product</th>' +
+            '<th style="width:90px;text-align:center">Cs / Units</th>' +
+            '<th style="width:80px;background:#fffde7">Prod. Date</th>' +
+          '</tr></thead>' +
+          '<tbody>' + itemRows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+    '</div>'
+  }
 
-  const html = `<!DOCTYPE html><html><head><title>KK Dispatch Slips</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; background: #fff; color: #000; }
-    .page { width: 210mm; height: 297mm; padding: 4mm; display: grid; grid-template-rows: auto 1fr; page-break-after: always; overflow: hidden; }
-    .page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 2px; margin-bottom: 3px; }
-    .logo { font-size: 12px; font-weight: 900; letter-spacing: 2px; }
-    .slips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; }
-    .order-block { border: 1.5px solid #000; display: flex; flex-direction: column; overflow: hidden; }
-    .order-header { border-bottom: 1.5px solid #000; padding: 3px 6px; flex-shrink: 0; }
-    .order-header strong { font-size: 15px; font-weight: 900; display: block; line-height: 1.3; }
-    .order-meta { font-size: 11px; font-weight: 600; color: #333; }
-    .table-wrap { flex: 1; overflow: hidden; }
-    table { width: 100%; border-collapse: collapse; height: 100%; }
-    th { background: #e8e8e8; padding: 3px 6px; font-size: 10px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }
-    td { padding: 4px 6px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: middle; }
-    @media print { body { margin: 0; } .page { page-break-after: always; } }
-  </style></head><body>
-    ${pages.map((pg, i) => renderPage(pg, i+1, pages.length)).join('')}
-  </body></html>`
+  function renderPage(pageOrders, pageNum, total) {
+    return '<div class="page">' +
+      '<div class="page-header">' +
+        '<span class="logo">KONSCIOUS KITCHEN</span>' +
+        '<span style="font-size:10px;color:#555">DISPATCH &middot; Page ' + pageNum + '/' + total + ' &middot; ' + new Date().toLocaleDateString('en-CA') + '</span>' +
+      '</div>' +
+      '<div class="slips-grid">' +
+        pageOrders.map(renderOrder).join('') +
+      '</div>' +
+    '</div>'
+  }
+
+  const css = [
+    '* { box-sizing: border-box; margin: 0; padding: 0; }',
+    'body { font-family: Arial, sans-serif; background: #fff; color: #000; }',
+    // Page: min-height so short orders don't crop; page-break so each pair starts fresh
+    '.page { width: 210mm; min-height: 297mm; padding: 6mm 6mm 4mm 6mm; display: flex; flex-direction: column; page-break-after: always; }',
+    '.page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 3px; margin-bottom: 6px; flex-shrink: 0; }',
+    '.logo { font-size: 12px; font-weight: 900; letter-spacing: 2px; }',
+    // Side-by-side, each column stretches to fit its own content — no shared height constraint
+    '.slips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; flex: 1; }',
+    '.order-block { border: 1.5px solid #000; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; }',
+    '.order-header { border-bottom: 1.5px solid #000; padding: 4px 7px; background: #f0f0f0; flex-shrink: 0; }',
+    '.order-header strong { font-size: 15px; font-weight: 900; display: block; line-height: 1.3; }',
+    '.order-meta { font-size: 11px; font-weight: 600; color: #333; margin-top: 1px; }',
+    '.table-wrap { flex: 1; }',
+    // Table fills all rows — no overflow:hidden, no fixed height
+    'table { width: 100%; border-collapse: collapse; }',
+    'th { background: #e0e0e0; padding: 3px 6px; font-size: 10px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }',
+    'td { padding: 5px 7px; border-bottom: 1px solid #ddd; font-size: 13px; vertical-align: middle; word-break: break-word; }',
+    'tr:last-child td { border-bottom: none; }',
+    '@media print { body { margin: 0; } .page { page-break-after: always; } }',
+  ].join('\n')
+
+  const html = '<!DOCTYPE html><html><head><title>KK Dispatch Slips</title>' +
+    '<style>' + css + '</style>' +
+    '</head><body>' +
+    pages.map(function(pg, i) { return renderPage(pg, i + 1, pages.length) }).join('') +
+    '</body></html>'
 
   const w = window.open('', '_blank')
   w.document.write(html)
@@ -581,60 +584,11 @@ function printDispatchSlip(ordersInput) {
 
 // ── AI helper ─────────────────────────────────────────────────
 async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '') {
-  const productList = products.map(p => `${p.code}: ${p.name}`).join('\n')
+  const productList = products.map(p => p.code + ': ' + p.name).join('\n')
   const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
-  const prompt = `You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list using smart semantic understanding.
+  const neRule = isNaturesEmporium ? '\nSPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):\n- "brownie ganache 90g" or "brownie ganache pouch" = PVBRG (packaged, retail)\n- "brownie ganache" without 90g or pouch = PVBRG-BULK (bulk order)\n' : ''
 
-OUR PRODUCT LIST:
-${productList}
-
-SEMANTIC MATCHING GUIDE (common customer names → our product code):
-- blueberry muffin / paleo muffin = PBB
-- chocolate muffin / choc muffin = PCC
-- lemon raspberry muffin / lemon muffin = KLR
-- hazelnut donut / hazelnut doughnut = KHD
-- peanut butter donut / PB donut / vegan donut = VPBD
-- cinnamon donut = KSCD
-- brownie / mini brownie / brownie bar (NOT ganache) = PVBR
-- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG
-${isNaturesEmporium ? `
-SPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):
-- "brownie ganache 90g" or "brownie ganache pouch" = PVBRG (packaged, retail)
-- "brownie ganache" without 90g or pouch = PVBRG-BULK (bulk order)
-` : ''}
-- pecan bar = VPCAN
-- notella / nutella bar / no'tella = PNF
-- pistachio bar = VPB
-- hemp cookies / hemp vegan cookie = PVHC
-- hazelnut protein cookie / hazelnut cookie = HPCo
-- ginger cookie / ginger snap = PGCo
-- shortbread / PO shortbread = POS
-- keto almond butter cookie = KAB
-- keto walnut cookie = KWAL
-- snickerdoodle = KSCo
-- collagen cookie / keto collagen = KCCo
-- banana bread / banana loaf = PVBB
-- ginger loaf = GBL
-- pumpkin loaf = KPL
-- focaccia = PFB
-- vanilla strawberry slice = VSCS
-- truffle cake slice = TRFCS
-- hazelnut royale slice / hazel royale = HRCS
-- truffle cake whole = WTC
-- pistachio raspberry mini cake = PRMC
-- carrot mini cake = CMC
-- lemon mini cake = LMC
-- truffle mini cake = TMC
-- almond biscotti / keto biscotti / biscotti shelf stable / almond biscottis = KABIS
-- Use semantic understanding for anything not listed above
-- If 60% confident it matches, mark matched: true
-
-Return ONLY a JSON array:
-[
-  {"product_name": "exact name from order", "quantity": 12, "product_code": "MATCHED_CODE", "matched": true},
-  {"product_name": "truly unrecognized item", "quantity": 6, "product_code": null, "matched": false}
-]
-Return ONLY the JSON array, no other text.`
+  const prompt = 'You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list using smart semantic understanding.\n\nOUR PRODUCT LIST:\n' + productList + '\n\nSEMANTIC MATCHING GUIDE (common customer names -> our product code):\n- blueberry muffin / paleo muffin = PBB\n- chocolate muffin / choc muffin = PCC\n- lemon raspberry muffin / lemon muffin = KLR\n- hazelnut donut / hazelnut doughnut = KHD\n- peanut butter donut / PB donut / vegan donut = VPBD\n- cinnamon donut = KSCD\n- brownie / mini brownie / brownie bar (NOT ganache) = PVBR\n- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG\n' + neRule + '- pecan bar = VPCAN\n- notella / nutella bar / no\'tella = PNF\n- pistachio bar = VPB\n- hemp cookies / hemp vegan cookie = PVHC\n- hazelnut protein cookie / hazelnut cookie = HPCo\n- ginger cookie / ginger snap = PGCo\n- shortbread / PO shortbread = POS\n- keto almond butter cookie = KAB\n- keto walnut cookie = KWAL\n- snickerdoodle = KSCo\n- collagen cookie / keto collagen = KCCo\n- banana bread / banana loaf = PVBB\n- ginger loaf = GBL\n- pumpkin loaf = KPL\n- focaccia = PFB\n- vanilla strawberry slice = VSCS\n- truffle cake slice = TRFCS\n- hazelnut royale slice / hazel royale = HRCS\n- truffle cake whole = WTC\n- pistachio raspberry mini cake = PRMC\n- carrot mini cake = CMC\n- lemon mini cake = LMC\n- truffle mini cake = TMC\n- almond biscotti / keto biscotti / biscotti shelf stable / almond biscottis = KABIS\n- Use semantic understanding for anything not listed above\n- If 60% confident it matches, mark matched: true\n\nReturn ONLY a JSON array:\n[\n  {"product_name": "exact name from order", "quantity": 12, "product_code": "MATCHED_CODE", "matched": true},\n  {"product_name": "truly unrecognized item", "quantity": 6, "product_code": null, "matched": false}\n]\nReturn ONLY the JSON array, no other text.'
 
   const isPDF = fileType === 'application/pdf'
   const messages = isImage
@@ -644,7 +598,7 @@ Return ONLY the JSON array, no other text.`
           : { type: 'image', source: { type: 'base64', media_type: fileType, data: content } },
         { type: 'text', text: prompt }
       ]}]
-    : [{ role: 'user', content: `This is a customer order:\n\n${content}\n\n${prompt}` }]
+    : [{ role: 'user', content: 'This is a customer order:\n\n' + content + '\n\n' + prompt }]
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: API_HEADERS,
@@ -725,9 +679,8 @@ export default function Orders() {
     const orderMode = form.order_input_mode || 'cases'
     const enriched = matched.map(i => {
       let productCode = i.product_code
-      let itemMode = orderMode === 'mix' ? 'pack' : orderMode  // mix defaults per-item to pack
+      let itemMode = orderMode === 'mix' ? 'pack' : orderMode
 
-      // For bulk mode, auto-switch to Bu code if available
       if (orderMode === 'bulk') {
         productCode = BULK_MAP[i.product_code] || i.product_code
         itemMode = 'bulk'
@@ -846,7 +799,7 @@ export default function Orders() {
       let attachment_url = null
       if (form.attachment) {
         const ext = form.attachment.name.split('.').pop()
-        const path = `orders/${Date.now()}-${form.customer_name.replace(/\s+/g,'-')}.${ext}`
+        const path = 'orders/' + Date.now() + '-' + form.customer_name.replace(/\s+/g,'-') + '.' + ext
         const { data: upData } = await supabase.storage.from('order-attachments').upload(path, form.attachment, { contentType: form.attachment.type })
         if (upData) {
           const { data: { publicUrl } } = supabase.storage.from('order-attachments').getPublicUrl(path)
@@ -854,7 +807,7 @@ export default function Orders() {
         }
       }
       const { data: numData } = await supabase.rpc('generate_order_number')
-      const order_number = numData || `KK${Date.now()}`
+      const order_number = numData || 'KK' + Date.now()
       const total = orderItems.reduce((sum, i) => { const packs = i.packs || (i.cases ? parseFloat(i.cases) * (i.packs_per_case || 6) : parseFloat(i.quantity)); return sum + (packs * parseFloat(i.price_per_pack || 0)) }, 0)
       const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true })
       const slipNum = 'SLIP-' + String((count || 0) + 1).padStart(3, '0')
@@ -880,8 +833,8 @@ export default function Orders() {
         await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
       }
       await supabase.from('activity').insert({
-        type: 'dispatch', title: `Order received: ${form.customer_name}`,
-        description: `${order_number} · ${slipNum} · ${orderItems.length} items · $${total.toFixed(2)}`,
+        type: 'dispatch', title: 'Order received: ' + form.customer_name,
+        description: order_number + ' · ' + slipNum + ' · ' + orderItems.length + ' items · $' + total.toFixed(2),
         created_by_name: profile?.name,
       })
       setShowModal(false); resetForm(); await loadData()
@@ -904,7 +857,6 @@ export default function Orders() {
     if (!selectedOrders.size) { alert('Select orders first.'); return }
     const toExport = orders.filter(o => selectedOrders.has(o.id))
 
-    // Fetch customer addresses for selected orders
     const customerNames = [...new Set(toExport.map(o => o.customer_name))]
     const { data: custData } = await supabase
       .from('customers')
@@ -917,44 +869,30 @@ export default function Orders() {
     const ws = XLSX.utils.aoa_to_sheet([])
 
     const rows = []
-    // Title
-    rows.push([`KONSCIOUS KITCHEN — DELIVERY MANIFEST — ${new Date().toLocaleDateString('en-CA')}`])
+    rows.push(['KONSCIOUS KITCHEN — DELIVERY MANIFEST — ' + new Date().toLocaleDateString('en-CA')])
     rows.push([])
-
-    // Header
     rows.push(['#', 'Store Name', 'Address', 'City', 'Special Notes'])
 
     toExport.forEach((order, i) => {
       const cust = custMap[order.customer_name] || {}
       const addr = [cust.street_address, cust.province, cust.postal_code].filter(Boolean).join(', ')
-      rows.push([
-        i + 1,
-        order.customer_name,
-        addr || '—',
-        cust.city || '—',
-        order.notes || '—',
-      ])
+      rows.push([i + 1, order.customer_name, addr || '—', cust.city || '—', order.notes || '—'])
     })
 
     XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' })
-
-    // Column widths
     ws['!cols'] = [{ wch: 4 }, { wch: 32 }, { wch: 40 }, { wch: 18 }, { wch: 35 }]
 
-    // Style title row
     const encode = (r, c) => XLSX.utils.encode_cell({ r, c })
     for (let c = 0; c < 5; c++) {
       const addr2 = encode(0, c)
       if (!ws[addr2]) ws[addr2] = { v: '', t: 's' }
       ws[addr2].s = { font: { bold: true, sz: 13, color: { rgb: 'E3DDD1' } }, fill: { fgColor: { rgb: '223824' } }, alignment: { horizontal: 'left' } }
     }
-    // Style header row
     for (let c = 0; c < 5; c++) {
       const addr2 = encode(2, c)
       if (!ws[addr2]) ws[addr2] = { v: '', t: 's' }
       ws[addr2].s = { font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '2D4A35' } }, alignment: { horizontal: 'left' } }
     }
-    // Style data rows
     for (let r = 3; r < rows.length; r++) {
       const bg = r % 2 === 0 ? 'F5F5F5' : 'FFFFFF'
       for (let c = 0; c < 5; c++) {
@@ -969,7 +907,7 @@ export default function Orders() {
     for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 40 }
 
     XLSX.utils.book_append_sheet(wb, ws, 'Delivery Manifest')
-    XLSX.writeFile(wb, `KK_Delivery_Manifest_${new Date().toISOString().split('T')[0]}.xlsx`)
+    XLSX.writeFile(wb, 'KK_Delivery_Manifest_' + new Date().toISOString().split('T')[0] + '.xlsx')
   }
 
   async function exportOrderSheet(includePricing) {
@@ -977,21 +915,21 @@ export default function Orders() {
     try {
       const offset = exportWeek === 'next' ? 1 : 0
       const sheetOrders = orders.filter(o => isWeekOrder(o, offset))
-      if (!sheetOrders.length) { alert(`No active orders for ${exportWeek === 'next' ? 'next' : 'this'} week.`); setExportLoading(false); return }
+      if (!sheetOrders.length) { alert('No active orders for ' + (exportWeek === 'next' ? 'next' : 'this') + ' week.'); setExportLoading(false); return }
       const weekLabel = getWeekLabel(offset)
       const wb = XLSX.utils.book_new()
       buildRetailSheet(wb, sheetOrders, includePricing, weekLabel)
       buildBulkSheet(wb, sheetOrders, weekLabel, includePricing)
       const suffix = includePricing ? 'FULL' : 'TEAM'
       const fileLabel = weekLabel.replace(/[^a-zA-Z0-9]/g, '_')
-      XLSX.writeFile(wb, `KK_Order_Sheet_${fileLabel}_${suffix}.xlsx`)
+      XLSX.writeFile(wb, 'KK_Order_Sheet_' + fileLabel + '_' + suffix + '.xlsx')
     } catch(err) { alert('Export failed: ' + err.message) }
     setExportLoading(false)
   }
 
   async function resetWeek() {
     const weekLabel = getWeekLabel(0)
-    if (!window.confirm(`Archive all active orders for week of ${weekLabel} and start fresh?\n\nNext-week orders will NOT be affected.`)) return
+    if (!window.confirm('Archive all active orders for week of ' + weekLabel + ' and start fresh?\n\nNext-week orders will NOT be affected.')) return
     const currentWeekOrders = orders.filter(o => o.status !== 'archived' && isWeekOrder(o, 0))
     if (!currentWeekOrders.length) { alert('No active orders for this week to archive.'); return }
     const ids = currentWeekOrders.map(o => o.id)
@@ -1084,7 +1022,7 @@ export default function Orders() {
 
         <div className="filter-bar">
           {[{ key:'active',label:'All Active' },{ key:'archived',label:'Archived' }].map(f => (
-            <button key={f.key} className={`filter-btn ${filterStatus===f.key?'active':''}`} onClick={() => setFilterStatus(f.key)}>{f.label}</button>
+            <button key={f.key} className={'filter-btn ' + (filterStatus===f.key?'active':'')} onClick={() => setFilterStatus(f.key)}>{f.label}</button>
           ))}
         </div>
 
@@ -1095,7 +1033,7 @@ export default function Orders() {
               <table>
                 <thead><tr>
                   <th style={{width:36}}>
-                    <input type="checkbox" 
+                    <input type="checkbox"
                       checked={filteredByStatus.length > 0 && filteredByStatus.every(o => selectedOrders.has(o.id))}
                       onChange={() => toggleAll(filteredByStatus)}
                       style={{cursor:'pointer'}}
@@ -1120,7 +1058,7 @@ export default function Orders() {
                       <td style={{ fontSize:11 }}>{o.dispatch_date || o.delivery_day || '—'}</td>
                       <td style={{ fontSize:11 }}>{o.order_items?.length || 0}</td>
                       {isAdmin && <td style={{ fontWeight:600, color:'var(--kk-green)', fontSize:12 }}>${(o.total_value||0).toFixed(2)}</td>}
-                      <td><span className={`badge badge-${STATUS_COLORS[o.status]}`}>{STATUS_LABELS[o.status]}</span></td>
+                      <td><span className={'badge badge-' + STATUS_COLORS[o.status]}>{STATUS_LABELS[o.status]}</span></td>
                       <td style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
                         <button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button>
                         {isAdmin && <button onClick={() => startEditOrder(o)} className="btn btn-secondary btn-sm">Edit</button>}
@@ -1275,19 +1213,16 @@ export default function Orders() {
                 {orderItems.map((item, idx) => (
                   <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
                     <div style={{ flex:3, minWidth:180 }}>
-                      {/* Pack/Bulk toggle for Mix mode */}
                       {form.order_input_mode === 'mix' && (
                         <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden', marginBottom:4 }}>
                           {['pack','bulk'].map(t => (
                             <button key={t} onClick={() => {
                               const newType = t
                               const isBulk = newType === 'bulk'
-                              // Switch product code if bulk map exists
                               const currentCode = item.product_code
                               let newCode = currentCode
                               if (isBulk && BULK_MAP[currentCode]) newCode = BULK_MAP[currentCode]
                               if (!isBulk) {
-                                // reverse lookup
                                 const reverseEntry = Object.entries(BULK_MAP).find(([, v]) => v === currentCode)
                                 if (reverseEntry) newCode = reverseEntry[0]
                               }
@@ -1323,7 +1258,6 @@ export default function Orders() {
                             updateItem(idx, 'packs_per_case', ppc)
                             updateItem(idx, 'units_per_pack', upp)
                             updateItem(idx, 'units_per_case', upc)
-                            // recalc if already has cases
                             if (item.input_mode === 'cases' && item.cases) {
                               updateItem(idx, 'packs', parseFloat(item.cases) * ppc)
                               updateItem(idx, 'quantity', parseFloat(item.cases) * upc)
@@ -1336,7 +1270,6 @@ export default function Orders() {
                       </select>
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
-                      {/* Cases/Units toggle — hidden for bulk items */}
                       {(item.item_type !== 'bulk' && form.order_input_mode !== 'bulk') && (
                         <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden', fontSize:11 }}>
                           {['cases','units'].map(m => (
@@ -1420,8 +1353,8 @@ export default function Orders() {
                 <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                   <span className="code-tag">{viewOrder.order_number}</span>
                   {viewOrder.slip_number && <span style={{ fontSize:11, color:'var(--ink3)', fontFamily:'var(--mono)' }}>{viewOrder.slip_number}</span>}
-                  <span className={`badge badge-${STATUS_COLORS[viewOrder.status]}`}>{STATUS_LABELS[viewOrder.status]}</span>
-                  <span style={{ fontSize:11, color:'var(--ink3)' }}>{viewOrder.order_source}{viewOrder.po_number ? ` · PO: ${viewOrder.po_number}` : ''}</span>
+                  <span className={'badge badge-' + STATUS_COLORS[viewOrder.status]}>{STATUS_LABELS[viewOrder.status]}</span>
+                  <span style={{ fontSize:11, color:'var(--ink3)' }}>{viewOrder.order_source}{viewOrder.po_number ? ' · PO: ' + viewOrder.po_number : ''}</span>
                 </div>
               </div>
               <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>

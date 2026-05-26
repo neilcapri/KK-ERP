@@ -14,6 +14,7 @@ const API_HEADERS = {
 export function Sourcing() {
   const { profile, isAdmin } = useAuth()
   const [rms, setRMs] = useState([])
+  const [packagingRMs, setPackagingRMs] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [entries, setEntries] = useState([])
   const [showModal, setShowModal] = useState(false)
@@ -26,6 +27,8 @@ export function Sourcing() {
   const [lotOCR, setLotOCR] = useState('')
   const [ocrLoading, setOcrLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  // 'ingredient' | 'packaging'
+  const [entryType, setEntryType] = useState('ingredient')
   const photoInputRef = useRef(null)
   const cameraInputRef = useRef(null)
 
@@ -43,35 +46,66 @@ export function Sourcing() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [r, e, s] = await Promise.all([
+    const [r, pkg, e, s] = await Promise.all([
       supabase.from('raw_materials')
         .select('name,category,stock,unit,min_stock,supplier,package_size,package_unit,package_label')
         .not('category', 'eq', 'Packaging')
         .not('category', 'eq', 'WIP')
         .order('name'),
+      supabase.from('raw_materials')
+        .select('name,category,stock,unit,min_stock,supplier,package_size,package_unit,package_label')
+        .eq('category', 'Packaging')
+        .order('name'),
       supabase.from('sourcing').select('*').order('created_at', { ascending: false }).limit(50),
       supabase.from('suppliers').select('name').order('name'),
     ])
     setRMs(r.data || [])
+    setPackagingRMs(pkg.data || [])
     setEntries(e.data || [])
     setSuppliers(s.data || [])
   }
 
+  // The active RM list depends on which toggle is selected
+  const activeRMs = entryType === 'packaging' ? packagingRMs : rms
+
+  function resetForm() {
+    setForm({
+      date: new Date().toISOString().split('T')[0],
+      rm_name: '', supplier: '', qty_bags: '', qty_kg: '',
+      unit: entryType === 'packaging' ? 'units' : 'kg',
+      manual_entry: false, lot_number: '',
+    })
+    setLotPhoto(null)
+    setLotPhotoPreview(null)
+    setLotOCR('')
+  }
+
+  // When toggle switches, reset the RM selection
+  function switchEntryType(type) {
+    setEntryType(type)
+    setForm(f => ({
+      ...f,
+      rm_name: '', supplier: '', qty_bags: '', qty_kg: '',
+      unit: type === 'packaging' ? 'units' : 'kg',
+      manual_entry: false,
+    }))
+  }
+
   function handleRMChange(name) {
-    const rm = rms.find(r => r.name === name)
+    const rm = activeRMs.find(r => r.name === name)
     const defaultSupplier = rm?.supplier && rm.supplier !== 'TBD' ? rm.supplier : ''
     setForm(f => ({
       ...f,
       rm_name: name,
       supplier: defaultSupplier,
-      unit: rm?.unit || 'kg',
+      unit: rm?.unit || (entryType === 'packaging' ? 'units' : 'kg'),
       qty_bags: '',
       qty_kg: '',
     }))
   }
 
   function handleBagsChange(bags) {
-    const rm = rms.find(r => r.name === form.rm_name)
+    const rm = activeRMs.find(r => r.name === form.rm_name)
     const qty_kg = rm?.package_size ? (parseFloat(bags) * rm.package_size).toFixed(3) : ''
     setForm(f => ({ ...f, qty_bags: bags, qty_kg }))
   }
@@ -97,7 +131,6 @@ export function Sourcing() {
         reader.readAsDataURL(file)
       })
 
-      // Build context string using regular concatenation — no backtick nesting
       const rmContext = form.rm_name
         ? ' This label is for: ' + form.rm_name + (form.supplier ? ' from supplier ' + form.supplier : '') + '.'
         : ''
@@ -113,14 +146,8 @@ export function Sourcing() {
           messages: [{
             role: 'user',
             content: [
-              {
-                type: 'image',
-                source: { type: 'base64', media_type: file.type, data: base64 }
-              },
-              {
-                type: 'text',
-                text: promptText
-              }
+              { type: 'image', source: { type: 'base64', media_type: file.type, data: base64 } },
+              { type: 'text', text: promptText }
             ]
           }]
         })
@@ -178,7 +205,7 @@ export function Sourcing() {
       await supabase.from('activity').insert({
         type: 'sourcing',
         title: editingEntry.rm_name + ' entry updated',
-        description: 'Qty: ' + oldQty + ' → ' + newQty + ' ' + editForm.unit + (editForm.lot_number ? ' · Lot: ' + editForm.lot_number : ''),
+        description: 'Qty: ' + oldQty + ' \u2192 ' + newQty + ' ' + editForm.unit + (editForm.lot_number ? ' \u00b7 Lot: ' + editForm.lot_number : ''),
         created_by_name: profile?.name
       })
 
@@ -225,16 +252,13 @@ export function Sourcing() {
 
       await supabase.from('activity').insert({
         type: 'sourcing',
-        title: rm_name + ' received',
-        description: q + ' ' + unit + ' from ' + supplier + (lot_number ? ' · Lot: ' + lot_number : ''),
+        title: rm_name + ' received' + (entryType === 'packaging' ? ' (Packaging)' : ''),
+        description: q + ' ' + unit + ' from ' + supplier + (lot_number ? ' \u00b7 Lot: ' + lot_number : ''),
         created_by_name: profile?.name
       })
 
       setShowModal(false)
-      setForm({ date: new Date().toISOString().split('T')[0], rm_name: '', supplier: '', qty_bags: '', qty_kg: '', unit: 'kg', manual_entry: false, lot_number: '' })
-      setLotPhoto(null)
-      setLotPhotoPreview(null)
-      setLotOCR('')
+      resetForm()
       loadData()
     } catch (err) {
       alert('Save failed: ' + err.message)
@@ -251,7 +275,7 @@ export function Sourcing() {
       await supabase.from('sourcing').delete().eq('id', entry.id)
       await supabase.from('activity').insert({
         type: 'sourcing', title: 'Sourcing Deleted: ' + entry.rm_name,
-        description: entry.qty_received + ' ' + entry.unit + ' reversed · ' + entry.date,
+        description: entry.qty_received + ' ' + entry.unit + ' reversed \u00b7 ' + entry.date,
         created_by_name: profile?.name || 'admin'
       })
       loadData()
@@ -259,29 +283,50 @@ export function Sourcing() {
     setDeletingId(null)
   }
 
-  const selectedRM = rms.find(r => r.name === form.rm_name)
+  const selectedRM = activeRMs.find(r => r.name === form.rm_name)
+
+  // Stats based on non-packaging RMs only (ingredient stock)
   const zero = rms.filter(r => r.stock <= 0).length
   const low = rms.filter(r => r.stock > 0 && r.stock <= r.min_stock).length
+  const pkgZero = packagingRMs.filter(r => r.stock <= 0).length
+  const pkgLow = packagingRMs.filter(r => r.stock > 0 && r.stock <= r.min_stock).length
 
-  const selectStyle = { width: '100%', padding: '12px 14px', fontSize: '14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--ink)', fontFamily: 'var(--mono)', height: '48px' }
+  const selectStyle = {
+    width: '100%', padding: '12px 14px', fontSize: '14px', borderRadius: '6px',
+    border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--ink)',
+    fontFamily: 'var(--mono)', height: '48px'
+  }
+
+  const toggleBtnStyle = (active, color) => ({
+    flex: 1, padding: '10px 16px', border: 'none', cursor: 'pointer', fontSize: 13,
+    fontFamily: 'var(--display)', letterSpacing: 1, textTransform: 'uppercase',
+    fontWeight: active ? 700 : 400,
+    background: active ? (color === 'green' ? 'var(--kk-green)' : '#8B5E3C') : 'var(--surface)',
+    color: active ? 'var(--kk-cream)' : 'var(--ink3)',
+    borderRight: '1px solid var(--border)',
+    transition: 'background 0.15s',
+  })
 
   return (
     <>
       <div className="page-header">
-        <div><h2>SOURCING</h2><p>Raw material intake & stock</p></div>
-        <button className="btn btn-amber" onClick={() => setShowModal(true)}>+ Log RM</button>
+        <div><h2>SOURCING</h2><p>Raw material &amp; packaging intake</p></div>
+        <button className="btn btn-amber" onClick={() => { resetForm(); setShowModal(true) }}>+ Log Receipt</button>
       </div>
       <div className="page-body">
+
+        {/* Stats row */}
         <div className="grid4" style={{ marginBottom: 16 }}>
-          <div className="stat blue"><div className="stat-label">Total RMs</div><div className="stat-value">{rms.length}</div></div>
+          <div className="stat blue"><div className="stat-label">Ingredients</div><div className="stat-value">{rms.length}</div></div>
           <div className="stat green"><div className="stat-label">In Stock</div><div className="stat-value">{rms.length - zero - low}</div></div>
-          <div className="stat amber"><div className="stat-label">Low</div><div className="stat-value">{low}</div></div>
-          <div className="stat red"><div className="stat-label">Zero Stock</div><div className="stat-value">{zero}</div></div>
+          <div className="stat amber"><div className="stat-label">Low</div><div className="stat-value">{low + pkgLow}</div></div>
+          <div className="stat red"><div className="stat-label">Zero Stock</div><div className="stat-value">{zero + pkgZero}</div></div>
         </div>
 
         <div className="grid2">
+          {/* Ingredient stock table */}
           <div className="card">
-            <div className="card-title">Raw Material Stock</div>
+            <div className="card-title">🌿 Ingredient Stock</div>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Material</th><th>Stock</th><th>Unit</th><th>Supplier</th><th>Status</th></tr></thead>
@@ -304,66 +349,122 @@ export function Sourcing() {
             </div>
           </div>
 
-          <div className="card">
-            <div className="card-title">Recent Sourcing</div>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Date</th><th>Material</th><th>Qty</th><th>Supplier</th><th>Lot #</th><th style={{width:60}}></th></tr></thead>
-                <tbody>
-                  {entries.map(e => (
-                    <tr key={e.id}>
-                      <td style={{ fontSize: 11 }}>{e.date}</td>
-                      <td style={{ fontWeight: 500, fontSize: 12 }}>{e.rm_name}</td>
-                      <td style={{ color: 'var(--green)', fontWeight: 600 }}>+{e.qty_received} {e.unit}</td>
-                      <td style={{ fontSize: 11 }}>{e.supplier}</td>
-                      <td style={{ fontSize: 11, color: 'var(--ink3)' }}>
-                        {e.lot_number || e.batch_number || '—'}
-                        {e.lot_photo_url && (
-                          <a href={e.lot_photo_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 4, fontSize: 10, color: 'var(--kk-green)' }}>📷</a>
-                        )}
-                      </td>
-                      <td style={{ display:'flex', gap:4 }}>
-                        <button onClick={() => openEdit(e)}
-                          style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
-                          Edit
-                        </button>
-                        <button onClick={() => deleteSourcing(e)} disabled={deletingId === e.id}
-                          style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', opacity: deletingId === e.id ? 0.5 : 1 }}>
-                          {deletingId === e.id ? '...' : 'Del'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Right column: Packaging stock + Recent log */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* Packaging stock */}
+            <div className="card">
+              <div className="card-title">📦 Packaging Stock</div>
+              {packagingRMs.length === 0 ? (
+                <div style={{ padding: '16px 0', fontSize: 12, color: 'var(--ink3)' }}>No packaging materials found. Add items with category "Packaging" in raw_materials.</div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Material</th><th>Stock</th><th>Unit</th><th>Supplier</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {packagingRMs.map(r => {
+                        const s = r.stock <= 0 ? 'red' : r.stock <= r.min_stock ? 'amber' : 'green'
+                        const label = r.stock <= 0 ? '🔴 OUT' : r.stock <= r.min_stock ? '⚠️' : '✅'
+                        return (
+                          <tr key={r.name}>
+                            <td style={{ fontWeight: 500, fontSize: 12 }}>{r.name}</td>
+                            <td style={{ fontWeight: 600, color: 'var(--' + s + ')' }}>{r.stock?.toFixed(0)}</td>
+                            <td style={{ color: 'var(--ink3)', fontSize: 11 }}>{r.unit}</td>
+                            <td style={{ fontSize: 11, color: 'var(--ink2)' }}>{r.supplier}</td>
+                            <td><span className={'badge badge-' + s}>{label}</span></td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
+
+            {/* Recent sourcing log */}
+            <div className="card">
+              <div className="card-title">Recent Sourcing</div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Date</th><th>Material</th><th>Qty</th><th>Supplier</th><th>Lot #</th><th style={{width:60}}></th></tr></thead>
+                  <tbody>
+                    {entries.map(e => (
+                      <tr key={e.id}>
+                        <td style={{ fontSize: 11 }}>{e.date}</td>
+                        <td style={{ fontWeight: 500, fontSize: 12 }}>{e.rm_name}</td>
+                        <td style={{ color: 'var(--green)', fontWeight: 600 }}>+{e.qty_received} {e.unit}</td>
+                        <td style={{ fontSize: 11 }}>{e.supplier}</td>
+                        <td style={{ fontSize: 11, color: 'var(--ink3)' }}>
+                          {e.lot_number || e.batch_number || '—'}
+                          {e.lot_photo_url && (
+                            <a href={e.lot_photo_url} target="_blank" rel="noopener noreferrer" style={{ marginLeft: 4, fontSize: 10, color: 'var(--kk-green)' }}>📷</a>
+                          )}
+                        </td>
+                        <td style={{ display:'flex', gap:4 }}>
+                          <button onClick={() => openEdit(e)}
+                            style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
+                            Edit
+                          </button>
+                          <button onClick={() => deleteSourcing(e)} disabled={deletingId === e.id}
+                            style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', opacity: deletingId === e.id ? 0.5 : 1 }}>
+                            {deletingId === e.id ? '...' : 'Del'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
 
+      {/* ── LOG RECEIPT MODAL ── */}
       {showModal && (
         <div className="modal-bg" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
           <div className="modal">
             <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
-            <div className="modal-title">LOG RM RECEIPT</div>
+            <div className="modal-title">LOG RECEIPT</div>
 
+            {/* Ingredient / Packaging toggle */}
+            <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 18 }}>
+              <button style={toggleBtnStyle(entryType === 'ingredient', 'green')}
+                onClick={() => switchEntryType('ingredient')}>
+                🌿 Ingredient
+              </button>
+              <button style={{ ...toggleBtnStyle(entryType === 'packaging', 'brown'), borderRight: 'none' }}
+                onClick={() => switchEntryType('packaging')}>
+                📦 Packaging
+              </button>
+            </div>
+
+            {/* Date */}
             <div className="field">
               <label>Date</label>
               <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
             </div>
 
+            {/* RM Dropdown — list depends on toggle */}
             <div className="field">
-              <label>Raw Material</label>
+              <label>{entryType === 'packaging' ? 'Packaging Material' : 'Raw Material'}</label>
               <select style={selectStyle} value={form.rm_name} onChange={e => handleRMChange(e.target.value)}>
-                <option value="">Select RM...</option>
-                {rms.map(r => (
+                <option value="">Select {entryType === 'packaging' ? 'packaging' : 'RM'}...</option>
+                {activeRMs.map(r => (
                   <option key={r.name} value={r.name}>
                     {r.name}{r.package_label ? ' (' + r.package_label + ')' : ''}
                   </option>
                 ))}
               </select>
+              {activeRMs.length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4 }}>
+                  ⚠️ No {entryType === 'packaging' ? 'packaging' : 'ingredient'} materials found in raw_materials table.
+                </div>
+              )}
             </div>
 
+            {/* Supplier */}
             <div className="field">
               <label>Supplier</label>
               <select style={selectStyle} value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))}>
@@ -372,6 +473,7 @@ export function Sourcing() {
               </select>
             </div>
 
+            {/* Qty — package count or manual */}
             {selectedRM?.package_size && !form.manual_entry ? (
               <div>
                 <div className="field">
@@ -398,12 +500,15 @@ export function Sourcing() {
                 <div className="field-row">
                   <div className="field" style={{ margin: 0 }}>
                     <label>Qty Received</label>
-                    <input type="number" value={form.qty_kg} onChange={e => handleManualQtyChange(e.target.value)} placeholder="0" step="0.001" style={{ fontSize: 16, padding: '12px 14px' }} />
+                    <input type="number" value={form.qty_kg} onChange={e => handleManualQtyChange(e.target.value)} placeholder="0" step={entryType === 'packaging' ? '1' : '0.001'} style={{ fontSize: 16, padding: '12px 14px' }} />
                   </div>
                   <div className="field" style={{ margin: 0 }}>
                     <label>Unit</label>
                     <select style={selectStyle} value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}>
-                      <option>kg</option><option>g</option><option>L</option><option>ml</option><option>units</option><option>ea</option><option>lbs</option>
+                      {entryType === 'packaging'
+                        ? <><option>units</option><option>rolls</option><option>sheets</option><option>boxes</option><option>cases</option><option>kg</option><option>g</option></>
+                        : <><option>kg</option><option>g</option><option>L</option><option>ml</option><option>units</option><option>ea</option><option>lbs</option></>
+                      }
                     </select>
                   </div>
                 </div>
@@ -418,8 +523,9 @@ export function Sourcing() {
               </div>
             )}
 
+            {/* Lot # Photo — optional for packaging, useful for ingredients */}
             <div className="field">
-              <label>📷 Lot # Photo</label>
+              <label>{entryType === 'packaging' ? '📷 Reference Photo (optional)' : '📷 Lot # Photo'}</label>
               <input ref={photoInputRef} type="file" accept="image/*"
                 onChange={handleLotPhoto} style={{ display: 'none' }} />
               <input ref={cameraInputRef} type="file" accept="image/*" capture="environment"
@@ -435,15 +541,22 @@ export function Sourcing() {
                 </button>
               </div>
               {lotPhotoPreview && (
-                <img src={lotPhotoPreview} alt="Lot label" style={{ width: '100%', borderRadius: 8, maxHeight: 150, objectFit: 'contain', background: '#f5f5f5', marginBottom: 8 }} />
+                <img src={lotPhotoPreview} alt="Label" style={{ width: '100%', borderRadius: 8, maxHeight: 150, objectFit: 'contain', background: '#f5f5f5', marginBottom: 8 }} />
               )}
               {ocrLoading && <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 8 }}>⏳ Reading lot number...</div>}
               {lotOCR && <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 8 }}>✅ Lot # detected: <strong>{lotOCR}</strong></div>}
             </div>
 
+            {/* Lot # / Ref # field */}
             <div className="field">
-              <label>Lot # {lotOCR ? '(auto-filled — edit if needed)' : '(type manually)'}</label>
-              <input type="text" value={form.lot_number} onChange={e => setForm(f => ({ ...f, lot_number: e.target.value }))} placeholder="e.g. LOT2024-001" />
+              <label>
+                {entryType === 'packaging' ? 'Ref / PO # (optional)' : ('Lot # ' + (lotOCR ? '(auto-filled — edit if needed)' : '(type manually)'))}
+              </label>
+              <input type="text"
+                value={form.lot_number}
+                onChange={e => setForm(f => ({ ...f, lot_number: e.target.value }))}
+                placeholder={entryType === 'packaging' ? 'e.g. PO-1234 or batch ref' : 'e.g. LOT2024-001'}
+              />
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>
@@ -456,6 +569,7 @@ export function Sourcing() {
         </div>
       )}
 
+      {/* ── EDIT MODAL ── */}
       {editingEntry && (
         <div className="modal-bg" onClick={e => e.target === e.currentTarget && setEditingEntry(null)}>
           <div className="modal">
@@ -481,12 +595,12 @@ export function Sourcing() {
               <div className="field" style={{ margin:0 }}>
                 <label>Unit</label>
                 <select style={selectStyle} value={editForm.unit} onChange={e => setEditForm(f => ({ ...f, unit: e.target.value }))}>
-                  <option>kg</option><option>g</option><option>L</option><option>ml</option><option>units</option><option>ea</option><option>lbs</option>
+                  <option>kg</option><option>g</option><option>L</option><option>ml</option><option>units</option><option>ea</option><option>lbs</option><option>rolls</option><option>sheets</option><option>boxes</option><option>cases</option>
                 </select>
               </div>
             </div>
             <div className="field">
-              <label>Lot #</label>
+              <label>Lot / Ref #</label>
               <input type="text" value={editForm.lot_number} onChange={e => setEditForm(f => ({ ...f, lot_number: e.target.value }))} placeholder="e.g. LOT2024-001" />
             </div>
             <div style={{ display:'flex', gap:10 }}>
@@ -712,10 +826,7 @@ export function Reports() {
     const day = d.getDay()
     const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
     const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
-    return {
-      start: mon.toISOString().split('T')[0],
-      end: sun.toISOString().split('T')[0]
-    }
+    return { start: mon.toISOString().split('T')[0], end: sun.toISOString().split('T')[0] }
   }
 
   async function loadLabourVsProduction() {
@@ -732,12 +843,10 @@ export function Reports() {
     ;(empRes.data || []).forEach(e => { empRateMap[e.id] = e.hourly_rate || 0 })
 
     const dayMap = {}
-
     ;(prodRes.data || []).forEach(p => {
       if (!dayMap[p.date]) dayMap[p.date] = { date: p.date, units: 0, labour_hours: 0, labour_cost: 0 }
       dayMap[p.date].units += p.output_units || 0
     })
-
     ;(timeRes.data || []).forEach(t => {
       const day = t.clock_in.split('T')[0]
       if (!dayMap[day]) dayMap[day] = { date: day, units: 0, labour_hours: 0, labour_cost: 0 }
@@ -748,8 +857,7 @@ export function Reports() {
     })
 
     const rows = Object.values(dayMap).sort((a,b) => a.date.localeCompare(b.date)).map(d => ({
-      ...d,
-      cost_per_unit: d.units > 0 ? d.labour_cost / d.units : null
+      ...d, cost_per_unit: d.units > 0 ? d.labour_cost / d.units : null
     }))
 
     setLabourData(rows)
@@ -947,12 +1055,8 @@ export function Reports() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Date</th>
-                        <th>Units Produced</th>
-                        <th>Labour Hours</th>
-                        <th>Labour Cost</th>
-                        <th>Cost / Unit</th>
-                        <th>Efficiency</th>
+                        <th>Date</th><th>Units Produced</th><th>Labour Hours</th>
+                        <th>Labour Cost</th><th>Cost / Unit</th><th>Efficiency</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -970,13 +1074,7 @@ export function Reports() {
                             <td>{d.labour_hours > 0 ? hrs + 'h ' + mins + 'm' : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
                             <td style={{ fontWeight: 600 }}>{d.labour_cost > 0 ? '$' + d.labour_cost.toFixed(2) : <span style={{ color: 'var(--ink3)' }}>—</span>}</td>
                             <td style={{ fontWeight: 700, color: effColor }}>{d.cost_per_unit != null ? '$' + d.cost_per_unit.toFixed(2) : '—'}</td>
-                            <td>
-                              {d.units > 0 && d.labour_hours > 0 ? (
-                                <span style={{ fontSize: 11, color: 'var(--ink2)' }}>
-                                  {(d.units / d.labour_hours).toFixed(1)} units/hr
-                                </span>
-                              ) : '—'}
-                            </td>
+                            <td>{d.units > 0 && d.labour_hours > 0 ? <span style={{ fontSize: 11, color: 'var(--ink2)' }}>{(d.units / d.labour_hours).toFixed(1)} units/hr</span> : '—'}</td>
                           </tr>
                         )
                       })}
@@ -988,9 +1086,7 @@ export function Reports() {
                         <td style={{ fontWeight: 700 }}>{Math.floor(totalLabourHours)}h {Math.round((totalLabourHours % 1) * 60)}m</td>
                         <td style={{ fontWeight: 700 }}>${totalLabourCost.toFixed(2)}</td>
                         <td style={{ fontWeight: 700 }}>{avgCostPerUnit != null ? '$' + avgCostPerUnit.toFixed(2) : '—'}</td>
-                        <td style={{ fontSize: 11, color: 'var(--ink2)' }}>
-                          {totalUnits > 0 && totalLabourHours > 0 ? (totalUnits / totalLabourHours).toFixed(1) + ' units/hr avg' : ''}
-                        </td>
+                        <td style={{ fontSize: 11, color: 'var(--ink2)' }}>{totalUnits > 0 && totalLabourHours > 0 ? (totalUnits / totalLabourHours).toFixed(1) + ' units/hr avg' : ''}</td>
                       </tr>
                     </tfoot>
                   </table>

@@ -21,6 +21,23 @@ function getWeekLabel(dateStr) {
   return monday.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
 }
 
+// Derive pack count from an order_item row — mirrors the order sheet logic
+function getPacksFromItem(item) {
+  // If packs is explicitly stored, use it
+  if (item.packs && item.packs > 0) return item.packs
+  // If cases + packs_per_case, derive
+  if (item.cases && item.cases > 0) {
+    const ppc = item.packs_per_case || 6
+    return item.cases * ppc
+  }
+  // Bulk items (no cases/packs): quantity IS the unit count, price_per_pack is per unit
+  // units_per_pack = 1 means pack === unit
+  const upp = item.units_per_pack || 1
+  if (upp <= 1) return item.quantity || 0
+  // Fall back: quantity / units_per_pack
+  return (item.quantity || 0) / upp
+}
+
 export default function Financials() {
   const [dateRange, setDateRange] = useState(30)
   const [loading, setLoading] = useState(true)
@@ -39,11 +56,10 @@ export default function Financials() {
     setLoading(true)
     const since = getStartDate(days)
 
-    // ── Pull from orders + order_items ──────────────────────
     const { data: orders } = await supabase
       .from('orders')
       .select('id, customer_name, dispatch_date, created_at, status, order_items(*)')
-      .or(`dispatch_date.gte.${since},created_at.gte.${since}`)
+      .or('dispatch_date.gte.' + since + ',created_at.gte.' + since)
 
     const filteredOrders = (orders || []).filter(o => {
       const d = o.dispatch_date || o.created_at?.split('T')[0]
@@ -58,16 +74,19 @@ export default function Financials() {
     for (const order of filteredOrders) {
       const items = order.order_items || []
       for (const item of items) {
-        const lineRevenue = (item.quantity || 0) * (item.price_per_pack || 0)
+        // ── Correct revenue: packs × price_per_pack ──────────
+        const packs = getPacksFromItem(item)
+        const lineRevenue = packs * (item.price_per_pack || 0)
         totalRevenue += lineRevenue
 
         // By product
         const code = item.product_code || 'OTHER'
         if (!byProduct[code]) {
-          byProduct[code] = { code, name: item.product_name || code, revenue: 0, units: 0 }
+          byProduct[code] = { code, name: item.product_name || code, revenue: 0, units: 0, packs: 0 }
         }
         byProduct[code].revenue += lineRevenue
         byProduct[code].units += item.quantity || 0
+        byProduct[code].packs += packs
 
         // By customer
         const cname = order.customer_name || 'Unknown'
@@ -179,7 +198,7 @@ export default function Financials() {
           </div>
           <div className="stat-sub">Revenue minus COGS</div>
         </div>
-        <div className="stat" style={{ borderTop: `3px solid ${grossMargin >= 50 ? 'var(--kk-green)' : grossMargin >= 30 ? 'var(--kk-peach)' : 'var(--red)'}` }}>
+        <div className="stat" style={{ borderTop: '3px solid ' + (grossMargin >= 50 ? 'var(--kk-green)' : grossMargin >= 30 ? 'var(--kk-peach)' : 'var(--red)') }}>
           <div className="stat-label">Gross Margin</div>
           <div className="stat-value" style={{ color: grossMargin >= 50 ? 'var(--kk-green)' : grossMargin >= 30 ? 'var(--kk-peach)' : 'var(--red)' }}>
             {grossMargin.toFixed(1)}%
@@ -199,7 +218,7 @@ export default function Financials() {
                   <div style={{ fontFamily: 'var(--display)', fontSize: 18, color: 'var(--ink3)', width: 24 }}>{i + 1}</div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, fontWeight: 500 }}>{p.name}</div>
-                    <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{p.units} units ordered</div>
+                    <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{p.packs.toFixed(0)} packs · {p.units} units</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontFamily: 'var(--display)', fontSize: 16, color: 'var(--kk-brown)' }}>${p.revenue.toFixed(2)}</div>
@@ -223,7 +242,7 @@ export default function Financials() {
                       <span style={{ fontFamily: 'var(--display)', color: 'var(--kk-brown)' }}>${w.revenue.toFixed(0)}</span>
                     </div>
                     <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: 'var(--kk-green)', borderRadius: 3, transition: 'width .4s' }} />
+                      <div style={{ height: '100%', width: pct + '%', background: 'var(--kk-green)', borderRadius: 3, transition: 'width .4s' }} />
                     </div>
                   </div>
                 )
@@ -238,18 +257,19 @@ export default function Financials() {
           <div className="card-title">Revenue by Product</div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Code</th><th>Product</th><th>Units</th><th>Revenue</th><th>% of Total</th></tr></thead>
+              <thead><tr><th>Code</th><th>Product</th><th>Packs</th><th>Units</th><th>Revenue</th><th>% of Total</th></tr></thead>
               <tbody>
                 {revenueByProduct.map(p => (
                   <tr key={p.code}>
                     <td><span className="code-tag">{p.code}</span></td>
                     <td style={{ fontWeight: 500 }}>{p.name}</td>
-                    <td>{p.units.toLocaleString()}</td>
+                    <td style={{ color: 'var(--ink2)' }}>{p.packs.toFixed(0)}</td>
+                    <td style={{ color: 'var(--ink3)', fontSize: 11 }}>{p.units.toLocaleString()}</td>
                     <td style={{ fontFamily: 'var(--display)', color: 'var(--kk-brown)', fontSize: 14 }}>${p.revenue.toFixed(2)}</td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 60, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${(p.revenue / revenue * 100)}%`, background: 'var(--kk-green)', borderRadius: 2 }} />
+                          <div style={{ height: '100%', width: (p.revenue / revenue * 100) + '%', background: 'var(--kk-green)', borderRadius: 2 }} />
                         </div>
                         <span style={{ fontSize: 11, color: 'var(--ink3)' }}>{(p.revenue / revenue * 100).toFixed(1)}%</span>
                       </div>
@@ -260,6 +280,7 @@ export default function Financials() {
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface2)' }}>
                   <td colSpan={2} style={{ fontFamily: 'var(--display)', fontSize: 13, letterSpacing: 1 }}>TOTAL</td>
+                  <td>{revenueByProduct.reduce((s, p) => s + p.packs, 0).toFixed(0)}</td>
                   <td>{revenueByProduct.reduce((s, p) => s + p.units, 0).toLocaleString()}</td>
                   <td style={{ fontFamily: 'var(--display)', fontSize: 16, color: 'var(--kk-green)' }}>${revenue.toFixed(2)}</td>
                   <td>100%</td>
@@ -286,7 +307,7 @@ export default function Financials() {
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 60, height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${(c.revenue / revenue * 100)}%`, background: 'var(--kk-peach)', borderRadius: 2 }} />
+                          <div style={{ height: '100%', width: (c.revenue / revenue * 100) + '%', background: 'var(--kk-peach)', borderRadius: 2 }} />
                         </div>
                         <span style={{ fontSize: 11, color: 'var(--ink3)' }}>{(c.revenue / revenue * 100).toFixed(1)}%</span>
                       </div>
@@ -321,7 +342,7 @@ export default function Financials() {
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 100, height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${(w.revenue / revenue * 100)}%`, background: 'var(--kk-green)', borderRadius: 3 }} />
+                          <div style={{ height: '100%', width: (w.revenue / revenue * 100) + '%', background: 'var(--kk-green)', borderRadius: 3 }} />
                         </div>
                         <span style={{ fontSize: 11, color: 'var(--ink3)' }}>{(w.revenue / revenue * 100).toFixed(1)}%</span>
                       </div>

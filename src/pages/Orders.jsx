@@ -690,10 +690,10 @@ export default function Orders() {
       const ppc = parseInt(p?.packs_per_case) || 6
       const upp = UNITS_PER_PACK_MAP[productCode] || parseInt(p?.units_per_pack) || 1
       const upc = ppc * upp
-      const imode = (itemMode === 'bulk') ? 'units' : (orderMode === 'units' ? 'units' : 'cases')
-      const cases = imode === 'cases' ? parseFloat(i.quantity) : null
-      const packs = imode === 'cases' ? parseFloat(i.quantity) * ppc : null
-      const qty = imode === 'cases' ? parseFloat(i.quantity) * upc : parseFloat(i.quantity)
+      const imode = (itemMode === 'bulk') ? 'units' : (orderMode === 'packs' ? 'packs' : 'cases')
+      const cases = imode === 'cases' ? parseFloat(i.quantity) : imode === 'packs' ? parseFloat(i.quantity) / ppc : null
+      const packs = imode === 'cases' ? parseFloat(i.quantity) * ppc : imode === 'packs' ? parseFloat(i.quantity) : null
+      const qty = imode === 'cases' ? parseFloat(i.quantity) * upc : imode === 'packs' ? parseFloat(i.quantity) * upp : parseFloat(i.quantity)
       return {
         product_code: productCode,
         product_name: p?.name || i.product_name,
@@ -746,14 +746,14 @@ export default function Orders() {
   function addManualItem() {
     const m = form.order_input_mode || 'cases'
     const isBulk = m === 'bulk'
-    const imode = isBulk ? 'units' : (m === 'units' ? 'units' : 'cases')
+    const imode = isBulk ? 'units' : (m === 'packs' ? 'packs' : 'cases')
     setOrderItems(prev => [...prev, {
       product_code: '', product_name: '',
       input_mode: imode,
       item_type: isBulk ? 'bulk' : 'pack',
-      cases: imode === 'cases' ? 1 : null,
-      packs: imode === 'cases' ? 6 : null,
-      quantity: imode === 'cases' ? 6 : 1,
+      cases: imode === 'cases' ? 1 : imode === 'packs' ? null : null,
+      packs: imode === 'cases' ? 6 : imode === 'packs' ? 1 : null,
+      quantity: imode === 'cases' ? 6 : imode === 'packs' ? 1 : 1,
       packs_per_case: 6, units_per_pack: 1, units_per_case: 6,
       price_per_pack: 0, notes: ''
     }])
@@ -1120,7 +1120,7 @@ export default function Orders() {
               <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', marginBottom: form.order_input_mode ? 16 : 0 }}>
                 {[
                   { key:'cases', label:'📦 Cases' },
-                  { key:'units', label:'🔢 Units' },
+                  { key:'packs', label:'📦 Packs' },
                   { key:'bulk',  label:'🧺 Bulk' },
                   { key:'mix',   label:'🔀 Mix' },
                 ].map(m => (
@@ -1136,6 +1136,9 @@ export default function Orders() {
               </div>
               {!form.order_input_mode && (
                 <div style={{ fontSize:11, color:'var(--amber)', marginTop:4 }}>⚠️ Select order type to continue</div>
+              )}
+              {form.order_input_mode === 'packs' && (
+                <div style={{ fontSize:11, color:'var(--ink3)', marginTop:4 }}>📦 Packs = enter pack count directly. e.g. 2 packs PBB = 4 units, 1 pack KSCD = 4 units.</div>
               )}
               {form.order_input_mode === 'bulk' && (
                 <div style={{ fontSize:11, color:'var(--ink3)', marginTop:4 }}>🧺 Bulk = single units. Products auto-switch to bulk codes (Bu).</div>
@@ -1272,17 +1275,24 @@ export default function Orders() {
                     <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
                       {(item.item_type !== 'bulk' && form.order_input_mode !== 'bulk') && (
                         <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden', fontSize:11 }}>
-                          {['cases','units'].map(m => (
+                          {['cases','packs'].map(m => (
                             <button key={m} onClick={() => {
                               updateItem(idx, 'input_mode', m)
-                              if (m === 'units') {
-                                updateItem(idx, 'cases', null)
-                              } else {
-                                const p = products.find(p => p.code === item.product_code)
-                                const upc = getUnitsPerCase(p)
-                                const cs = item.quantity ? Math.round(item.quantity / upc) : 1
+                              const p = products.find(p => p.code === item.product_code)
+                              const ppc = parseInt(p?.packs_per_case) || 6
+                              const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1
+                              const upc = ppc * upp
+                              if (m === 'cases') {
+                                const cs = item.packs ? Math.round(item.packs / ppc) : item.quantity ? Math.round(item.quantity / upc) : 1
                                 updateItem(idx, 'cases', cs)
+                                updateItem(idx, 'packs', cs * ppc)
                                 updateItem(idx, 'quantity', cs * upc)
+                              } else {
+                                // switching to packs
+                                const pks = item.cases ? item.cases * ppc : item.quantity ? Math.round(item.quantity / upp) : 1
+                                updateItem(idx, 'packs', pks)
+                                updateItem(idx, 'cases', pks / ppc)
+                                updateItem(idx, 'quantity', pks * upp)
                               }
                             }} style={{
                               padding:'4px 8px', border:'none', cursor:'pointer', fontSize:11,
@@ -1296,17 +1306,28 @@ export default function Orders() {
                       {(item.item_type === 'bulk' || form.order_input_mode === 'bulk') && (
                         <span style={{ fontSize:10, color:'#E79B81', fontFamily:'var(--display)', letterSpacing:1, padding:'4px 8px', background:'#fff3ee', borderRadius:4 }}>BULK</span>
                       )}
-                      <input type="number" value={(item.input_mode === 'cases') ? (item.cases || 1) : item.quantity}
+                      <input type="number" value={
+                          item.input_mode === 'cases' ? (item.cases || 1)
+                          : item.input_mode === 'packs' ? (item.packs || 1)
+                          : item.quantity
+                        }
                         onChange={e => {
                           const val = parseFloat(e.target.value) || 0
+                          const p = products.find(p => p.code === item.product_code)
+                          const ppc = parseInt(p?.packs_per_case) || 6
+                          const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1
+                          const upc = ppc * upp
                           if (item.input_mode === 'cases') {
-                            const p = products.find(p => p.code === item.product_code)
-                            const ppc = parseInt(p?.packs_per_case) || 6
-                            const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1
-                            const upc = ppc * upp
                             updateItem(idx, 'cases', e.target.value)
                             updateItem(idx, 'packs', val * ppc)
                             updateItem(idx, 'quantity', val * upc)
+                            updateItem(idx, 'packs_per_case', ppc)
+                            updateItem(idx, 'units_per_pack', upp)
+                            updateItem(idx, 'units_per_case', upc)
+                          } else if (item.input_mode === 'packs') {
+                            updateItem(idx, 'packs', e.target.value)
+                            updateItem(idx, 'cases', val / ppc)
+                            updateItem(idx, 'quantity', val * upp)
                             updateItem(idx, 'packs_per_case', ppc)
                             updateItem(idx, 'units_per_pack', upp)
                             updateItem(idx, 'units_per_case', upc)
@@ -1320,6 +1341,9 @@ export default function Orders() {
                         <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.packs || (item.cases||1) * (item.packs_per_case||6)} pks / {item.quantity} u</span>
                       )}
                       {item.input_mode === 'cases' && (item.packs_per_case||6) === 1 && (
+                        <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>
+                      )}
+                      {item.input_mode === 'packs' && (item.units_per_pack||1) > 1 && (
                         <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>
                       )}
                     </div>
@@ -1476,17 +1500,22 @@ export default function Orders() {
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
                   <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden' }}>
-                    {['cases','units'].map(m => (
+                    {['cases','packs'].map(m => (
                       <button key={m} onClick={() => {
                         updateEditItem(idx, 'input_mode', m)
-                        if (m === 'units') {
-                          updateEditItem(idx, 'cases', null)
-                        } else {
-                          const p = products.find(p => p.code === item.product_code)
-                          const upc = getUnitsPerCase(p)
+                        const p = products.find(p => p.code === item.product_code)
+                        const ppc = parseInt(p?.packs_per_case) || 6
+                        const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1
+                        const upc = ppc * upp
+                        if (m === 'cases') {
                           const cs = item.quantity ? Math.round(item.quantity / upc) : 1
                           updateEditItem(idx, 'cases', cs)
                           updateEditItem(idx, 'quantity', cs * upc)
+                        } else {
+                          const pks = item.cases ? item.cases * ppc : item.quantity ? Math.round(item.quantity / upp) : 1
+                          updateEditItem(idx, 'packs', pks)
+                          updateEditItem(idx, 'cases', pks / ppc)
+                          updateEditItem(idx, 'quantity', pks * upp)
                         }
                       }} style={{
                         padding:'4px 8px', border:'none', cursor:'pointer', fontSize:11,
@@ -1496,21 +1525,37 @@ export default function Orders() {
                       }}>{m}</button>
                     ))}
                   </div>
-                  <input type="number" value={(item.input_mode || 'cases') === 'cases' ? (item.cases || Math.round(item.quantity / (item.units_per_case || 6))) : item.quantity}
+                  <input type="number" value={
+                    (item.input_mode || 'cases') === 'cases'
+                      ? (item.cases || Math.round(item.quantity / (item.units_per_case || 6)))
+                      : (item.input_mode === 'packs')
+                        ? (item.packs || Math.round(item.quantity / (item.units_per_pack || 1)))
+                        : item.quantity
+                  }
                     onChange={e => {
                       const val = parseFloat(e.target.value) || 0
+                      const p = products.find(p => p.code === item.product_code)
+                      const ppc = parseInt(p?.packs_per_case) || 6
+                      const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1
+                      const upc = ppc * upp
                       if ((item.input_mode || 'cases') === 'cases') {
-                        const p = products.find(p => p.code === item.product_code)
-                        const upc = getUnitsPerCase(p)
                         updateEditItem(idx, 'cases', e.target.value)
                         updateEditItem(idx, 'quantity', val * upc)
                         updateEditItem(idx, 'units_per_case', upc)
+                      } else if (item.input_mode === 'packs') {
+                        updateEditItem(idx, 'packs', e.target.value)
+                        updateEditItem(idx, 'cases', val / ppc)
+                        updateEditItem(idx, 'quantity', val * upp)
+                        updateEditItem(idx, 'units_per_pack', upp)
                       } else {
                         updateEditItem(idx, 'quantity', val)
                         updateEditItem(idx, 'cases', null)
                       }
                     }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
                   {(item.input_mode || 'cases') === 'cases' && (
+                    <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>
+                  )}
+                  {item.input_mode === 'packs' && (
                     <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>
                   )}
                 </div>

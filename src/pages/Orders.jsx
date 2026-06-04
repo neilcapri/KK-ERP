@@ -615,6 +615,8 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
 export default function Orders() {
   const { profile } = useAuth()
   const isAdmin = profile?.role === 'admin'
+  const isKitchen = profile?.role === 'kitchen'
+  const canEdit = isAdmin || isKitchen
 
   const [orders, setOrders] = useState([])
   const [customers, setCustomers] = useState([])
@@ -983,7 +985,7 @@ export default function Orders() {
               </button>
             </>
           )}
-          {isAdmin && <button className="btn btn-green" onClick={() => setShowModal(true)}>+ New Order</button>}
+          {(isAdmin || isKitchen) && <button className="btn btn-green" onClick={() => setShowModal(true)}>+ New Order</button>}
         </div>
       </div>
 
@@ -993,7 +995,7 @@ export default function Orders() {
           <div className="stat purple"><div className="stat-label">Archived</div><div className="stat-value">{orders.filter(o => o.status === 'archived').length}</div></div>
         </div>
 
-        {isAdmin && (
+        {(isAdmin || isKitchen) && (
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title">📊 Order Sheet Export</div>
             <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:12, flexWrap:'wrap' }}>
@@ -1061,15 +1063,15 @@ export default function Orders() {
                       <td><span className={'badge badge-' + STATUS_COLORS[o.status]}>{STATUS_LABELS[o.status]}</span></td>
                       <td style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
                         <button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button>
-                        {isAdmin && <button onClick={() => startEditOrder(o)} className="btn btn-secondary btn-sm">Edit</button>}
-                        {isAdmin && (
+                        {(isAdmin || isKitchen) && <button onClick={() => startEditOrder(o)} className="btn btn-secondary btn-sm">Edit</button>}
+                        {(isAdmin || isKitchen) && (
                           <button onClick={() => updateStatus(o.id, o.status === 'archived' ? 'order_sheet' : 'archived')}
                             className="btn btn-sm"
                             style={{ background: o.status === 'archived' ? '#7e57c2' : 'var(--surface)', color: o.status === 'archived' ? '#fff' : 'var(--ink3)', border: '1px solid var(--border)' }}>
                             {o.status === 'archived' ? '↩' : '🗄'}
                           </button>
                         )}
-                        {isAdmin && <button onClick={async () => { if(window.confirm('Delete order ' + o.order_number + '?')) { await supabase.from('orders').delete().eq('id', o.id); await loadData(); }}} className="btn btn-red btn-sm">Del</button>}
+                        {(isAdmin || isKitchen) && <button onClick={async () => { if(window.confirm('Delete order ' + o.order_number + '?')) { await supabase.from('orders').delete().eq('id', o.id); await loadData(); }}} className="btn btn-red btn-sm">Del</button>}
                       </td>
                     </tr>
                     )
@@ -1383,11 +1385,11 @@ export default function Orders() {
               </div>
               <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => printDispatchSlip([viewOrder])}>🖨️ Print Slip</button>
-                {isAdmin && <button className="btn btn-amber btn-sm" onClick={() => startEditOrder(viewOrder)}>✏️ Edit</button>}
-                {isAdmin && <button className="btn btn-red btn-sm" onClick={async () => { if(window.confirm('Delete order ' + viewOrder.order_number + '?')) { await supabase.from('orders').delete().eq('id', viewOrder.id); setViewOrder(null); await loadData(); }}}>🗑️ Delete</button>}
+                {(isAdmin || isKitchen) && <button className="btn btn-amber btn-sm" onClick={() => startEditOrder(viewOrder)}>✏️ Edit</button>}
+                {(isAdmin || isKitchen) && <button className="btn btn-red btn-sm" onClick={async () => { if(window.confirm('Delete order ' + viewOrder.order_number + '?')) { await supabase.from('orders').delete().eq('id', viewOrder.id); setViewOrder(null); await loadData(); }}}>🗑️ Delete</button>}
               </div>
             </div>
-            {isAdmin && (
+            {(isAdmin || isKitchen) && (
               <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
                 <button onClick={() => updateStatus(viewOrder.id, viewOrder.status === 'archived' ? 'order_sheet' : 'archived')} style={{
                   padding:'6px 14px', borderRadius:20, border:'1px solid var(--border)', cursor:'pointer',

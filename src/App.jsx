@@ -27,12 +27,12 @@ function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="inventory" element={<Inventory />} />
         <Route path="production" element={<ProtectedRoute roles={['admin','kitchen']}><Production /></ProtectedRoute>} />
-        <Route path="dispatch" element={<ProtectedRoute roles={['admin','dispatch']}><Dispatch /></ProtectedRoute>} />
-        <Route path="sourcing" element={<ProtectedRoute roles={['admin','kitchen','dispatch']}><Sourcing /></ProtectedRoute>} />
+        <Route path="dispatch" element={<ProtectedRoute roles={['admin','kitchen']}><Dispatch /></ProtectedRoute>} />
+        <Route path="sourcing" element={<ProtectedRoute roles={['admin','kitchen']}><Sourcing /></ProtectedRoute>} />
         <Route path="activity" element={<Activity />} />
         <Route path="reports" element={<ProtectedRoute roles={['admin','analyst']}><Reports /></ProtectedRoute>} />
         <Route path="time-tracking" element={<ProtectedRoute><TimeTracking user={user} employee={profile} /></ProtectedRoute>} />
-        <Route path="orders" element={<ProtectedRoute roles={['admin']}><Orders /></ProtectedRoute>} />
+        <Route path="orders" element={<ProtectedRoute roles={['admin','kitchen']}><Orders /></ProtectedRoute>} />
       </Route>
     </Routes>
   )

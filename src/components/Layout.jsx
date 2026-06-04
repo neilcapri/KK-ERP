@@ -11,7 +11,7 @@ const navItems = [
   { to: '/activity', icon: '🕐', label: 'Activity', roles: ['admin','kitchen','analyst','dispatch'] },
   { to: '/reports', icon: '📊', label: 'Reports', roles: ['admin','analyst'] },
   { to: '/time-tracking', icon: '⏱', label: 'Time Tracking', roles: ['admin','kitchen','staff'] },
-  { to: '/orders', icon: '🛒', label: 'Orders', roles: ['admin'] },
+  { to: '/orders', icon: '🛒', label: 'Orders', roles: ['admin','kitchen'] },
 ]
 
 export default function Layout() {
@@ -53,12 +53,10 @@ export default function Layout() {
           <button className="btn btn-secondary btn-sm btn-full" onClick={handleSignOut}>Sign Out</button>
         </div>
       </aside>
-
       {/* Main Content */}
       <div className="main-content">
         <Outlet />
       </div>
-
       {/* Mobile Bottom Nav */}
       <nav className="bottom-nav">
         {visibleItems.map(item => (
@@ -77,7 +75,6 @@ export default function Layout() {
           Sign Out
         </button>
       </nav>
-
       {/* AI Chat Widget */}
       <ChatWidget />
     </div>

@@ -12,7 +12,7 @@ const DATE_RANGES = [
 ]
 
 export default function Inventory() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isKitchen } = useAuth()
   const [tab, setTab] = useState('fg')
   const [products, setProducts] = useState([])
   const [rms, setRMs] = useState([])
@@ -61,7 +61,6 @@ export default function Inventory() {
       supabase.from('productions').select('*').eq('product_code', code).gte('date', sinceStr).order('date', { ascending: false }),
       supabase.from('dispatch_items').select('*, dispatches(date, customer_name, invoice_number)').eq('product_code', code).order('created_at', { ascending: false }),
     ])
-    // Filter dispatches by date
     const filteredDisp = (disp.data || []).filter(d => d.dispatches?.date >= sinceStr)
     setProductHistory({ productions: prod.data || [], dispatches: filteredDisp })
     setHistoryLoading(false)
@@ -76,7 +75,6 @@ export default function Inventory() {
       supabase.from('sourcing').select('*').eq('rm_name', name).gte('date', sinceStr).order('date', { ascending: false }),
       supabase.from('bom').select('product_code').eq('rm_name', name),
     ])
-    // Get productions that used this RM
     let usedInProd = []
     if (bom.data?.length) {
       const codes = bom.data.map(b => b.product_code)
@@ -102,7 +100,7 @@ export default function Inventory() {
     })
     await supabase.from('activity').insert({
       type: 'stock', title: `${editItem.code || editItem.name} corrected`,
-      description: `${oldVal} → ${newVal} — ${editReason || 'Manual correction'}`
+      description: `${oldVal} -> ${newVal} — ${editReason || 'Manual correction'}`
     })
     setEditItem(null); setEditVal(''); setEditReason('')
     loadData()
@@ -189,7 +187,7 @@ export default function Inventory() {
                       style={{ cursor: 'pointer', outline: isSelected ? '2px solid var(--ink)' : 'none' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div className="si-code">{p.code}</div>
-                        {isAdmin && <button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); }}
+                        {(isAdmin || isKitchen) && <button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); }}
                           style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 2, padding: '1px 6px', fontSize: 9, cursor: 'pointer', color: 'var(--ink3)' }}>edit</button>}
                       </div>
                       <div className="si-name">{p.name}</div>
@@ -256,7 +254,7 @@ export default function Inventory() {
                       <th>Raw Material</th><th>Category</th><th>Stock</th><th>Unit</th>
                       <th>Supplier</th><th>Status</th>
                       {isAdmin && <th>$/Unit</th>}
-                      {isAdmin && <th></th>}
+                      {(isAdmin || isKitchen) && <th></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -273,8 +271,8 @@ export default function Inventory() {
                           <td style={{ color: 'var(--ink3)' }}>{r.unit}</td>
                           <td style={{ fontSize: 11 }}>{r.supplier}</td>
                           <td><span className={`badge badge-${cls}`}>{label}</span></td>
-                          {isAdmin && <td style={{ color: 'var(--ink3)' }}>{r.price_per_unit > 0 ? `$${r.price_per_unit.toFixed(2)}` : '—'}</td>}
-                          {isAdmin && <td><button onClick={e => { e.stopPropagation(); setEditItem(r); setEditVal(String(r.stock)); }} className="btn btn-secondary btn-sm">edit</button></td>}
+                          {isAdmin && <td style={{ color: 'var(--ink3)' }}>{r.price_per_unit > 0 ? '$' + r.price_per_unit.toFixed(2) : '—'}</td>}
+                          {(isAdmin || isKitchen) && <td><button onClick={e => { e.stopPropagation(); setEditItem(r); setEditVal(String(r.stock)); }} className="btn btn-secondary btn-sm">edit</button></td>}
                         </tr>
                       )
                     })}
@@ -303,7 +301,7 @@ export default function Inventory() {
                             <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                               <div style={{ fontWeight: 600, color: 'var(--green)' }}>+{s.qty_received} {s.unit}</div>
                               <div style={{ fontSize: 11, color: 'var(--ink2)' }}>{s.supplier}</div>
-                              <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{s.date}{s.batch_number ? ` · Lot ${s.batch_number}` : ''}</div>
+                              <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{s.date}{s.batch_number ? ' · Lot ' + s.batch_number : ''}</div>
                               {isAdmin && s.cost > 0 && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>${s.cost.toFixed(2)}</div>}
                             </div>
                           ))

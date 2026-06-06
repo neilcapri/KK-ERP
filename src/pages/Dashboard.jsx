@@ -226,12 +226,12 @@ export default function Dashboard() {
 
         {/* ── Stat cards ── */}
         <div className="grid4" style={{ marginBottom:16 }}>
-          <div className="stat" style={{ borderTop:'3px solid var(--red)', cursor:'pointer' }} onClick={() => navigate('/inventory')}>
+          <div className="stat" style={{ borderTop:'3px solid var(--red)', cursor:'pointer' }} onClick={() => navigate('/inventory?tab=fg&filter=alerts')}>
             <div className="stat-label">FG Stock Alerts</div>
             <div className="stat-value" style={{ color: stats.outFG > 0 ? 'var(--red)' : 'var(--amber)' }}>{stats.outFG + stats.lowFG}</div>
             <div className="stat-sub">{stats.outFG} out · {stats.lowFG} low · tap to view</div>
           </div>
-          <div className="stat" style={{ borderTop:'3px solid var(--amber)', cursor:'pointer' }} onClick={() => navigate('/inventory')}>
+          <div className="stat" style={{ borderTop:'3px solid var(--amber)', cursor:'pointer' }} onClick={() => navigate('/inventory?tab=rm&filter=alerts')}>
             <div className="stat-label">RM Stock Alerts</div>
             <div className="stat-value" style={{ color: stats.outRM > 0 ? 'var(--red)' : 'var(--amber)' }}>{stats.outRM + stats.lowRM}</div>
             <div className="stat-sub">{stats.outRM} out · {stats.lowRM} low · tap to view</div>
@@ -390,7 +390,7 @@ export default function Dashboard() {
               <div className="card">
                 <div className="card-title" style={{ display:'flex', justifyContent:'space-between' }}>
                   Stock alerts
-                  <Link to="/inventory" style={{ fontSize:10, color:'var(--ink3)', textDecoration:'none', fontFamily:'inherit', letterSpacing:0, textTransform:'none', fontWeight:400 }}>
+                  <Link to="/inventory?tab=fg&filter=alerts" style={{ fontSize:10, color:'var(--ink3)', textDecoration:'none', fontFamily:'inherit', letterSpacing:0, textTransform:'none', fontWeight:400 }}>
                     View inventory →
                   </Link>
                 </div>

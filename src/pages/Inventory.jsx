@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
@@ -22,6 +23,7 @@ export default function Inventory() {
   const [editItem, setEditItem] = useState(null)
   const [editVal, setEditVal] = useState('')
   const [editReason, setEditReason] = useState('')
+  const [showAlertsOnly, setShowAlertsOnly] = useState(false)
 
   // Product detail view
   const [selectedProduct, setSelectedProduct] = useState(null)
@@ -31,7 +33,18 @@ export default function Inventory() {
   const [rmHistory, setRMHistory] = useState({ sourcing: [], used: [] })
   const [historyLoading, setHistoryLoading] = useState(false)
 
+  const location = useLocation()
+
   useEffect(() => { loadData() }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const tabParam = params.get('tab')
+    const filterParam = params.get('filter')
+    if (tabParam === 'rm') setTab('rm')
+    if (tabParam === 'fg') setTab('fg')
+    if (filterParam === 'alerts') setShowAlertsOnly(true)
+  }, [location.search])
 
   useEffect(() => {
     if (selectedProduct) loadProductHistory(selectedProduct, dateRange)
@@ -99,8 +112,8 @@ export default function Inventory() {
       old_value: oldVal, new_value: newVal, reason: editReason || 'Manual correction'
     })
     await supabase.from('activity').insert({
-      type: 'stock', title: `${editItem.code || editItem.name} corrected`,
-      description: `${oldVal} -> ${newVal} — ${editReason || 'Manual correction'}`
+      type: 'stock', title: (editItem.code || editItem.name) + ' corrected',
+      description: oldVal + ' -> ' + newVal + ' — ' + (editReason || 'Manual correction')
     })
     setEditItem(null); setEditVal(''); setEditReason('')
     loadData()
@@ -110,12 +123,14 @@ export default function Inventory() {
   const rmCategories = ['all', ...new Set(rms.map(r => r.category))]
 
   const filteredFG = products.filter(p => {
+    if (showAlertsOnly && p.units > p.min_stock) return false
     if (catFilter !== 'all' && p.category !== catFilter) return false
     if (search && !p.code.toLowerCase().includes(search.toLowerCase()) && !p.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
 
   const filteredRM = rms.filter(r => {
+    if (showAlertsOnly && r.stock > r.min_stock) return false
     if (catFilter !== 'all' && r.category !== catFilter) return false
     if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
@@ -163,13 +178,21 @@ export default function Inventory() {
           </div>
         )}
 
+        {showAlertsOnly && (
+          <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', background:'var(--amber-l)', borderRadius:6, marginBottom:12, fontSize:12, color:'var(--amber)' }}>
+            <span>⚠️ Showing low stock & out of stock only</span>
+            <button onClick={() => setShowAlertsOnly(false)} style={{ marginLeft:'auto', background:'none', border:'1px solid var(--amber)', color:'var(--amber)', borderRadius:4, padding:'2px 10px', fontSize:11, cursor:'pointer' }}>
+              Show all
+            </button>
+          </div>
+        )}
         <div className="filter-bar">
           {(tab === 'fg' ? fgCategories : rmCategories).map(cat => (
-            <button key={cat} className={`filter-btn ${catFilter===cat?'active':''}`} onClick={() => setCatFilter(cat)}>
+            <button key={cat} className={'filter-btn ' + (catFilter===cat?'active':'')} onClick={() => setCatFilter(cat)}>
               {cat === 'all' ? 'All' : cat}
             </button>
           ))}
-          <input className="search-input" placeholder={`Search ${tab==='fg'?'product':'material'}...`} value={search} onChange={e => setSearch(e.target.value)} />
+          <input className="search-input" placeholder={'Search ' + (tab==='fg'?'product':'material') + '...'} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
 
         {loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Loading...</div> : (
@@ -182,7 +205,7 @@ export default function Inventory() {
                   const bar = p.units <= 0 ? 'var(--red)' : p.units <= p.min_stock ? 'var(--amber)' : 'var(--green)'
                   const isSelected = selectedProduct === p.code
                   return (
-                    <div key={p.code} className={`stock-item ${cls}`}
+                    <div key={p.code} className={'stock-item ' + cls}
                       onClick={() => setSelectedProduct(isSelected ? null : p.code)}
                       style={{ cursor: 'pointer', outline: isSelected ? '2px solid var(--ink)' : 'none' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -193,7 +216,7 @@ export default function Inventory() {
                       <div className="si-name">{p.name}</div>
                       <div className="si-units">{p.units}</div>
                       <div className="si-packs">{Math.floor(p.units/ps)}pk · {ps}/pk</div>
-                      <div className="stock-bar"><div className="stock-bar-fill" style={{ width: `${Math.min(100,Math.max(0,p.units/(p.min_stock*2)*100))}%`, background: bar }} /></div>
+                      <div className="stock-bar"><div className="stock-bar-fill" style={{ width: Math.min(100,Math.max(0,p.units/(p.min_stock*2)*100)) + '%', background: bar }} /></div>
                     </div>
                   )
                 })}
@@ -267,10 +290,10 @@ export default function Inventory() {
                           style={{ cursor: 'pointer', background: isSelected ? 'var(--surface2)' : '' }}>
                           <td style={{ fontWeight: 500 }}>{r.name}</td>
                           <td><span style={{ fontSize: 10, color: 'var(--ink3)' }}>{r.category}</span></td>
-                          <td style={{ fontWeight: 600, color: `var(--${cls})` }}>{r.stock?.toFixed(3)}</td>
+                          <td style={{ fontWeight: 600, color: 'var(--' + cls + ')' }}>{r.stock?.toFixed(3)}</td>
                           <td style={{ color: 'var(--ink3)' }}>{r.unit}</td>
                           <td style={{ fontSize: 11 }}>{r.supplier}</td>
-                          <td><span className={`badge badge-${cls}`}>{label}</span></td>
+                          <td><span className={'badge badge-' + cls}>{label}</span></td>
                           {isAdmin && <td style={{ color: 'var(--ink3)' }}>{r.price_per_unit > 0 ? '$' + r.price_per_unit.toFixed(2) : '—'}</td>}
                           {(isAdmin || isKitchen) && <td><button onClick={e => { e.stopPropagation(); setEditItem(r); setEditVal(String(r.stock)); }} className="btn btn-secondary btn-sm">edit</button></td>}
                         </tr>

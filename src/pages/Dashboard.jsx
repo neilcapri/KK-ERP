@@ -253,8 +253,38 @@ export default function Dashboard() {
           <button style={tabStyle('performance')} onClick={() => setActiveTab('performance')}>Performance</button>
           <button style={tabStyle('overview')}    onClick={() => setActiveTab('overview')}>Overview</button>
           <button style={tabStyle('schedule')}    onClick={() => setActiveTab('schedule')}>Delivery Schedule</button>
-          <button style={tabStyle('map')}         onClick={() => setActiveTab('map')}>Zone Map</button>
         </div>
+
+        {/* ── Always-visible zone map ── */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 180px', gap:12, marginBottom:20, alignItems:'start' }}>
+          <div id="kk-zone-map" style={{ height:300, borderRadius:8, overflow:'hidden', border:'0.5px solid var(--border)' }} />
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            <div style={{ fontSize:10, letterSpacing:'1.5px', textTransform:'uppercase', color:'var(--ink3)', marginBottom:2 }}>Zones · this month</div>
+            {[
+              { key:'City',  label:'City',  day:'Fri',  color:'#7F77DD', bg:'#EEEDFE', tc:'#3C3489' },
+              { key:'West',  label:'West',  day:'Thu',  color:'#EF9F27', bg:'#FAEEDA', tc:'#633806' },
+              { key:'ONFC',  label:'ONFC',  day:'Mon',  color:'#E24B4A', bg:'#FCEBEB', tc:'#791F1F' },
+              { key:'North', label:'North', day:'Wed',  color:'#1D9E75', bg:'#E1F5EE', tc:'#085041' },
+              { key:'East',  label:'East',  day:'Wed',  color:'#378ADD', bg:'#E6F1FB', tc:'#0C447C' },
+            ].map(z => {
+              const maxU = Math.max(...Object.values(mapUnits), 1)
+              return (
+                <div key={z.key}
+                  style={{ background:'var(--surface)', border:'0.5px solid var(--border)', borderRadius:6, padding:'7px 10px', cursor:'pointer' }}
+                  onClick={() => { if (window._kkMap) { const c={City:[43.653,-79.383,12],West:[43.48,-79.85,10],ONFC:[43.72,-79.42,13],North:[44.05,-79.50,10],East:[43.88,-78.85,10]}; const [lat,lng,zoom]=c[z.key]||[43.7,-79.4,10]; window._kkMap.flyTo([lat,lng],zoom,{duration:1.2}) }}}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
+                    <span style={{ fontSize:10, fontWeight:500, letterSpacing:'0.5px', textTransform:'uppercase', color:z.tc }}>{z.label} · {z.day}</span>
+                    <span style={{ fontSize:13, fontWeight:500, color:z.tc }}>{(mapUnits[z.key]||0).toLocaleString()}</span>
+                  </div>
+                  <div style={{ height:3, background:z.bg, borderRadius:2, marginTop:5 }}>
+                    <div style={{ height:3, width: mapUnits[z.key] > 0 ? Math.round((mapUnits[z.key]/maxU)*100)+'%' : '10%', background:z.color, borderRadius:2 }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <MapLoader units={mapUnits} height={300} />
 
         {/* ─────────────────────────────────────────── */}
         {/* PERFORMANCE TAB                             */}
@@ -554,22 +584,22 @@ export default function Dashboard() {
   )
 }
 
-function MapLoader({ units }) {
+function MapLoader({ units, height = 460 }) {
   useEffect(() => {
     if (document.getElementById('leaflet-js')) {
-      initMap(units)
+      initMap(units, height)
       return
     }
     const script = document.createElement('script')
     script.id = 'leaflet-js'
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload = () => initMap(units)
+    script.onload = () => initMap(units, height)
     document.head.appendChild(script)
   }, [units])
   return null
 }
 
-function initMap(units) {
+function initMap(units, height) {
   if (window._kkMap) { window._kkMap.remove(); window._kkMap = null }
   const el = document.getElementById('kk-zone-map')
   if (!el || !window.L) return

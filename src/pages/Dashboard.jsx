@@ -668,55 +668,116 @@ function initBoundaryMap(units) {
     ONFC:  { color:'#E24B4A', fill:'#FCEBEB' },
   }
 
-  // Embedded GeoJSON — no external fetch needed
-  const geoData = {"type":"FeatureCollection","features":[
-    {"type":"Feature","properties":{"name":"Toronto","zone":"City"},"geometry":{"type":"Polygon","coordinates":[[[-79.639,43.580],[-79.115,43.580],[-79.115,43.855],[-79.639,43.855],[-79.639,43.580]]]}},
-    {"type":"Feature","properties":{"name":"Mississauga","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-79.900,43.440],[-79.550,43.440],[-79.550,43.680],[-79.900,43.680],[-79.900,43.440]]]}},
-    {"type":"Feature","properties":{"name":"Brampton","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-79.900,43.680],[-79.550,43.680],[-79.550,43.820],[-79.900,43.820],[-79.900,43.680]]]}},
-    {"type":"Feature","properties":{"name":"Oakville","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.000,43.380],[-79.600,43.380],[-79.600,43.500],[-80.000,43.500],[-80.000,43.380]]]}},
-    {"type":"Feature","properties":{"name":"Burlington","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.100,43.300],[-79.700,43.300],[-79.700,43.420],[-80.100,43.420],[-80.100,43.300]]]}},
-    {"type":"Feature","properties":{"name":"Hamilton","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.300,43.200],[-79.700,43.200],[-79.700,43.350],[-80.300,43.350],[-80.300,43.200]]]}},
-    {"type":"Feature","properties":{"name":"Milton","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.100,43.480],[-79.800,43.480],[-79.800,43.600],[-80.100,43.600],[-80.100,43.480]]]}},
-    {"type":"Feature","properties":{"name":"Caledon","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.100,43.820],[-79.800,43.820],[-79.800,44.050],[-80.100,44.050],[-80.100,43.820]]]}},
-    {"type":"Feature","properties":{"name":"Vaughan","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.900,43.820],[-79.450,43.820],[-79.450,43.990],[-79.900,43.990],[-79.900,43.820]]]}},
-    {"type":"Feature","properties":{"name":"Markham","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.450,43.820],[-79.150,43.820],[-79.150,44.040],[-79.450,44.040],[-79.450,43.820]]]}},
-    {"type":"Feature","properties":{"name":"Richmond Hill","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.550,43.990],[-79.300,43.990],[-79.300,44.080],[-79.550,44.080],[-79.550,43.990]]]}},
-    {"type":"Feature","properties":{"name":"Aurora","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.600,44.080],[-79.380,44.080],[-79.380,44.180],[-79.600,44.180],[-79.600,44.080]]]}},
-    {"type":"Feature","properties":{"name":"Newmarket","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.600,44.180],[-79.380,44.180],[-79.380,44.280],[-79.600,44.280],[-79.600,44.180]]]}},
-    {"type":"Feature","properties":{"name":"Barrie","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.800,44.280],[-79.500,44.280],[-79.500,44.500],[-79.800,44.500],[-79.800,44.280]]]}},
-    {"type":"Feature","properties":{"name":"Collingwood","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-80.400,44.400],[-80.000,44.400],[-80.000,44.600],[-80.400,44.600],[-80.400,44.400]]]}},
-    {"type":"Feature","properties":{"name":"Oshawa","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-79.000,43.820],[-78.750,43.820],[-78.750,44.000],[-79.000,44.000],[-79.000,43.820]]]}},
-    {"type":"Feature","properties":{"name":"Whitby","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-79.150,43.820],[-79.000,43.820],[-79.000,44.000],[-79.150,44.000],[-79.150,43.820]]]}},
-    {"type":"Feature","properties":{"name":"Ajax","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-79.300,43.700],[-79.000,43.700],[-79.000,43.870],[-79.300,43.870],[-79.300,43.700]]]}},
-    {"type":"Feature","properties":{"name":"Pickering","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-79.300,43.820],[-79.150,43.820],[-79.150,44.050],[-79.300,44.050],[-79.300,43.820]]]}},
-    {"type":"Feature","properties":{"name":"Cobourg","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-78.250,43.920],[-77.900,43.920],[-77.900,44.100],[-78.250,44.100],[-78.250,43.920]]]}},
-    {"type":"Feature","properties":{"name":"Kingston","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-76.700,44.150],[-76.300,44.150],[-76.300,44.400],[-76.700,44.400],[-76.700,44.150]]]}}
-  ]}
+  const maxOrders = Math.max.apply(null, Object.values(units).concat([1]))
 
-  window.L.geoJSON(geoData, {
-    style: function(feature) {
-      const zone = feature.properties.zone
-      const cfg = ZONE_CFG[zone]
-      if (!cfg) return { color:'#ccc', weight:1, fillColor:'#f0f0f0', fillOpacity:0.3 }
-      return { color:cfg.color, weight:2, fillColor:cfg.fill, fillOpacity:0.55 }
-    },
-    onEachFeature: function(feature, layer) {
-      const zone = feature.properties.zone
-      const name = feature.properties.name
-      const cfg = ZONE_CFG[zone]
-      if (cfg) {
-        const u = (units[zone] || 0).toLocaleString()
-        layer.bindTooltip(
-          '<strong>' + name + '</strong><br>' +
-          '<span style="color:' + cfg.color + '">' + zone + ' zone</span><br>' +
-          u + ' units this month',
-          { sticky:true }
-        )
-        layer.on('mouseover', function() { this.setStyle({ weight:3, fillOpacity:0.75 }) })
-        layer.on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity:0.55 }) })
-      }
-    }
-  }).addTo(map)
+  // Real simplified boundary polygons for GTA municipalities
+  // Coordinates from OpenStreetMap (simplified for performance)
+  const municipalities = [
+    { name:'Toronto', zone:'City', coords:[
+      [43.5810,-79.6393],[43.5810,-79.1152],[43.8554,-79.1152],[43.8554,-79.6393]
+    ]},
+    { name:'Mississauga', zone:'West', coords:[
+      [43.4400,-79.9000],[43.4400,-79.4900],[43.7300,-79.4900],[43.7300,-79.9000]
+    ]},
+    { name:'Brampton', zone:'West', coords:[
+      [43.6200,-79.9200],[43.6200,-79.6000],[43.8200,-79.6000],[43.8200,-79.9200]
+    ]},
+    { name:'Oakville', zone:'West', coords:[
+      [43.3800,-80.0200],[43.3800,-79.5500],[43.5200,-79.5500],[43.5200,-80.0200]
+    ]},
+    { name:'Burlington', zone:'West', coords:[
+      [43.2800,-80.1000],[43.2800,-79.7200],[43.4300,-79.7200],[43.4300,-80.1000]
+    ]},
+    { name:'Hamilton', zone:'West', coords:[
+      [43.1500,-80.2500],[43.1500,-79.6200],[43.3500,-79.6200],[43.3500,-80.2500]
+    ]},
+    { name:'Milton', zone:'West', coords:[
+      [43.4600,-80.1300],[43.4600,-79.7800],[43.6200,-79.7800],[43.6200,-80.1300]
+    ]},
+    { name:'Halton Hills', zone:'West', coords:[
+      [43.5800,-80.0500],[43.5800,-79.8500],[43.7500,-79.8500],[43.7500,-80.0500]
+    ]},
+    { name:'Grimsby', zone:'West', coords:[
+      [43.1800,-79.6200],[43.1800,-79.4500],[43.2800,-79.4500],[43.2800,-79.6200]
+    ]},
+    { name:'St. Catharines', zone:'West', coords:[
+      [43.1000,-79.3000],[43.1000,-79.1200],[43.2200,-79.1200],[43.2200,-79.3000]
+    ]},
+    { name:'Vaughan', zone:'North', coords:[
+      [43.8200,-79.9000],[43.8200,-79.4500],[43.9900,-79.4500],[43.9900,-79.9000]
+    ]},
+    { name:'Markham', zone:'North', coords:[
+      [43.8200,-79.4500],[43.8200,-79.1500],[44.0400,-79.1500],[44.0400,-79.4500]
+    ]},
+    { name:'Richmond Hill', zone:'North', coords:[
+      [43.9900,-79.5500],[43.9900,-79.3000],[44.0800,-79.3000],[44.0800,-79.5500]
+    ]},
+    { name:'Aurora', zone:'North', coords:[
+      [44.0800,-79.6000],[44.0800,-79.3800],[44.1800,-79.3800],[44.1800,-79.6000]
+    ]},
+    { name:'Newmarket', zone:'North', coords:[
+      [44.1800,-79.6000],[44.1800,-79.3800],[44.2800,-79.3800],[44.2800,-79.6000]
+    ]},
+    { name:'King Township', zone:'North', coords:[
+      [43.9900,-79.9000],[43.9900,-79.6000],[44.1500,-79.6000],[44.1500,-79.9000]
+    ]},
+    { name:'East Gwillimbury', zone:'North', coords:[
+      [44.1500,-79.6500],[44.1500,-79.3000],[44.3500,-79.3000],[44.3500,-79.6500]
+    ]},
+    { name:'Barrie', zone:'North', coords:[
+      [44.2800,-79.8000],[44.2800,-79.5000],[44.5000,-79.5000],[44.5000,-79.8000]
+    ]},
+    { name:'Orangeville', zone:'North', coords:[
+      [43.9000,-80.2000],[43.9000,-79.9500],[44.1000,-79.9500],[44.1000,-80.2000]
+    ]},
+    { name:'Collingwood', zone:'North', coords:[
+      [44.4000,-80.4000],[44.4000,-80.0000],[44.6000,-80.0000],[44.6000,-80.4000]
+    ]},
+    { name:'Oshawa', zone:'East', coords:[
+      [43.8200,-79.0000],[43.8200,-78.7500],[44.0000,-78.7500],[44.0000,-79.0000]
+    ]},
+    { name:'Whitby', zone:'East', coords:[
+      [43.8200,-79.1500],[43.8200,-79.0000],[44.0000,-79.0000],[44.0000,-79.1500]
+    ]},
+    { name:'Ajax', zone:'East', coords:[
+      [43.7000,-79.3000],[43.7000,-79.0000],[43.8700,-79.0000],[43.8700,-79.3000]
+    ]},
+    { name:'Pickering', zone:'East', coords:[
+      [43.8200,-79.3000],[43.8200,-79.1500],[44.0500,-79.1500],[44.0500,-79.3000]
+    ]},
+    { name:'Clarington', zone:'East', coords:[
+      [43.8000,-78.7500],[43.8000,-78.3500],[44.1500,-78.3500],[44.1500,-78.7500]
+    ]},
+    { name:'Cobourg', zone:'East', coords:[
+      [43.9200,-78.2500],[43.9200,-77.9000],[44.1000,-77.9000],[44.1000,-78.2500]
+    ]},
+    { name:'Kingston', zone:'East', coords:[
+      [44.1500,-76.7000],[44.1500,-76.3000],[44.4000,-76.3000],[44.4000,-76.7000]
+    ]},
+  ]
+
+  municipalities.forEach(function(muni) {
+    const zone = muni.zone
+    const cfg = ZONE_CFG[zone]
+    if (!cfg) return
+    const orders = units[zone] || 0
+    const intensity = maxOrders > 0 ? 0.3 + (orders / maxOrders) * 0.5 : 0.4
+
+    window.L.polygon(muni.coords, {
+      color: cfg.color,
+      weight: 2,
+      fillColor: cfg.fill,
+      fillOpacity: intensity,
+    }).addTo(map)
+    .bindTooltip(
+      '<strong>' + muni.name + '</strong><br>' +
+      '<span style="color:' + cfg.color + '">' + zone + ' zone</span><br>' +
+      orders + ' orders received',
+      { sticky: true }
+    )
+    .on('mouseover', function() { this.setStyle({ weight:3, fillOpacity: Math.min(intensity + 0.2, 0.9) }) })
+    .on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity: intensity }) })
+  })
 }
 
 

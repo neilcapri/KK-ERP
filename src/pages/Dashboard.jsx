@@ -249,10 +249,10 @@ export default function Dashboard() {
             <div className="stat-value" style={{ color: stats.outRM > 0 ? 'var(--red)' : 'var(--amber)' }}>{stats.outRM + stats.lowRM}</div>
             <div className="stat-sub">{stats.outRM} out · {stats.lowRM} low · tap to view</div>
           </div>
-          <div className="stat" style={{ borderTop:'3px solid var(--blue)' }}>
+          <div className="stat" style={{ borderTop:'3px solid var(--blue)', cursor:'pointer' }} onClick={() => navigate('/orders')}>
             <div className="stat-label">Pending Dispatch</div>
             <div className="stat-value" style={{ color:'var(--blue)' }}>{stats.weekOrders}</div>
-            <div className="stat-sub">yet to be dispatched</div>
+            <div className="stat-sub">yet to be dispatched · tap to view</div>
           </div>
           <div className="stat" style={{ borderTop:'3px solid var(--kk-green)', cursor:'pointer' }} onClick={() => navigate('/orders')}>
             <div className="stat-label">Pack Today</div>
@@ -646,10 +646,20 @@ function initBoundaryMap(units) {
     return null
   }
 
-  fetch('https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/ontario.geojson')
-    .then(r => r.json())
-    .then(data => {
-      window.L.geoJSON(data, {
+  const geoSources = [
+    'https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/canada.geojson',
+    'https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/ontario.geojson',
+  ]
+
+  function tryLoadGeo(sources, idx) {
+    if (idx >= sources.length) {
+      loadFallbackPolygons()
+      return
+    }
+    fetch(sources[idx])
+      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
+      .then(data => {
+        window.L.geoJSON(data, {
         style: feature => {
           const name = feature.properties.name || feature.properties.NAME || ''
           const zone = getZone(name)
@@ -674,5 +684,27 @@ function initBoundaryMap(units) {
         }
       }).addTo(map)
     })
-    .catch(err => console.log('GeoJSON load failed:', err))
+          .catch(() => tryLoadGeo(sources, idx + 1))
+      })
+      .catch(() => tryLoadGeo(sources, idx + 1))
+  }
+
+  tryLoadGeo(geoSources, 0)
+}
+
+function loadFallbackPolygons() {
+  // Fallback: draw approximate zone polygons manually if GeoJSON fails
+  if (!window.L || !window._kkMap) return
+  const map = window._kkMap
+  const zones = [
+    { key:'City',  color:'#7F77DD', fill:'#EEEDFE', coords:[[43.855,-79.639],[43.855,-79.115],[43.581,-79.115],[43.581,-79.639]] },
+    { key:'West',  color:'#EF9F27', fill:'#FAEEDA', coords:[[43.95,-80.5],[43.95,-79.639],[43.3,-79.639],[43.3,-80.5]] },
+    { key:'North', color:'#1D9E75', fill:'#E1F5EE', coords:[[44.8,-80.5],[44.8,-79.0],[43.855,-79.0],[43.855,-80.5]] },
+    { key:'East',  color:'#378ADD', fill:'#E6F1FB', coords:[[44.4,-79.115],[44.4,-76.5],[43.5,-76.5],[43.5,-79.115]] },
+  ]
+  zones.forEach(z => {
+    window.L.polygon(z.coords, {
+      color: z.color, weight: 2, fillColor: z.fill, fillOpacity: 0.45
+    }).addTo(map).bindTooltip('<strong style="color:' + z.color + '">' + z.key + ' Zone</strong>', { sticky:true })
+  })
 }

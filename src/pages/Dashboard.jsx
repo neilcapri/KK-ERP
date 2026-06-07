@@ -712,7 +712,7 @@ function initBoundaryMap(units, metric) {
     { key:'North', label:'North',       lat:44.100, lng:-79.480, color:'#1D9E75', fill:'#E1F5EE' },
     { key:'West',  label:'West',        lat:43.450, lng:-79.820, color:'#EF9F27', fill:'#FAEEDA' },
     { key:'East',  label:'East',        lat:43.880, lng:-78.820, color:'#378ADD', fill:'#E6F1FB' },
-    { key:'ONFC',  label:'ONFC',        lat:43.760, lng:-79.410, color:'#E24B4A', fill:'#FCEBEB' },
+    { key:'ONFC',  label:'ONFC',        lat:43.580, lng:-79.720, color:'#E24B4A', fill:'#FCEBEB' },
   ]
 
   const showUnits = metric !== 'orders'

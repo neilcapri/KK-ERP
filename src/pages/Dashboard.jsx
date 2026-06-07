@@ -53,8 +53,11 @@ export default function Dashboard() {
   const [topCustomers, setTopCustomers] = useState([])
   const [weeklyRevenue, setWeeklyRevenue] = useState([])
   const [mapUnits, setMapUnits] = useState({ City:0, West:0, North:0, East:0, ONFC:0 })
+  const [mapRange, setMapRange] = useState('month')
+  const [mapLoading, setMapLoading] = useState(false)
 
   useEffect(() => { loadDashboard() }, [])
+  useEffect(() => { loadMapData(mapRange, []) }, [mapRange])
 
   async function loadDashboard() {
     setLoading(true)
@@ -160,37 +163,8 @@ export default function Dashboard() {
         }))
       }
 
-      // Zone units — get dispatches this month first, then join dispatch_items
-      const zoneMap = { City:0, West:0, North:0, East:0, ONFC:0 }
-      const custZoneMap = {}
-      ;(custRes.data || []).forEach(c => { if (c.zone) custZoneMap[c.name] = c.zone })
-
-      const { data: monthDispatches } = await supabase
-        .from('dispatches')
-        .select('id, customer_name')
-        .gte('date', monthStart)
-
-      if (monthDispatches && monthDispatches.length > 0) {
-        const dispatchIds = monthDispatches.map(d => d.id)
-        const dispatchCustMap = {}
-        monthDispatches.forEach(d => { dispatchCustMap[d.id] = d.customer_name })
-
-        const { data: zoneItems } = await supabase
-          .from('dispatch_items')
-          .select('dispatch_id, units_dispatched')
-          .in('dispatch_id', dispatchIds)
-
-        ;(zoneItems || []).forEach(item => {
-          const cname = dispatchCustMap[item.dispatch_id]
-          const zone = custZoneMap[cname]
-          if (zone && zoneMap[zone] !== undefined) {
-            zoneMap[zone] += item.units_dispatched || 0
-          } else if (cname && cname.toLowerCase().includes('ontario natural food')) {
-            zoneMap['ONFC'] += item.units_dispatched || 0
-          }
-        })
-      }
-      setMapUnits(zoneMap)
+      // Initial map load — this month
+      loadMapData('month', custRes.data || [])
 
     } catch(e) { console.error(e) }
     setLoading(false)
@@ -205,6 +179,49 @@ export default function Dashboard() {
       document.head.appendChild(link)
     }
   }, [])
+
+
+  async function loadMapData(range, custData) {
+    setMapLoading(true)
+    try {
+      const now = new Date()
+      const days = { week:7, month:30, '3months':90, '6months':180, '12months':365 }[range] || 30
+      const since = new Date(now)
+      since.setDate(now.getDate() - days)
+      const sinceStr = since.toISOString().split('T')[0]
+
+      const custZoneMap = {}
+      const customers = custData.length > 0 ? custData : []
+      if (customers.length === 0) {
+        const { data: cd } = await supabase.from('customers').select('name,zone').not('zone','is',null)
+        ;(cd || []).forEach(c => { if (c.zone) custZoneMap[c.name] = c.zone })
+      } else {
+        customers.forEach(c => { if (c.zone) custZoneMap[c.name] = c.zone })
+      }
+
+      const zoneMap = { City:0, West:0, North:0, East:0, ONFC:0 }
+
+      // Count orders received (not dispatches) per zone
+      const { data: zoneOrders } = await supabase
+        .from('orders')
+        .select('customer_name')
+        .gte('created_at', sinceStr)
+        .neq('status','archived')
+
+      ;(zoneOrders || []).forEach(o => {
+        const zone = custZoneMap[o.customer_name]
+        if (zone && zoneMap[zone] !== undefined) {
+          zoneMap[zone]++
+        } else if (o.customer_name && o.customer_name.toLowerCase().includes('ontario natural food')) {
+          zoneMap['ONFC']++
+        }
+      })
+
+      setMapUnits(zoneMap)
+    } catch(e) { console.error(e) }
+    setMapLoading(false)
+  }
+
 
   const today = new Date().toLocaleDateString('en-CA', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
   const icons = { dispatch:'📋', production:'🏭', sourcing:'📥', stock:'📦', order:'🛒' }
@@ -269,6 +286,25 @@ export default function Dashboard() {
         </div>
 
         {/* ── Always-visible zone map ── */}
+        <div style={{ marginBottom:8, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+          <span style={{ fontSize:11, color:'var(--ink3)', letterSpacing:'0.5px' }}>Orders received:</span>
+          {[
+            { key:'week',     label:'This Week' },
+            { key:'month',    label:'This Month' },
+            { key:'3months',  label:'3 Months' },
+            { key:'6months',  label:'6 Months' },
+            { key:'12months', label:'12 Months' },
+          ].map(r => (
+            <button key={r.key} onClick={() => setMapRange(r.key)} style={{
+              padding:'4px 12px', borderRadius:20, border:'1px solid var(--border)', cursor:'pointer',
+              fontSize:11, fontFamily:'var(--display)', letterSpacing:0.5,
+              background: mapRange === r.key ? 'var(--kk-green)' : 'var(--surface)',
+              color: mapRange === r.key ? 'var(--kk-cream)' : 'var(--ink3)',
+              fontWeight: mapRange === r.key ? 600 : 400,
+            }}>{r.label}</button>
+          ))}
+          {mapLoading && <span style={{ fontSize:11, color:'var(--ink3)' }}>⏳</span>}
+        </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 180px', gap:12, marginBottom:20, alignItems:'start' }}>
           <div id="kk-zone-map" style={{ height:300, borderRadius:8, overflow:'hidden', border:'0.5px solid var(--border)' }} />
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>

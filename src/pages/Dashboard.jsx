@@ -617,7 +617,7 @@ function initBoundaryMap(units) {
   const el = document.getElementById('kk-zone-map')
   if (!el || !window.L) return
 
-  const map = window.L.map('kk-zone-map', { zoomControl:true }).setView([43.75,-79.5], 9)
+  const map = window.L.map('kk-zone-map', { zoomControl:true }).setView([43.85,-79.5], 9)
   window._kkMap = map
 
   window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -625,84 +625,62 @@ function initBoundaryMap(units) {
   }).addTo(map)
 
   const ZONE_CFG = {
-    City:  { color:'#7F77DD', fill:'#EEEDFE', munis:['toronto'] },
-    West:  { color:'#EF9F27', fill:'#FAEEDA', munis:['mississauga','brampton','oakville','burlington','hamilton','milton','halton hills','grimsby','lincoln','pelham','welland','niagara falls','st. catharines','ancaster','waterdown','dundas','caledon'] },
-    North: { color:'#1D9E75', fill:'#E1F5EE', munis:['vaughan','markham','richmond hill','aurora','newmarket','barrie','king','east gwillimbury','georgina','bradford','innisfil','collingwood','orangeville'] },
-    East:  { color:'#378ADD', fill:'#E6F1FB', munis:['oshawa','ajax','pickering','whitby','clarington','cobourg','port hope','kingston'] },
-    ONFC:  { color:'#E24B4A', fill:'#FCEBEB', munis:[] },
+    City:  { color:'#7F77DD', fill:'#EEEDFE' },
+    West:  { color:'#EF9F27', fill:'#FAEEDA' },
+    North: { color:'#1D9E75', fill:'#E1F5EE' },
+    East:  { color:'#378ADD', fill:'#E6F1FB' },
+    ONFC:  { color:'#E24B4A', fill:'#FCEBEB' },
   }
 
-  const muniZoneMap = {}
-  Object.entries(ZONE_CFG).forEach(([zone, cfg]) => {
-    cfg.munis.forEach(m => { muniZoneMap[m] = zone })
-  })
+  // Embedded GeoJSON — no external fetch needed
+  const geoData = {"type":"FeatureCollection","features":[
+    {"type":"Feature","properties":{"name":"Toronto","zone":"City"},"geometry":{"type":"Polygon","coordinates":[[[-79.639,43.580],[-79.115,43.580],[-79.115,43.855],[-79.639,43.855],[-79.639,43.580]]]}},
+    {"type":"Feature","properties":{"name":"Mississauga","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-79.900,43.440],[-79.550,43.440],[-79.550,43.680],[-79.900,43.680],[-79.900,43.440]]]}},
+    {"type":"Feature","properties":{"name":"Brampton","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-79.900,43.680],[-79.550,43.680],[-79.550,43.820],[-79.900,43.820],[-79.900,43.680]]]}},
+    {"type":"Feature","properties":{"name":"Oakville","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.000,43.380],[-79.600,43.380],[-79.600,43.500],[-80.000,43.500],[-80.000,43.380]]]}},
+    {"type":"Feature","properties":{"name":"Burlington","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.100,43.300],[-79.700,43.300],[-79.700,43.420],[-80.100,43.420],[-80.100,43.300]]]}},
+    {"type":"Feature","properties":{"name":"Hamilton","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.300,43.200],[-79.700,43.200],[-79.700,43.350],[-80.300,43.350],[-80.300,43.200]]]}},
+    {"type":"Feature","properties":{"name":"Milton","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.100,43.480],[-79.800,43.480],[-79.800,43.600],[-80.100,43.600],[-80.100,43.480]]]}},
+    {"type":"Feature","properties":{"name":"Caledon","zone":"West"},"geometry":{"type":"Polygon","coordinates":[[[-80.100,43.820],[-79.800,43.820],[-79.800,44.050],[-80.100,44.050],[-80.100,43.820]]]}},
+    {"type":"Feature","properties":{"name":"Vaughan","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.900,43.820],[-79.450,43.820],[-79.450,43.990],[-79.900,43.990],[-79.900,43.820]]]}},
+    {"type":"Feature","properties":{"name":"Markham","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.450,43.820],[-79.150,43.820],[-79.150,44.040],[-79.450,44.040],[-79.450,43.820]]]}},
+    {"type":"Feature","properties":{"name":"Richmond Hill","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.550,43.990],[-79.300,43.990],[-79.300,44.080],[-79.550,44.080],[-79.550,43.990]]]}},
+    {"type":"Feature","properties":{"name":"Aurora","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.600,44.080],[-79.380,44.080],[-79.380,44.180],[-79.600,44.180],[-79.600,44.080]]]}},
+    {"type":"Feature","properties":{"name":"Newmarket","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.600,44.180],[-79.380,44.180],[-79.380,44.280],[-79.600,44.280],[-79.600,44.180]]]}},
+    {"type":"Feature","properties":{"name":"Barrie","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-79.800,44.280],[-79.500,44.280],[-79.500,44.500],[-79.800,44.500],[-79.800,44.280]]]}},
+    {"type":"Feature","properties":{"name":"Collingwood","zone":"North"},"geometry":{"type":"Polygon","coordinates":[[[-80.400,44.400],[-80.000,44.400],[-80.000,44.600],[-80.400,44.600],[-80.400,44.400]]]}},
+    {"type":"Feature","properties":{"name":"Oshawa","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-79.000,43.820],[-78.750,43.820],[-78.750,44.000],[-79.000,44.000],[-79.000,43.820]]]}},
+    {"type":"Feature","properties":{"name":"Whitby","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-79.150,43.820],[-79.000,43.820],[-79.000,44.000],[-79.150,44.000],[-79.150,43.820]]]}},
+    {"type":"Feature","properties":{"name":"Ajax","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-79.300,43.700],[-79.000,43.700],[-79.000,43.870],[-79.300,43.870],[-79.300,43.700]]]}},
+    {"type":"Feature","properties":{"name":"Pickering","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-79.300,43.820],[-79.150,43.820],[-79.150,44.050],[-79.300,44.050],[-79.300,43.820]]]}},
+    {"type":"Feature","properties":{"name":"Cobourg","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-78.250,43.920],[-77.900,43.920],[-77.900,44.100],[-78.250,44.100],[-78.250,43.920]]]}},
+    {"type":"Feature","properties":{"name":"Kingston","zone":"East"},"geometry":{"type":"Polygon","coordinates":[[[-76.700,44.150],[-76.300,44.150],[-76.300,44.400],[-76.700,44.400],[-76.700,44.150]]]}}
+  ]}
 
-  function getZone(name) {
-    if (!name) return null
-    const n = name.toLowerCase()
-    for (const [key, zone] of Object.entries(muniZoneMap)) {
-      if (n.includes(key)) return zone
+  window.L.geoJSON(geoData, {
+    style: function(feature) {
+      const zone = feature.properties.zone
+      const cfg = ZONE_CFG[zone]
+      if (!cfg) return { color:'#ccc', weight:1, fillColor:'#f0f0f0', fillOpacity:0.3 }
+      return { color:cfg.color, weight:2, fillColor:cfg.fill, fillOpacity:0.55 }
+    },
+    onEachFeature: function(feature, layer) {
+      const zone = feature.properties.zone
+      const name = feature.properties.name
+      const cfg = ZONE_CFG[zone]
+      if (cfg) {
+        const u = (units[zone] || 0).toLocaleString()
+        layer.bindTooltip(
+          '<strong>' + name + '</strong><br>' +
+          '<span style="color:' + cfg.color + '">' + zone + ' zone</span><br>' +
+          u + ' units this month',
+          { sticky:true }
+        )
+        layer.on('mouseover', function() { this.setStyle({ weight:3, fillOpacity:0.75 }) })
+        layer.on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity:0.55 }) })
+      }
     }
-    return null
-  }
-
-  const geoSources = [
-    'https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/canada.geojson',
-    'https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/ontario.geojson',
-  ]
-
-  function tryLoadGeo(sources, idx) {
-    if (idx >= sources.length) {
-      loadFallbackPolygons()
-      return
-    }
-    fetch(sources[idx])
-      .then(function(r) { if (!r.ok) throw new Error('failed'); return r.json() })
-      .then(function(data) {
-        window.L.geoJSON(data, {
-          style: function(feature) {
-            const name = feature.properties.name || feature.properties.NAME || ''
-            const zone = getZone(name)
-            if (!zone) return { color:'#ccc', weight:0.5, fillColor:'#f0f0f0', fillOpacity:0.2 }
-            const cfg = ZONE_CFG[zone]
-            return { color:cfg.color, weight:2, fillColor:cfg.fill, fillOpacity:0.55 }
-          },
-          onEachFeature: function(feature, layer) {
-            const name = feature.properties.name || feature.properties.NAME || ''
-            const zone = getZone(name)
-            if (zone) {
-              const u = (units[zone] || 0).toLocaleString()
-              layer.bindTooltip(
-                '<strong>' + name + '</strong><br>' +
-                '<span style="color:' + ZONE_CFG[zone].color + '">' + zone + ' zone</span><br>' +
-                '<span>' + u + ' units this month</span>',
-                { sticky:true }
-              )
-              layer.on('mouseover', function() { this.setStyle({ weight:3, fillOpacity:0.75 }) })
-              layer.on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity:0.55 }) })
-            }
-          }
-        }).addTo(map)
-      })
-      .catch(function() { tryLoadGeo(sources, idx + 1) })
-  }
-
-  tryLoadGeo(geoSources, 0)
+  }).addTo(map)
 }
 
-function loadFallbackPolygons() {
-  // Fallback: draw approximate zone polygons manually if GeoJSON fails
-  if (!window.L || !window._kkMap) return
-  const map = window._kkMap
-  const zones = [
-    { key:'City',  color:'#7F77DD', fill:'#EEEDFE', coords:[[43.855,-79.639],[43.855,-79.115],[43.581,-79.115],[43.581,-79.639]] },
-    { key:'West',  color:'#EF9F27', fill:'#FAEEDA', coords:[[43.95,-80.5],[43.95,-79.639],[43.3,-79.639],[43.3,-80.5]] },
-    { key:'North', color:'#1D9E75', fill:'#E1F5EE', coords:[[44.8,-80.5],[44.8,-79.0],[43.855,-79.0],[43.855,-80.5]] },
-    { key:'East',  color:'#378ADD', fill:'#E6F1FB', coords:[[44.4,-79.115],[44.4,-76.5],[43.5,-76.5],[43.5,-79.115]] },
-  ]
-  zones.forEach(z => {
-    window.L.polygon(z.coords, {
-      color: z.color, weight: 2, fillColor: z.fill, fillOpacity: 0.45
-    }).addTo(map).bindTooltip('<strong style="color:' + z.color + '">' + z.key + ' Zone</strong>', { sticky:true })
-  })
-}
+

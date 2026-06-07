@@ -72,8 +72,7 @@ export default function Dashboard() {
         supabase.from('activity').select('*').order('created_at',{ ascending:false }).limit(6),
         supabase.from('orders').select('id,customer_name,dispatch_date,order_items(id)')
           .eq('dispatch_date', tomorrow).neq('status','archived'),
-        supabase.from('orders').select('id,dispatch_date')
-          .gte('dispatch_date', weekStart).lte('dispatch_date', weekEnd).neq('status','archived'),
+        supabase.from('orders').select('id').eq('status','order_sheet'),
         supabase.from('customers').select('name,zone,dispatch_day').not('zone','is',null),
       ])
 
@@ -161,22 +160,36 @@ export default function Dashboard() {
         }))
       }
 
-      // Zone units from dispatch_items this month
+      // Zone units — get dispatches this month first, then join dispatch_items
       const zoneMap = { City:0, West:0, North:0, East:0, ONFC:0 }
       const custZoneMap = {}
       ;(custRes.data || []).forEach(c => { if (c.zone) custZoneMap[c.name] = c.zone })
 
-      const { data: zoneDisp } = await supabase
-        .from('dispatch_items')
-        .select('units_dispatched,dispatches(date,customer_name)')
-        .gte('dispatches.date', monthStart)
+      const { data: monthDispatches } = await supabase
+        .from('dispatches')
+        .select('id, customer_name')
+        .gte('date', monthStart)
 
-      ;(zoneDisp || []).forEach(item => {
-        const cname = item.dispatches?.customer_name
-        const zone = custZoneMap[cname]
-        if (zone && zoneMap[zone] !== undefined) zoneMap[zone] += item.units_dispatched || 0
-        else if (cname?.toLowerCase().includes('ontario natural food')) zoneMap['ONFC'] += item.units_dispatched || 0
-      })
+      if (monthDispatches && monthDispatches.length > 0) {
+        const dispatchIds = monthDispatches.map(d => d.id)
+        const dispatchCustMap = {}
+        monthDispatches.forEach(d => { dispatchCustMap[d.id] = d.customer_name })
+
+        const { data: zoneItems } = await supabase
+          .from('dispatch_items')
+          .select('dispatch_id, units_dispatched')
+          .in('dispatch_id', dispatchIds)
+
+        ;(zoneItems || []).forEach(item => {
+          const cname = dispatchCustMap[item.dispatch_id]
+          const zone = custZoneMap[cname]
+          if (zone && zoneMap[zone] !== undefined) {
+            zoneMap[zone] += item.units_dispatched || 0
+          } else if (cname && cname.toLowerCase().includes('ontario natural food')) {
+            zoneMap['ONFC'] += item.units_dispatched || 0
+          }
+        })
+      }
       setMapUnits(zoneMap)
 
     } catch(e) { console.error(e) }
@@ -237,9 +250,9 @@ export default function Dashboard() {
             <div className="stat-sub">{stats.outRM} out · {stats.lowRM} low · tap to view</div>
           </div>
           <div className="stat" style={{ borderTop:'3px solid var(--blue)' }}>
-            <div className="stat-label">Orders This Week</div>
+            <div className="stat-label">Pending Dispatch</div>
             <div className="stat-value" style={{ color:'var(--blue)' }}>{stats.weekOrders}</div>
-            <div className="stat-sub">active orders</div>
+            <div className="stat-sub">yet to be dispatched</div>
           </div>
           <div className="stat" style={{ borderTop:'3px solid var(--kk-green)', cursor:'pointer' }} onClick={() => navigate('/orders')}>
             <div className="stat-label">Pack Today</div>

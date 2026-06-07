@@ -657,36 +657,34 @@ function initBoundaryMap(units) {
       return
     }
     fetch(sources[idx])
-      .then(r => { if (!r.ok) throw new Error('failed'); return r.json() })
-      .then(data => {
+      .then(function(r) { if (!r.ok) throw new Error('failed'); return r.json() })
+      .then(function(data) {
         window.L.geoJSON(data, {
-        style: feature => {
-          const name = feature.properties.name || feature.properties.NAME || ''
-          const zone = getZone(name)
-          if (!zone) return { color:'#ccc', weight:0.5, fillColor:'#f0f0f0', fillOpacity:0.2 }
-          const cfg = ZONE_CFG[zone]
-          return { color:cfg.color, weight:2, fillColor:cfg.fill, fillOpacity:0.55 }
-        },
-        onEachFeature: (feature, layer) => {
-          const name = feature.properties.name || feature.properties.NAME || ''
-          const zone = getZone(name)
-          if (zone) {
-            const u = (units[zone] || 0).toLocaleString()
-            layer.bindTooltip(
-              '<strong>' + name + '</strong><br>' +
-              '<span style="color:' + ZONE_CFG[zone].color + '">' + zone + ' zone</span><br>' +
-              '<span>' + u + ' units this month</span>',
-              { sticky:true }
-            )
-            layer.on('mouseover', function() { this.setStyle({ weight:3, fillOpacity:0.75 }) })
-            layer.on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity:0.55 }) })
+          style: function(feature) {
+            const name = feature.properties.name || feature.properties.NAME || ''
+            const zone = getZone(name)
+            if (!zone) return { color:'#ccc', weight:0.5, fillColor:'#f0f0f0', fillOpacity:0.2 }
+            const cfg = ZONE_CFG[zone]
+            return { color:cfg.color, weight:2, fillColor:cfg.fill, fillOpacity:0.55 }
+          },
+          onEachFeature: function(feature, layer) {
+            const name = feature.properties.name || feature.properties.NAME || ''
+            const zone = getZone(name)
+            if (zone) {
+              const u = (units[zone] || 0).toLocaleString()
+              layer.bindTooltip(
+                '<strong>' + name + '</strong><br>' +
+                '<span style="color:' + ZONE_CFG[zone].color + '">' + zone + ' zone</span><br>' +
+                '<span>' + u + ' units this month</span>',
+                { sticky:true }
+              )
+              layer.on('mouseover', function() { this.setStyle({ weight:3, fillOpacity:0.75 }) })
+              layer.on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity:0.55 }) })
+            }
           }
-        }
-      }).addTo(map)
-    })
-          .catch(() => tryLoadGeo(sources, idx + 1))
+        }).addTo(map)
       })
-      .catch(() => tryLoadGeo(sources, idx + 1))
+      .catch(function() { tryLoadGeo(sources, idx + 1) })
   }
 
   tryLoadGeo(geoSources, 0)

@@ -361,14 +361,14 @@ export default function Dashboard() {
               { key:'North', label:'North', color:'#1D9E75', bg:'#E1F5EE', tc:'#085041' },
               { key:'East',  label:'East',  color:'#378ADD', bg:'#E6F1FB', tc:'#0C447C' },
             ].map(z => {
-              const maxU = Math.max(...Object.values(mapUnits), 1)
+              const maxU = Math.max(...Object.values(mapUnits).map(v => (v||{}).units||0), 1)
               return (
                 <div key={z.key}
                   style={{ background:'var(--surface)', border:'0.5px solid var(--border)', borderRadius:6, padding:'7px 10px', cursor:'pointer' }}
-                  onClick={() => { if (window._kkMap) { const c={City:[43.653,-79.383,11],West:[43.48,-79.85,9],ONFC:[43.72,-79.42,11],North:[44.05,-79.50,9],East:[43.88,-78.85,9]}; const [lat,lng,zoom]=c[z.key]||[43.7,-79.4,10]; window._kkMap.flyTo([lat,lng],zoom,{duration:1.2}) }}}>
+                  onClick={() => { if (window._kkMap) { const c={City:[43.653,-79.383,11],West:[43.38,-80.05,9],ONFC:[43.72,-79.42,11],North:[44.05,-79.50,9],East:[43.88,-78.85,9]}; const [lat,lng,zoom]=c[z.key]||[43.7,-79.4,10]; window._kkMap.flyTo([lat,lng],zoom,{duration:1.2}) }}}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
                     <span style={{ fontSize:10, fontWeight:500, letterSpacing:'0.5px', textTransform:'uppercase', color:z.tc }}>{z.label}</span>
-                    <span style={{ fontSize:13, fontWeight:500, color:z.tc }}>{(mapUnits[z.key]||0).toLocaleString()}</span>
+                    <span style={{ fontSize:13, fontWeight:500, color:z.tc }}>{((mapUnits[z.key]||{}).units||0).toLocaleString() + ' u / ' + ((mapUnits[z.key]||{}).orders||0) + ' ord'}</span>
                   </div>
                   <div style={{ height:3, background:z.bg, borderRadius:2, marginTop:5 }}>
                     <div style={{ height:3, width: (mapUnits[z.key]||{}).units > 0 ? Math.round(((mapUnits[z.key]||{}).units/Math.max(...Object.values(mapUnits).map(v=>(v||{}).units||0),1))*100)+'%' : '10%', background:z.color, borderRadius:2 }} />
@@ -660,10 +660,10 @@ export default function Dashboard() {
                       }
                     }}>
                     <div style={{ fontSize:10, fontWeight:500, letterSpacing:'1px', textTransform:'uppercase', color:z.textColor }}>{z.label} · {z.day}</div>
-                    <div style={{ fontSize:22, fontWeight:500, color:z.textColor, lineHeight:1.2 }}>{(mapUnits[z.key]||0).toLocaleString()}</div>
+                    <div style={{ fontSize:22, fontWeight:500, color:z.textColor, lineHeight:1.2 }}>{((mapUnits[z.key]||{}).units||0).toLocaleString() + ' u / ' + ((mapUnits[z.key]||{}).orders||0) + ' ord'}</div>
                     <div style={{ fontSize:11, color:'var(--ink3)' }}>units dispatched</div>
                     <div style={{ height:4, background:z.bg, borderRadius:2, marginTop:6 }}>
-                      <div style={{ height:4, width: mapUnits[z.key] > 0 ? Math.round((mapUnits[z.key] / Math.max(...Object.values(mapUnits),1)) * 100) + '%' : z.pct+'%', background:z.color, borderRadius:2 }} />
+                      <div style={{ height:4, width: (mapUnits[z.key]||{}).units > 0 ? Math.round(((mapUnits[z.key]||{}).units / Math.max(...Object.values(mapUnits).map(v=>(v||{}).units||0),1)) * 100) + '%' : '10%', background:z.color, borderRadius:2 }} />
                     </div>
                   </div>
                 ))}
@@ -710,7 +710,7 @@ function initBoundaryMap(units, metric) {
   const zones = [
     { key:'City',  label:'City',        lat:43.680, lng:-79.380, color:'#7F77DD', fill:'#EEEDFE' },
     { key:'North', label:'North',       lat:44.100, lng:-79.480, color:'#1D9E75', fill:'#E1F5EE' },
-    { key:'West',  label:'West',        lat:43.450, lng:-79.820, color:'#EF9F27', fill:'#FAEEDA' },
+    { key:'West',  label:'West',        lat:43.380, lng:-80.050, color:'#EF9F27', fill:'#FAEEDA' },
     { key:'East',  label:'East',        lat:43.880, lng:-78.820, color:'#378ADD', fill:'#E6F1FB' },
     { key:'ONFC',  label:'ONFC',        lat:43.580, lng:-79.720, color:'#E24B4A', fill:'#FCEBEB' },
   ]

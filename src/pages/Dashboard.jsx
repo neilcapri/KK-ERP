@@ -274,19 +274,19 @@ export default function Dashboard() {
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             <div style={{ fontSize:10, letterSpacing:'1.5px', textTransform:'uppercase', color:'var(--ink3)', marginBottom:2 }}>Zones · this month</div>
             {[
-              { key:'City',  label:'City',  day:'Fri',  color:'#7F77DD', bg:'#EEEDFE', tc:'#3C3489' },
-              { key:'West',  label:'West',  day:'Thu',  color:'#EF9F27', bg:'#FAEEDA', tc:'#633806' },
-              { key:'ONFC',  label:'ONFC',  day:'Mon',  color:'#E24B4A', bg:'#FCEBEB', tc:'#791F1F' },
-              { key:'North', label:'North', day:'Wed',  color:'#1D9E75', bg:'#E1F5EE', tc:'#085041' },
-              { key:'East',  label:'East',  day:'Wed',  color:'#378ADD', bg:'#E6F1FB', tc:'#0C447C' },
+              { key:'City',  label:'City',  color:'#7F77DD', bg:'#EEEDFE', tc:'#3C3489' },
+              { key:'West',  label:'West',  color:'#EF9F27', bg:'#FAEEDA', tc:'#633806' },
+              { key:'ONFC',  label:'ONFC',  color:'#E24B4A', bg:'#FCEBEB', tc:'#791F1F' },
+              { key:'North', label:'North', color:'#1D9E75', bg:'#E1F5EE', tc:'#085041' },
+              { key:'East',  label:'East',  color:'#378ADD', bg:'#E6F1FB', tc:'#0C447C' },
             ].map(z => {
               const maxU = Math.max(...Object.values(mapUnits), 1)
               return (
                 <div key={z.key}
                   style={{ background:'var(--surface)', border:'0.5px solid var(--border)', borderRadius:6, padding:'7px 10px', cursor:'pointer' }}
-                  onClick={() => { if (window._kkMap) { const c={City:[43.653,-79.383,12],West:[43.48,-79.85,10],ONFC:[43.72,-79.42,13],North:[44.05,-79.50,10],East:[43.88,-78.85,10]}; const [lat,lng,zoom]=c[z.key]||[43.7,-79.4,10]; window._kkMap.flyTo([lat,lng],zoom,{duration:1.2}) }}}>
+                  onClick={() => { if (window._kkMap) { const c={City:[43.653,-79.383,11],West:[43.48,-79.85,9],ONFC:[43.72,-79.42,11],North:[44.05,-79.50,9],East:[43.88,-78.85,9]}; const [lat,lng,zoom]=c[z.key]||[43.7,-79.4,10]; window._kkMap.flyTo([lat,lng],zoom,{duration:1.2}) }}}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
-                    <span style={{ fontSize:10, fontWeight:500, letterSpacing:'0.5px', textTransform:'uppercase', color:z.tc }}>{z.label} · {z.day}</span>
+                    <span style={{ fontSize:10, fontWeight:500, letterSpacing:'0.5px', textTransform:'uppercase', color:z.tc }}>{z.label}</span>
                     <span style={{ fontSize:13, fontWeight:500, color:z.tc }}>{(mapUnits[z.key]||0).toLocaleString()}</span>
                   </div>
                   <div style={{ height:3, background:z.bg, borderRadius:2, marginTop:5 }}>
@@ -597,42 +597,82 @@ export default function Dashboard() {
   )
 }
 
-function MapLoader({ units, height = 460 }) {
+function MapLoader({ units, height = 300 }) {
   useEffect(() => {
     if (document.getElementById('leaflet-js')) {
-      initMap(units, height)
+      setTimeout(() => initBoundaryMap(units), 100)
       return
     }
     const script = document.createElement('script')
     script.id = 'leaflet-js'
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload = () => initMap(units, height)
+    script.onload = () => initBoundaryMap(units)
     document.head.appendChild(script)
   }, [units])
   return null
 }
 
-function initMap(units, height) {
+function initBoundaryMap(units) {
   if (window._kkMap) { window._kkMap.remove(); window._kkMap = null }
   const el = document.getElementById('kk-zone-map')
   if (!el || !window.L) return
-  const map = window.L.map('kk-zone-map', { zoomControl:true }).setView([43.75,-79.5], 10)
+
+  const map = window.L.map('kk-zone-map', { zoomControl:true }).setView([43.75,-79.5], 9)
   window._kkMap = map
+
   window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '\u00a9 OpenStreetMap contributors', maxZoom:18
   }).addTo(map)
-  const zones = [
-    { key:'City',  lat:43.653, lng:-79.383, color:'#7F77DD', fill:'#EEEDFE', day:'Friday',    r:36 },
-    { key:'ONFC',  lat:43.720, lng:-79.420, color:'#E24B4A', fill:'#FCEBEB', day:'Monday',    r:28 },
-    { key:'West',  lat:43.480, lng:-79.850, color:'#EF9F27', fill:'#FAEEDA', day:'Thursday',  r:34 },
-    { key:'North', lat:44.050, lng:-79.500, color:'#1D9E75', fill:'#E1F5EE', day:'Wednesday', r:24 },
-    { key:'East',  lat:43.880, lng:-78.850, color:'#378ADD', fill:'#E6F1FB', day:'Wednesday', r:18 },
-  ]
-  zones.forEach(z => {
-    const u = (units[z.key] || 0).toLocaleString()
-    window.L.circleMarker([z.lat, z.lng], {
-      radius: z.r, fillColor: z.fill, color: z.color, weight:2.5, fillOpacity:0.85
-    }).addTo(map)
-    .bindPopup('<strong style="color:' + z.color + ';font-size:14px">' + z.key + '</strong><br><span style="font-size:13px">' + u + ' units · ' + z.day + '</span>')
+
+  const ZONE_CFG = {
+    City:  { color:'#7F77DD', fill:'#EEEDFE', munis:['toronto'] },
+    West:  { color:'#EF9F27', fill:'#FAEEDA', munis:['mississauga','brampton','oakville','burlington','hamilton','milton','halton hills','grimsby','lincoln','pelham','welland','niagara falls','st. catharines','ancaster','waterdown','dundas','caledon'] },
+    North: { color:'#1D9E75', fill:'#E1F5EE', munis:['vaughan','markham','richmond hill','aurora','newmarket','barrie','king','east gwillimbury','georgina','bradford','innisfil','collingwood','orangeville'] },
+    East:  { color:'#378ADD', fill:'#E6F1FB', munis:['oshawa','ajax','pickering','whitby','clarington','cobourg','port hope','kingston'] },
+    ONFC:  { color:'#E24B4A', fill:'#FCEBEB', munis:[] },
+  }
+
+  const muniZoneMap = {}
+  Object.entries(ZONE_CFG).forEach(([zone, cfg]) => {
+    cfg.munis.forEach(m => { muniZoneMap[m] = zone })
   })
+
+  function getZone(name) {
+    if (!name) return null
+    const n = name.toLowerCase()
+    for (const [key, zone] of Object.entries(muniZoneMap)) {
+      if (n.includes(key)) return zone
+    }
+    return null
+  }
+
+  fetch('https://raw.githubusercontent.com/codeforgermany/click_that_hood/main/public/data/ontario.geojson')
+    .then(r => r.json())
+    .then(data => {
+      window.L.geoJSON(data, {
+        style: feature => {
+          const name = feature.properties.name || feature.properties.NAME || ''
+          const zone = getZone(name)
+          if (!zone) return { color:'#ccc', weight:0.5, fillColor:'#f0f0f0', fillOpacity:0.2 }
+          const cfg = ZONE_CFG[zone]
+          return { color:cfg.color, weight:2, fillColor:cfg.fill, fillOpacity:0.55 }
+        },
+        onEachFeature: (feature, layer) => {
+          const name = feature.properties.name || feature.properties.NAME || ''
+          const zone = getZone(name)
+          if (zone) {
+            const u = (units[zone] || 0).toLocaleString()
+            layer.bindTooltip(
+              '<strong>' + name + '</strong><br>' +
+              '<span style="color:' + ZONE_CFG[zone].color + '">' + zone + ' zone</span><br>' +
+              '<span>' + u + ' units this month</span>',
+              { sticky:true }
+            )
+            layer.on('mouseover', function() { this.setStyle({ weight:3, fillOpacity:0.75 }) })
+            layer.on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity:0.55 }) })
+          }
+        }
+      }).addTo(map)
+    })
+    .catch(err => console.log('GeoJSON load failed:', err))
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
+import gtaZones from '../data/gta-zones.json'
 
 const ZONE_COLORS = {
   North:  { bg: '#E1F5EE', color: '#085041' },
@@ -636,7 +637,7 @@ export default function Dashboard() {
 function MapLoader({ units, height = 300 }) {
   useEffect(() => {
     if (document.getElementById('leaflet-js')) {
-      setTimeout(() => initBoundaryMap(units), 100)
+      setTimeout(() => initBoundaryMap(units, gtaZones), 100)
       return
     }
     const script = document.createElement('script')
@@ -648,7 +649,7 @@ function MapLoader({ units, height = 300 }) {
   return null
 }
 
-function initBoundaryMap(units) {
+function initBoundaryMap(units, geoData) {
   if (window._kkMap) { window._kkMap.remove(); window._kkMap = null }
   const el = document.getElementById('kk-zone-map')
   if (!el || !window.L) return
@@ -670,114 +671,32 @@ function initBoundaryMap(units) {
 
   const maxOrders = Math.max.apply(null, Object.values(units).concat([1]))
 
-  // Real simplified boundary polygons for GTA municipalities
-  // Coordinates from OpenStreetMap (simplified for performance)
-  const municipalities = [
-    { name:'Toronto', zone:'City', coords:[
-      [43.5810,-79.6393],[43.5810,-79.1152],[43.8554,-79.1152],[43.8554,-79.6393]
-    ]},
-    { name:'Mississauga', zone:'West', coords:[
-      [43.4400,-79.9000],[43.4400,-79.4900],[43.7300,-79.4900],[43.7300,-79.9000]
-    ]},
-    { name:'Brampton', zone:'West', coords:[
-      [43.6200,-79.9200],[43.6200,-79.6000],[43.8200,-79.6000],[43.8200,-79.9200]
-    ]},
-    { name:'Oakville', zone:'West', coords:[
-      [43.3800,-80.0200],[43.3800,-79.5500],[43.5200,-79.5500],[43.5200,-80.0200]
-    ]},
-    { name:'Burlington', zone:'West', coords:[
-      [43.2800,-80.1000],[43.2800,-79.7200],[43.4300,-79.7200],[43.4300,-80.1000]
-    ]},
-    { name:'Hamilton', zone:'West', coords:[
-      [43.1500,-80.2500],[43.1500,-79.6200],[43.3500,-79.6200],[43.3500,-80.2500]
-    ]},
-    { name:'Milton', zone:'West', coords:[
-      [43.4600,-80.1300],[43.4600,-79.7800],[43.6200,-79.7800],[43.6200,-80.1300]
-    ]},
-    { name:'Halton Hills', zone:'West', coords:[
-      [43.5800,-80.0500],[43.5800,-79.8500],[43.7500,-79.8500],[43.7500,-80.0500]
-    ]},
-    { name:'Grimsby', zone:'West', coords:[
-      [43.1800,-79.6200],[43.1800,-79.4500],[43.2800,-79.4500],[43.2800,-79.6200]
-    ]},
-    { name:'St. Catharines', zone:'West', coords:[
-      [43.1000,-79.3000],[43.1000,-79.1200],[43.2200,-79.1200],[43.2200,-79.3000]
-    ]},
-    { name:'Vaughan', zone:'North', coords:[
-      [43.8200,-79.9000],[43.8200,-79.4500],[43.9900,-79.4500],[43.9900,-79.9000]
-    ]},
-    { name:'Markham', zone:'North', coords:[
-      [43.8200,-79.4500],[43.8200,-79.1500],[44.0400,-79.1500],[44.0400,-79.4500]
-    ]},
-    { name:'Richmond Hill', zone:'North', coords:[
-      [43.9900,-79.5500],[43.9900,-79.3000],[44.0800,-79.3000],[44.0800,-79.5500]
-    ]},
-    { name:'Aurora', zone:'North', coords:[
-      [44.0800,-79.6000],[44.0800,-79.3800],[44.1800,-79.3800],[44.1800,-79.6000]
-    ]},
-    { name:'Newmarket', zone:'North', coords:[
-      [44.1800,-79.6000],[44.1800,-79.3800],[44.2800,-79.3800],[44.2800,-79.6000]
-    ]},
-    { name:'King Township', zone:'North', coords:[
-      [43.9900,-79.9000],[43.9900,-79.6000],[44.1500,-79.6000],[44.1500,-79.9000]
-    ]},
-    { name:'East Gwillimbury', zone:'North', coords:[
-      [44.1500,-79.6500],[44.1500,-79.3000],[44.3500,-79.3000],[44.3500,-79.6500]
-    ]},
-    { name:'Barrie', zone:'North', coords:[
-      [44.2800,-79.8000],[44.2800,-79.5000],[44.5000,-79.5000],[44.5000,-79.8000]
-    ]},
-    { name:'Orangeville', zone:'North', coords:[
-      [43.9000,-80.2000],[43.9000,-79.9500],[44.1000,-79.9500],[44.1000,-80.2000]
-    ]},
-    { name:'Collingwood', zone:'North', coords:[
-      [44.4000,-80.4000],[44.4000,-80.0000],[44.6000,-80.0000],[44.6000,-80.4000]
-    ]},
-    { name:'Oshawa', zone:'East', coords:[
-      [43.8200,-79.0000],[43.8200,-78.7500],[44.0000,-78.7500],[44.0000,-79.0000]
-    ]},
-    { name:'Whitby', zone:'East', coords:[
-      [43.8200,-79.1500],[43.8200,-79.0000],[44.0000,-79.0000],[44.0000,-79.1500]
-    ]},
-    { name:'Ajax', zone:'East', coords:[
-      [43.7000,-79.3000],[43.7000,-79.0000],[43.8700,-79.0000],[43.8700,-79.3000]
-    ]},
-    { name:'Pickering', zone:'East', coords:[
-      [43.8200,-79.3000],[43.8200,-79.1500],[44.0500,-79.1500],[44.0500,-79.3000]
-    ]},
-    { name:'Clarington', zone:'East', coords:[
-      [43.8000,-78.7500],[43.8000,-78.3500],[44.1500,-78.3500],[44.1500,-78.7500]
-    ]},
-    { name:'Cobourg', zone:'East', coords:[
-      [43.9200,-78.2500],[43.9200,-77.9000],[44.1000,-77.9000],[44.1000,-78.2500]
-    ]},
-    { name:'Kingston', zone:'East', coords:[
-      [44.1500,-76.7000],[44.1500,-76.3000],[44.4000,-76.3000],[44.4000,-76.7000]
-    ]},
-  ]
-
-  municipalities.forEach(function(muni) {
-    const zone = muni.zone
-    const cfg = ZONE_CFG[zone]
-    if (!cfg) return
-    const orders = units[zone] || 0
-    const intensity = maxOrders > 0 ? 0.3 + (orders / maxOrders) * 0.5 : 0.4
-
-    window.L.polygon(muni.coords, {
-      color: cfg.color,
-      weight: 2,
-      fillColor: cfg.fill,
-      fillOpacity: intensity,
-    }).addTo(map)
-    .bindTooltip(
-      '<strong>' + muni.name + '</strong><br>' +
-      '<span style="color:' + cfg.color + '">' + zone + ' zone</span><br>' +
-      orders + ' orders received',
-      { sticky: true }
-    )
-    .on('mouseover', function() { this.setStyle({ weight:3, fillOpacity: Math.min(intensity + 0.2, 0.9) }) })
-    .on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity: intensity }) })
-  })
+  window.L.geoJSON(geoData, {
+    style: function(feature) {
+      const zone = feature.properties.zone
+      const cfg = ZONE_CFG[zone]
+      if (!cfg) return { color:'#ccc', weight:1, fillColor:'#f0f0f0', fillOpacity:0.2 }
+      const orders = units[zone] || 0
+      const intensity = maxOrders > 0 ? 0.3 + (orders / maxOrders) * 0.5 : 0.4
+      return { color:cfg.color, weight:2, fillColor:cfg.fill, fillOpacity:intensity }
+    },
+    onEachFeature: function(feature, layer) {
+      const zone = feature.properties.zone
+      const name = feature.properties.name
+      const cfg = ZONE_CFG[zone]
+      if (!cfg) return
+      const orders = units[zone] || 0
+      layer.bindTooltip(
+        '<strong>' + name + '</strong><br>' +
+        '<span style="color:' + cfg.color + '">' + zone + ' zone</span><br>' +
+        orders + ' orders received',
+        { sticky: true }
+      )
+      const baseOpacity = Math.max(0.3 + (orders / Math.max(maxOrders, 1)) * 0.5, 0.3)
+      layer.on('mouseover', function() { this.setStyle({ weight:3, fillOpacity: Math.min(baseOpacity + 0.2, 0.9) }) })
+      layer.on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity: baseOpacity }) })
+    }
+  }).addTo(map)
 }
 
 

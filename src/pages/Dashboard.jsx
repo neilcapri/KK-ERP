@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
-import gtaZones from '../data/gta-zones.json'
 
 const ZONE_COLORS = {
   North:  { bg: '#E1F5EE', color: '#085041' },
@@ -53,8 +52,9 @@ export default function Dashboard() {
   const [topSKUs, setTopSKUs]       = useState([])
   const [topCustomers, setTopCustomers] = useState([])
   const [weeklyRevenue, setWeeklyRevenue] = useState([])
-  const [mapUnits, setMapUnits] = useState({ City:0, West:0, North:0, East:0, ONFC:0 })
+  const [mapUnits, setMapUnits] = useState({ City:{units:0,orders:0}, West:{units:0,orders:0}, North:{units:0,orders:0}, East:{units:0,orders:0}, ONFC:{units:0,orders:0} })
   const [mapRange, setMapRange] = useState('month')
+  const [mapMetric, setMapMetric] = useState('units')
   const [mapLoading, setMapLoading] = useState(false)
 
   useEffect(() => { loadDashboard() }, [])
@@ -200,25 +200,56 @@ export default function Dashboard() {
         customers.forEach(c => { if (c.zone) custZoneMap[c.name] = c.zone })
       }
 
-      const zoneMap = { City:0, West:0, North:0, East:0, ONFC:0 }
+      const zoneOrders = { City:0, West:0, North:0, East:0, ONFC:0 }
+      const zoneUnits  = { City:0, West:0, North:0, East:0, ONFC:0 }
 
-      // Count orders received (not dispatches) per zone
-      const { data: zoneOrders } = await supabase
+      // Orders received per zone
+      const { data: ordersData } = await supabase
         .from('orders')
         .select('customer_name')
         .gte('created_at', sinceStr)
         .neq('status','archived')
 
-      ;(zoneOrders || []).forEach(o => {
+      ;(ordersData || []).forEach(o => {
         const zone = custZoneMap[o.customer_name]
-        if (zone && zoneMap[zone] !== undefined) {
-          zoneMap[zone]++
+        if (zone && zoneOrders[zone] !== undefined) {
+          zoneOrders[zone]++
         } else if (o.customer_name && o.customer_name.toLowerCase().includes('ontario natural food')) {
-          zoneMap['ONFC']++
+          zoneOrders['ONFC']++
         }
       })
 
-      setMapUnits(zoneMap)
+      // Units dispatched per zone
+      const { data: monthDispatches } = await supabase
+        .from('dispatches')
+        .select('id, customer_name')
+        .gte('date', sinceStr)
+
+      if (monthDispatches && monthDispatches.length > 0) {
+        const dispatchIds = monthDispatches.map(d => d.id)
+        const dispatchCustMap = {}
+        monthDispatches.forEach(d => { dispatchCustMap[d.id] = d.customer_name })
+        const { data: dispItems } = await supabase
+          .from('dispatch_items')
+          .select('dispatch_id, units_dispatched')
+          .in('dispatch_id', dispatchIds)
+        ;(dispItems || []).forEach(item => {
+          const cname = dispatchCustMap[item.dispatch_id]
+          const zone = custZoneMap[cname]
+          if (zone && zoneUnits[zone] !== undefined) {
+            zoneUnits[zone] += item.units_dispatched || 0
+          } else if (cname && cname.toLowerCase().includes('ontario natural food')) {
+            zoneUnits['ONFC'] += item.units_dispatched || 0
+          }
+        })
+      }
+
+      // Combine into mapUnits: { City: { units, orders }, ... }
+      const combined = {}
+      Object.keys(zoneOrders).forEach(zone => {
+        combined[zone] = { units: zoneUnits[zone] || 0, orders: zoneOrders[zone] || 0 }
+      })
+      setMapUnits(combined)
     } catch(e) { console.error(e) }
     setMapLoading(false)
   }
@@ -304,6 +335,19 @@ export default function Dashboard() {
               fontWeight: mapRange === r.key ? 600 : 400,
             }}>{r.label}</button>
           ))}
+          <span style={{ fontSize:11, color:'var(--ink3)', marginLeft:8 }}>|</span>
+          {[
+            { key:'units',  label:'Units Sold' },
+            { key:'orders', label:'Orders' },
+          ].map(m => (
+            <button key={m.key} onClick={() => setMapMetric(m.key)} style={{
+              padding:'4px 12px', borderRadius:20, border:'1px solid var(--border)', cursor:'pointer',
+              fontSize:11, fontFamily:'var(--display)', letterSpacing:0.5,
+              background: mapMetric === m.key ? 'var(--kk-peach)' : 'var(--surface)',
+              color: mapMetric === m.key ? '#fff' : 'var(--ink3)',
+              fontWeight: mapMetric === m.key ? 600 : 400,
+            }}>{m.label}</button>
+          ))}
           {mapLoading && <span style={{ fontSize:11, color:'var(--ink3)' }}>⏳</span>}
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 180px', gap:12, marginBottom:20, alignItems:'start' }}>
@@ -327,14 +371,14 @@ export default function Dashboard() {
                     <span style={{ fontSize:13, fontWeight:500, color:z.tc }}>{(mapUnits[z.key]||0).toLocaleString()}</span>
                   </div>
                   <div style={{ height:3, background:z.bg, borderRadius:2, marginTop:5 }}>
-                    <div style={{ height:3, width: mapUnits[z.key] > 0 ? Math.round((mapUnits[z.key]/maxU)*100)+'%' : '10%', background:z.color, borderRadius:2 }} />
+                    <div style={{ height:3, width: (mapUnits[z.key]||{}).units > 0 ? Math.round(((mapUnits[z.key]||{}).units/Math.max(...Object.values(mapUnits).map(v=>(v||{}).units||0),1))*100)+'%' : '10%', background:z.color, borderRadius:2 }} />
                   </div>
                 </div>
               )
             })}
           </div>
         </div>
-        <MapLoader units={mapUnits} height={300} />
+        <MapLoader units={mapUnits} metric={mapMetric} height={300} />
 
         {/* ─────────────────────────────────────────── */}
         {/* PERFORMANCE TAB                             */}
@@ -634,69 +678,96 @@ export default function Dashboard() {
   )
 }
 
-function MapLoader({ units, height = 300 }) {
+function MapLoader({ units, metric, height = 300 }) {
   useEffect(() => {
     if (document.getElementById('leaflet-js')) {
-      setTimeout(() => initBoundaryMap(units, gtaZones), 100)
+      setTimeout(() => initBoundaryMap(units, metric), 100)
       return
     }
     const script = document.createElement('script')
     script.id = 'leaflet-js'
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
-    script.onload = () => initBoundaryMap(units)
+    script.onload = () => initBoundaryMap(units, metric)
     document.head.appendChild(script)
-  }, [units])
+  }, [units, metric])
   return null
 }
 
-function initBoundaryMap(units, geoData) {
+function initBoundaryMap(units, metric) {
   if (window._kkMap) { window._kkMap.remove(); window._kkMap = null }
   const el = document.getElementById('kk-zone-map')
   if (!el || !window.L) return
 
-  const map = window.L.map('kk-zone-map', { zoomControl:true }).setView([43.85,-79.5], 9)
+  const map = window.L.map('kk-zone-map', { zoomControl:true }).setView([43.82,-79.55], 9)
   window._kkMap = map
 
   window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '\u00a9 OpenStreetMap contributors', maxZoom:18
   }).addTo(map)
 
-  const ZONE_CFG = {
-    City:  { color:'#7F77DD', fill:'#EEEDFE' },
-    West:  { color:'#EF9F27', fill:'#FAEEDA' },
-    North: { color:'#1D9E75', fill:'#E1F5EE' },
-    East:  { color:'#378ADD', fill:'#E6F1FB' },
-    ONFC:  { color:'#E24B4A', fill:'#FCEBEB' },
-  }
+  // Zone definitions — carefully positioned so circles don't overlap at zoom 9
+  // Each zone has a fixed anchor point well separated from others
+  const zones = [
+    { key:'City',  label:'City',        lat:43.680, lng:-79.380, color:'#7F77DD', fill:'#EEEDFE' },
+    { key:'North', label:'North',       lat:44.100, lng:-79.480, color:'#1D9E75', fill:'#E1F5EE' },
+    { key:'West',  label:'West',        lat:43.450, lng:-79.820, color:'#EF9F27', fill:'#FAEEDA' },
+    { key:'East',  label:'East',        lat:43.880, lng:-78.820, color:'#378ADD', fill:'#E6F1FB' },
+    { key:'ONFC',  label:'ONFC',        lat:43.760, lng:-79.410, color:'#E24B4A', fill:'#FCEBEB' },
+  ]
 
-  const maxOrders = Math.max.apply(null, Object.values(units).concat([1]))
+  const showUnits = metric !== 'orders'
+  const maxVal = showUnits
+    ? Math.max.apply(null, zones.map(z => (units[z.key] || {}).units  || 0).concat([1]))
+    : Math.max.apply(null, zones.map(z => (units[z.key] || {}).orders || 0).concat([1]))
 
-  window.L.geoJSON(geoData, {
-    style: function(feature) {
-      const zone = feature.properties.zone
-      const cfg = ZONE_CFG[zone]
-      if (!cfg) return { color:'#ccc', weight:1, fillColor:'#f0f0f0', fillOpacity:0.2 }
-      const orders = units[zone] || 0
-      const intensity = maxOrders > 0 ? 0.3 + (orders / maxOrders) * 0.5 : 0.4
-      return { color:cfg.color, weight:2, fillColor:cfg.fill, fillOpacity:intensity }
-    },
-    onEachFeature: function(feature, layer) {
-      const zone = feature.properties.zone
-      const name = feature.properties.name
-      const cfg = ZONE_CFG[zone]
-      if (!cfg) return
-      const orders = units[zone] || 0
-      layer.bindTooltip(
-        '<strong>' + name + '</strong><br>' +
-        '<span style="color:' + cfg.color + '">' + zone + ' zone</span><br>' +
-        orders + ' orders received',
-        { sticky: true }
-      )
-      const baseOpacity = Math.max(0.3 + (orders / Math.max(maxOrders, 1)) * 0.5, 0.3)
-      layer.on('mouseover', function() { this.setStyle({ weight:3, fillOpacity: Math.min(baseOpacity + 0.2, 0.9) }) })
-      layer.on('mouseout',  function() { this.setStyle({ weight:2, fillOpacity: baseOpacity }) })
-    }
-  }).addTo(map)
+  zones.forEach(function(z) {
+    const data   = units[z.key] || { units:0, orders:0 }
+    const u      = data.units  || 0
+    const o      = data.orders || 0
+    const metricVal = showUnits ? u : o
+
+    // Radius 20-55px based on selected metric
+    const radius = maxVal > 0 ? Math.round(20 + (metricVal / maxVal) * 35) : 25
+
+    const circle = window.L.circleMarker([z.lat, z.lng], {
+      radius:      radius,
+      fillColor:   z.fill,
+      color:       z.color,
+      weight:      2.5,
+      fillOpacity: 0.80,
+    }).addTo(map)
+
+    circle.bindTooltip(
+      '<div style="text-align:center;min-width:120px">' +
+        '<strong style="font-size:14px;color:' + z.color + '">' + z.label + '</strong><br>' +
+        '<span style="font-size:13px;font-weight:600">' + u.toLocaleString() + ' units sold</span><br>' +
+        '<span style="font-size:12px;color:#555">' + o + ' orders received</span>' +
+      '</div>',
+      { permanent: false, sticky: false, direction: 'top', offset: [0, -radius] }
+    )
+
+    // Add a permanent label inside the circle
+    const icon = window.L.divIcon({
+      className: '',
+      html:
+        '<div style="' +
+          'width:' + (radius*2) + 'px;' +
+          'height:' + (radius*2) + 'px;' +
+          'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+          'pointer-events:none;' +
+        '">' +
+          '<div style="font-size:' + Math.max(9, Math.round(radius * 0.32)) + 'px;font-weight:700;color:' + z.color + ';line-height:1.1">' + z.label + '</div>' +
+          '<div style="font-size:' + Math.max(8, Math.round(radius * 0.30)) + 'px;font-weight:600;color:' + z.color + ';line-height:1.1">' + (showUnits ? u.toLocaleString() + 'u' : o + ' ord') + '</div>' +
+        '</div>',
+      iconSize:   [radius*2, radius*2],
+      iconAnchor: [radius,   radius],
+    })
+
+    window.L.marker([z.lat, z.lng], { icon: icon, interactive: false }).addTo(map)
+
+    circle.on('mouseover', function() { this.setStyle({ weight:4, fillOpacity:0.95 }) })
+    circle.on('mouseout',  function() { this.setStyle({ weight:2.5, fillOpacity:0.80 }) })
+  })
 }
 
 

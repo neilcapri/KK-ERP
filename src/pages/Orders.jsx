@@ -504,8 +504,10 @@ function printDispatchSlip(ordersInput) {
   function renderOrder(order) {
     const itemRows = (order.order_items || []).map(function(item) {
       const isBulk = item.item_type === 'bulk' || (item.product_code && item.product_code.endsWith('Bu'))
-      const cases = item.cases || Math.round(item.quantity / (item.units_per_case || 6))
-      const qtyDisplay = isBulk ? String(item.quantity) : (String(cases) + ' / ' + String(item.quantity))
+      const packs = item.packs
+        || (item.cases ? Math.round(parseFloat(item.cases) * (item.packs_per_case || 6)) : null)
+        || (item.units_per_pack > 1 ? Math.round(item.quantity / item.units_per_pack) : item.quantity)
+      const qtyDisplay = isBulk ? String(item.quantity) : String(packs)
       return '<tr>' +
         '<td>' + (item.product_name || '') + ' <span style="font-weight:700">(' + (item.product_code || '') + ')</span></td>' +
         '<td style="text-align:center;font-weight:900">' + qtyDisplay + '</td>' +

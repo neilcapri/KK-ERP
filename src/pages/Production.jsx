@@ -4,20 +4,19 @@ import { useAuth } from '../context/AuthContext'
 
 const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:54 }
 
-// Pack sizes for display: units per retail pack
 const PACK_SIZE = {
-  PBB:2, PCC:2, KLR:2,          // muffins pack of 2
-  VPCAN:3, PNF:3, VPB:3,        // bars pack of 3
-  KAB:5, KWAL:5, HPCo:5, PVHC:5, KABIS:5,  // cookies pack of 5
-  KSCD:4,                        // cinnamon donuts pack of 4
-  VPBD:2, KHD:2,                 // PB & hazelnut donuts pack of 2
+  PBB:2, PCC:2, KLR:2,
+  VPCAN:3, PNF:3, VPB:3,
+  KAB:5, KWAL:5, HPCo:5, PVHC:5, KABIS:5,
+  KSCD:4,
+  VPBD:2, KHD:2,
 }
 
 function packsDisplay(code, units) {
   const ps = PACK_SIZE[code]
-  if (!ps || !units) return `${units} units`
+  if (!ps || !units) return units + ' units'
   const packs = Math.round(units / ps)
-  return `${units} units = ${packs} packs`
+  return units + ' units = ' + packs + ' packs'
 }
 
 function sellableQty(code, units) {
@@ -41,6 +40,7 @@ export default function Production() {
   const [editRMWarnings, setEditRMWarnings] = useState([])
   const [log, setLog] = useState([])
   const [deletingId, setDeletingId] = useState(null)
+  const [selectedSchedDates, setSelectedSchedDates] = useState(new Set())
 
   const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
   const [schedForm, setSchedForm] = useState({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
@@ -161,13 +161,10 @@ export default function Production() {
     const { data: p } = await supabase.from('products').select('name').eq('code', product_code).single()
     const planned_output = calcOutput(product_code, input_type, planned_input)
     const { error } = await supabase.from('production_schedule').update({
-      scheduled_date,
-      product_code,
+      scheduled_date, product_code,
       product_name: p?.name || product_code,
       planned_input: parseFloat(planned_input) || 0,
-      input_type,
-      planned_output,
-      notes,
+      input_type, planned_output, notes,
     }).eq('id', editingSchedule.id)
     if (error) { alert('Update failed: ' + error.message); return }
     setShowEditModal(false)
@@ -184,11 +181,11 @@ export default function Production() {
     const { code, date, inputType, inputQty, outputUnits, notes } = form
     if (!code || !inputQty || !outputUnits) { alert('Please fill in all fields.'); return }
     const output = parseInt(outputUnits)
-    addLog(`Saving ${code} +${output} units...`)
+    addLog('Saving ' + code + ' +' + output + ' units...')
     const { data: prod } = await supabase.from('products').select('units,name').eq('code', code).single()
     const newUnits = (prod?.units || 0) + output
     await supabase.from('products').update({ units: newUnits }).eq('code', code)
-    addLog(`✓ FG stock updated: ${prod?.units} → ${newUnits}`, 'ok')
+    addLog('✓ FG stock updated: ' + prod?.units + ' → ' + newUnits, 'ok')
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', code)
     if (bom?.length) {
       for (const item of bom) {
@@ -196,7 +193,7 @@ export default function Production() {
         const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
         if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductKg) }).eq('name', item.rm_name)
       }
-      addLog(`✓ ${bom.length} RMs deducted via BOM`, 'ok')
+      addLog('✓ ' + bom.length + ' RMs deducted via BOM', 'ok')
     }
     await supabase.from('productions').insert({
       date, product_code: code, product_name: prod?.name || code,
@@ -204,18 +201,18 @@ export default function Production() {
       output_units: output, notes, created_by_name: profile?.name
     })
     await supabase.from('activity').insert({
-      type: 'production', title: `${code}: +${output} units`,
-      description: `${inputQty} ${inputType} · ${prod?.name}`,
+      type: 'production', title: code + ': +' + output + ' units',
+      description: inputQty + ' ' + inputType + ' · ' + (prod?.name),
       created_by_name: profile?.name
     })
-    addLog(`✓ Production saved successfully!`, 'ok')
+    addLog('✓ Production saved successfully!', 'ok')
     setForm({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
     setRmWarnings([])
     loadData()
   }
 
   async function deleteProduction(h) {
-    if (!window.confirm(`Delete production entry for ${h.product_code} (+${h.output_units} units) on ${h.date}?\n\nThis will reverse the stock change.`)) return
+    if (!window.confirm('Delete production entry for ' + h.product_code + ' (+' + h.output_units + ' units) on ' + h.date + '?\n\nThis will reverse the stock change.')) return
     setDeletingId(h.id)
     try {
       const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
@@ -230,8 +227,8 @@ export default function Production() {
       }
       await supabase.from('productions').delete().eq('id', h.id)
       await supabase.from('activity').insert({
-        type: 'production', title: `Production Deleted: ${h.product_code}`,
-        description: `${h.output_units} units reversed · ${h.date}`,
+        type: 'production', title: 'Production Deleted: ' + h.product_code,
+        description: h.output_units + ' units reversed · ' + h.date,
         created_by_name: profile?.name || 'admin'
       })
       loadData()
@@ -275,26 +272,52 @@ export default function Production() {
   }
 
   async function deleteSchedule(id, productCode) {
-    if (!window.confirm(`Delete this scheduled production for ${productCode}?`)) return
+    if (!window.confirm('Delete this scheduled production for ' + productCode + '?')) return
     await supabase.from('production_schedule').delete().eq('id', id)
     loadData()
   }
 
+  function sendScheduleEmail() {
+    const byDate = {}
+    schedule.forEach(s => {
+      if (!byDate[s.scheduled_date]) byDate[s.scheduled_date] = []
+      byDate[s.scheduled_date].push(s)
+    })
+
+    const dates = Object.keys(byDate).sort()
+    const selected = selectedSchedDates.size > 0
+      ? dates.filter(d => selectedSchedDates.has(d))
+      : dates
+
+    let body = 'KK PRODUCTION SCHEDULE%0A%0A'
+    selected.forEach(date => {
+      const rows = byDate[date] || []
+      const label = new Date(date + 'T12:00:00').toLocaleDateString('en-CA', { weekday:'long', month:'long', day:'numeric' }).toUpperCase()
+      body += label + '%0A'
+      rows.forEach(s => {
+        body += '  ' + s.product_code + ' - ' + s.product_name + ': ' + s.planned_input + ' ' + s.input_type + ' → ' + (s.planned_output || 0) + ' units (' + s.status + ')%0A'
+      })
+      body += '%0A'
+    })
+
+    window.location.href = 'mailto:?subject=KK Production Schedule&body=' + body
+  }
+
   const statusColors = { planned: 'blue', in_progress: 'amber', completed: 'green', cancelled: 'red' }
 
-  // Shared large select style
   const selectStyle = {
-    width: '100%',
-    padding: '12px 14px',
-    fontSize: '14px',
-    borderRadius: '6px',
-    border: '1px solid var(--border)',
-    background: 'var(--surface)',
-    color: 'var(--ink)',
-    fontFamily: 'var(--mono)',
-    cursor: 'pointer',
-    height: '48px',
+    width: '100%', padding: '12px 14px', fontSize: '14px', borderRadius: '6px',
+    border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--ink)',
+    fontFamily: 'var(--mono)', cursor: 'pointer', height: '48px',
   }
+
+  const btnToggle = (active) => ({
+    padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)',
+    cursor: 'pointer', fontSize: 11, fontFamily: 'var(--display)',
+    background: active ? 'var(--kk-green)' : 'var(--surface)',
+    color: active ? 'var(--kk-cream)' : 'var(--ink3)',
+    fontWeight: active ? 600 : 400,
+  })
 
   return (
     <>
@@ -384,10 +407,45 @@ export default function Production() {
 
         {view === 'schedule' && (
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div className="card-title" style={{ margin: 0 }}>Production Schedule</div>
-              <button className="btn btn-secondary btn-sm" onClick={() => setShowScheduleModal(true)}>+ Add</button>
+            {/* ── Schedule header with date toggles + email ── */}
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:10 }}>
+              <div className="card-title" style={{ margin:0 }}>Production Schedule</div>
+              <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                {/* Date toggles */}
+                {(() => {
+                  const dates = [...new Set(schedule.map(s => s.scheduled_date))].sort()
+                  return dates.map(date => {
+                    const label = new Date(date + 'T12:00:00').toLocaleDateString('en-CA', { month:'short', day:'numeric' })
+                    const active = selectedSchedDates.has(date)
+                    return (
+                      <button key={date} onClick={() => setSelectedSchedDates(prev => {
+                        const next = new Set(prev)
+                        next.has(date) ? next.delete(date) : next.add(date)
+                        return next
+                      })} style={btnToggle(active)}>{label}</button>
+                    )
+                  })
+                })()}
+                {schedule.length > 0 && (
+                  <button onClick={() => setSelectedSchedDates(
+                    selectedSchedDates.size > 0 ? new Set() : new Set(schedule.map(s => s.scheduled_date))
+                  )} style={btnToggle(selectedSchedDates.size > 0)}>
+                    {selectedSchedDates.size > 0 ? 'Clear' : 'All'}
+                  </button>
+                )}
+                {/* Email button */}
+                <button onClick={sendScheduleEmail} style={{
+                  padding:'6px 14px', borderRadius:6, border:'none', cursor:'pointer',
+                  fontSize:12, fontFamily:'var(--display)', letterSpacing:1,
+                  background:'var(--kk-green)', color:'var(--kk-cream)',
+                }}>
+                  ✉️ Send Schedule
+                </button>
+                {/* Add button */}
+                <button className="btn btn-secondary btn-sm" onClick={() => setShowScheduleModal(true)}>+ Add</button>
+              </div>
             </div>
+
             {schedule.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 32, color: 'var(--ink3)' }}>No scheduled production. Click "+ Schedule" to add.</div>
             ) : (() => {
@@ -396,9 +454,13 @@ export default function Production() {
                 if (!byDate[s.scheduled_date]) byDate[s.scheduled_date] = []
                 byDate[s.scheduled_date].push(s)
               })
+              // Filter by selected dates if any selected
+              const datesToShow = selectedSchedDates.size > 0
+                ? Object.entries(byDate).filter(([d]) => selectedSchedDates.has(d))
+                : Object.entries(byDate)
               return (
                 <div>
-                  {Object.entries(byDate).sort(([a],[b]) => a.localeCompare(b)).map(([date, rows]) => (
+                  {datesToShow.sort(([a],[b]) => a.localeCompare(b)).map(([date, rows]) => (
                     <div key={date} style={{ marginBottom: 24 }}>
                       <div style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -574,7 +636,6 @@ export default function Production() {
 
 function DailyTotal({ rows, products }) {
   const [total, setTotal] = useState(null)
-
   useEffect(() => {
     async function calc() {
       let sum = 0
@@ -586,14 +647,11 @@ function DailyTotal({ rows, products }) {
     }
     calc()
   }, [rows.map(r => r.id).join(',')])
-
   if (total === null) return <span style={{ fontSize: 12, color: 'rgba(227,221,209,.5)' }}>...</span>
   return (
     <div style={{ textAlign: 'right' }}>
       <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)' }}>DAY TOTAL</div>
-      <div style={{ fontFamily: 'var(--display)', fontSize: 20, color: 'var(--kk-peach)', letterSpacing: 1 }}>
-        ${total.toFixed(2)}
-      </div>
+      <div style={{ fontFamily: 'var(--display)', fontSize: 20, color: 'var(--kk-peach)', letterSpacing: 1 }}>${total.toFixed(2)}</div>
     </div>
   )
 }
@@ -601,7 +659,6 @@ function DailyTotal({ rows, products }) {
 function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, onEdit, calcOutput, onStart }) {
   const [rmStatus, setRMStatus] = useState(null)
   const [batchValue, setBatchValue] = useState(null)
-
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
@@ -631,47 +688,37 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
         const committed = committedMap[item.rm_name] || 0
         const remaining = currentStock - committed
         if (remaining < neededKg) {
-          warns.push({
-            rm: item.rm_name,
-            needed: neededKg.toFixed(3),
-            remaining: remaining.toFixed(3),
-            shortBy: (neededKg - remaining).toFixed(3)
-          })
+          warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3), remaining: remaining.toFixed(3), shortBy: (neededKg - remaining).toFixed(3) })
         }
       }
       setRMStatus(warns)
     }
     check()
   }, [s.id, allSchedule.map(x => x.id).join(',')])
-
   return (
     <tr>
       <td><span className="code-tag">{s.product_code}</span> <span style={{fontSize:11,color:'var(--ink2)'}}>{s.product_name}</span></td>
       <td style={{fontSize:12}}>{s.planned_input} {s.input_type}</td>
       <td style={{fontWeight:500,color:'var(--green)'}}>{packsDisplay(s.product_code, s.planned_output)}</td>
-      <td style={{fontWeight:600, color:'var(--kk-brown)'}}>
-        {batchValue === null ? '...' : batchValue > 0 ? `$${batchValue.toFixed(2)}` : <span style={{color:'var(--ink3)'}}>—</span>}
+      <td style={{fontWeight:600,color:'var(--kk-brown)'}}>
+        {batchValue === null ? '...' : batchValue > 0 ? '$' + batchValue.toFixed(2) : <span style={{color:'var(--ink3)'}}>—</span>}
       </td>
       <td>
         {rmStatus === null
           ? <span style={{fontSize:11,color:'var(--ink3)'}}>...</span>
           : rmStatus.length === 0
             ? <span style={{fontSize:11,color:'var(--green)'}}>✅ All OK</span>
-            : (
-              <div>
-                {rmStatus.map((w, i) => (
-                  <div key={i} style={{fontSize:10, color:'var(--red)', lineHeight:1.6}}>
-                    ⚠️ {w.rm.split(' ').slice(0,2).join(' ')}: need {w.needed}kg, {parseFloat(w.remaining) < 0 ? 'none left' : `${w.remaining}kg left`} (short {w.shortBy}kg)
-                  </div>
-                ))}
+            : rmStatus.map((w,i) => (
+              <div key={i} style={{fontSize:10,color:'var(--red)',lineHeight:1.6}}>
+                ⚠️ {w.rm.split(' ').slice(0,2).join(' ')}: need {w.needed}kg, {parseFloat(w.remaining) < 0 ? 'none left' : w.remaining + 'kg left'} (short {w.shortBy}kg)
               </div>
-            )
+            ))
         }
       </td>
-      <td><span className={`badge badge-${statusColors[s.status]}`}>{s.status}</span></td>
+      <td><span className={'badge badge-' + statusColors[s.status]}>{s.status}</span></td>
       <td>
         <select value={s.status} onChange={e => onStatusChange(s.id, e.target.value)}
-          style={{ fontSize: 10, padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 2, fontFamily: 'var(--display)', background: 'var(--surface)' }}>
+          style={{ fontSize:10, padding:'3px 6px', border:'1px solid var(--border)', borderRadius:2, fontFamily:'var(--display)', background:'var(--surface)' }}>
           <option value="planned">Planned</option>
           <option value="in_progress">In Progress</option>
           <option value="completed">Completed</option>
@@ -679,19 +726,19 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
         </select>
       </td>
       <td>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
           {(s.status === 'planned' || s.status === 'in_progress') && (
             <button onClick={() => onStart(s)}
-              style={{ background: '#E79B81', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)', fontWeight: 700 }}>
+              style={{ background:'#E79B81', border:'none', color:'#fff', borderRadius:3, padding:'3px 8px', fontSize:11, cursor:'pointer', fontFamily:'var(--display)', fontWeight:700 }}>
               ▶ Run
             </button>
           )}
           <button onClick={() => onEdit(s)}
-            style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
+            style={{ background:'var(--kk-green)', border:'none', color:'#fff', borderRadius:3, padding:'3px 8px', fontSize:11, cursor:'pointer', fontFamily:'var(--display)' }}>
             Edit
           </button>
           <button onClick={() => onDelete(s.id, s.product_code)}
-            style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--display)' }}>
+            style={{ background:'none', border:'1px solid var(--red)', color:'var(--red)', borderRadius:3, padding:'3px 8px', fontSize:11, cursor:'pointer', fontFamily:'var(--display)' }}>
             Del
           </button>
         </div>

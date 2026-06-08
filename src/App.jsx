@@ -9,6 +9,7 @@ import Dispatch from './pages/Dispatch'
 import { Sourcing, Activity, Reports } from './pages/Sourcing'
 import TimeTracking from './pages/TimeTracking'
 import Orders from './pages/Orders'
+import Expenses from './pages/Expenses'
 
 function ProtectedRoute({ children, roles }) {
   const { user, profile, loading } = useAuth()
@@ -33,6 +34,7 @@ function AppRoutes() {
         <Route path="reports" element={<ProtectedRoute roles={['admin','analyst']}><Reports /></ProtectedRoute>} />
         <Route path="time-tracking" element={<ProtectedRoute><TimeTracking user={user} employee={profile} /></ProtectedRoute>} />
         <Route path="orders" element={<ProtectedRoute roles={['admin','kitchen']}><Orders /></ProtectedRoute>} />
+        <Route path="expenses" element={<ProtectedRoute roles={['admin']}><Expenses /></ProtectedRoute>} />
       </Route>
     </Routes>
   )

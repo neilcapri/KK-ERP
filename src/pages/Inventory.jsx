@@ -3,10 +3,11 @@ import { useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1 }
+const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1 }
+
+const TRAY_SIZE = { VPB: 64, VPCAN: 36, PNF: 40, PVBRG: 36, PVBR: 12 }
 
 const DATE_RANGES = [
-  { label: '30 Days', days: 30 },
   { label: '3 Months', days: 90 },
   { label: '6 Months', days: 180 },
   { label: '12 Months', days: 365 },
@@ -25,10 +26,9 @@ export default function Inventory() {
   const [editReason, setEditReason] = useState('')
   const [showAlertsOnly, setShowAlertsOnly] = useState(false)
 
-  // Product detail view
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [selectedRM, setSelectedRM] = useState(null)
-  const [dateRange, setDateRange] = useState(30)
+  const [dateRange, setDateRange] = useState(90)
   const [productHistory, setProductHistory] = useState({ productions: [], dispatches: [] })
   const [rmHistory, setRMHistory] = useState({ sourcing: [], used: [] })
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -139,11 +139,17 @@ export default function Inventory() {
   const fgStats = { total: products.reduce((s,p)=>s+Math.max(0,p.units),0), low: products.filter(p=>p.units>0&&p.units<=p.min_stock).length, out: products.filter(p=>p.units<=0).length }
   const rmStats = { total: rms.length, low: rms.filter(r=>r.stock>0&&r.stock<=r.min_stock).length, out: rms.filter(r=>r.stock<=0).length }
 
+  // FIXED: date range button style — proper contrast for selected state
   const btnStyle = (active) => ({
     padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 3,
-    background: active ? 'var(--ink)' : 'var(--surface)', color: active ? 'var(--paper)' : 'var(--ink3)',
+    background: active ? 'var(--kk-green)' : 'var(--surface)',
+    color: active ? '#fff' : 'var(--ink3)',
     cursor: 'pointer', fontSize: 11, fontFamily: 'var(--mono)'
   })
+
+  // Get current stock for selected product
+  const selectedProductData = selectedProduct ? products.find(p => p.code === selectedProduct) : null
+  const selectedRMData = selectedRM ? rms.find(r => r.name === selectedRM) : null
 
   return (
     <>
@@ -181,11 +187,10 @@ export default function Inventory() {
         {showAlertsOnly && (
           <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', background:'var(--amber-l)', borderRadius:6, marginBottom:12, fontSize:12, color:'var(--amber)' }}>
             <span>⚠️ Showing low stock & out of stock only</span>
-            <button onClick={() => setShowAlertsOnly(false)} style={{ marginLeft:'auto', background:'none', border:'1px solid var(--amber)', color:'var(--amber)', borderRadius:4, padding:'2px 10px', fontSize:11, cursor:'pointer' }}>
-              Show all
-            </button>
+            <button onClick={() => setShowAlertsOnly(false)} style={{ marginLeft:'auto', background:'none', border:'1px solid var(--amber)', color:'var(--amber)', borderRadius:4, padding:'2px 10px', fontSize:11, cursor:'pointer' }}>Show all</button>
           </div>
         )}
+
         <div className="filter-bar">
           {(tab === 'fg' ? fgCategories : rmCategories).map(cat => (
             <button key={cat} className={'filter-btn ' + (catFilter===cat?'active':'')} onClick={() => setCatFilter(cat)}>
@@ -197,7 +202,7 @@ export default function Inventory() {
 
         {loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Loading...</div> : (
           tab === 'fg' ? (
-            <div style={{ display: 'grid', gridTemplateColumns: selectedProduct ? '1fr 1fr' : '1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: selectedProduct ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
               <div className="stock-grid">
                 {filteredFG.map(p => {
                   const ps = PACK_SIZE[p.code] || p.pack_size || 1
@@ -207,7 +212,7 @@ export default function Inventory() {
                   return (
                     <div key={p.code} className={'stock-item ' + cls}
                       onClick={() => setSelectedProduct(isSelected ? null : p.code)}
-                      style={{ cursor: 'pointer', outline: isSelected ? '2px solid var(--ink)' : 'none' }}>
+                      style={{ cursor: 'pointer', outline: isSelected ? '2px solid var(--kk-green)' : 'none', minHeight: 110 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div className="si-code">{p.code}</div>
                         {(isAdmin || isKitchen) && <button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); }}
@@ -215,7 +220,10 @@ export default function Inventory() {
                       </div>
                       <div className="si-name">{p.name}</div>
                       <div className="si-units">{p.units}</div>
-                      <div className="si-packs">{Math.floor(p.units/ps)}pk · {ps}/pk</div>
+                      {TRAY_SIZE[p.code]
+                        ? <div className="si-packs">{(p.units / TRAY_SIZE[p.code]).toFixed(2)} trays · {TRAY_SIZE[p.code]}/tray</div>
+                        : <div className="si-packs">{Math.floor(p.units/ps)}pk · {ps}/pk</div>
+                      }
                       <div className="stock-bar"><div className="stock-bar-fill" style={{ width: Math.min(100,Math.max(0,p.units/(p.min_stock*2)*100)) + '%', background: bar }} /></div>
                     </div>
                   )
@@ -223,45 +231,73 @@ export default function Inventory() {
               </div>
 
               {selectedProduct && (
-                <div className="card" style={{ alignSelf: 'start', position: 'sticky', top: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div className="card-title" style={{ margin: 0 }}>
-                      <span className="code-tag">{selectedProduct}</span> History
+                <div className="card" style={{ position: 'sticky', top: 16, maxHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  {/* Header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexShrink: 0 }}>
+                    <div>
+                      <div className="card-title" style={{ margin: 0 }}>
+                        <span className="code-tag">{selectedProduct}</span> History
+                      </div>
+                      {/* FIXED: Show current stock */}
+                      {selectedProductData && (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 16 }}>
+                          <div>
+                            <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Current Stock</div>
+                            <div style={{ fontSize: 28, fontFamily: 'var(--display)', fontWeight: 800, color: selectedProductData.units <= 0 ? 'var(--red)' : selectedProductData.units <= selectedProductData.min_stock ? 'var(--amber)' : 'var(--kk-green)', lineHeight: 1 }}>{selectedProductData.units}</div>
+                            <div style={{ fontSize: 11, color: 'var(--ink3)' }}>
+              {TRAY_SIZE[selectedProduct]
+                ? (selectedProductData.units / TRAY_SIZE[selectedProduct]).toFixed(2) + ' trays'
+                : Math.floor(selectedProductData.units / (PACK_SIZE[selectedProduct] || 1)) + ' packs'
+              }
+            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Min Stock</div>
+                            <div style={{ fontSize: 28, fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--ink3)', lineHeight: 1 }}>{selectedProductData.min_stock || 0}</div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                       {DATE_RANGES.map(r => (
                         <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>
                       ))}
                       <button onClick={() => setSelectedProduct(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--ink3)' }}>×</button>
                     </div>
                   </div>
+
+                  {/* Scrollable content */}
                   {historyLoading ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--ink3)' }}>Loading...</div> : (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, overflow: 'hidden', flex: 1 }}>
                       <div>
                         <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>🏭 Productions</div>
-                        {productHistory.productions.length === 0
-                          ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
-                          : productHistory.productions.map((p, i) => (
-                            <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                              <div style={{ fontWeight: 600, color: 'var(--green)' }}>+{p.output_units} units</div>
-                              <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.date} · {p.input_qty} {p.input_type}</div>
-                              {p.notes && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{p.notes}</div>}
-                            </div>
-                          ))
-                        }
+                        <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 320px)', paddingRight: 4 }}>
+                          {productHistory.productions.length === 0
+                            ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
+                            : productHistory.productions.map((p, i) => (
+                              <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                <div style={{ fontWeight: 600, color: 'var(--green)' }}>+{p.output_units} units</div>
+                                <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.date} · {p.input_qty} {p.input_type}</div>
+                                {p.notes && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{p.notes}</div>}
+                              </div>
+                            ))
+                          }
+                        </div>
                       </div>
                       <div>
                         <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>📋 Dispatches</div>
-                        {productHistory.dispatches.length === 0
-                          ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
-                          : productHistory.dispatches.map((d, i) => (
-                            <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                              <div style={{ fontWeight: 600, color: 'var(--red)' }}>-{d.units_dispatched} units</div>
-                              <div style={{ fontSize: 11, color: 'var(--ink2)' }}>{d.dispatches?.customer_name}</div>
-                              <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{d.dispatches?.date} · {d.qty} {d.dispatch_type}</div>
-                            </div>
-                          ))
-                        }
+                        <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 320px)', paddingRight: 4 }}>
+                          {productHistory.dispatches.length === 0
+                            ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
+                            : productHistory.dispatches.map((d, i) => (
+                              <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                <div style={{ fontWeight: 600, color: 'var(--red)' }}>-{d.units_dispatched} units</div>
+                                <div style={{ fontSize: 11, color: 'var(--ink2)' }}>{d.dispatches?.customer_name}</div>
+                                <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{d.dispatches?.date} · {d.qty} {d.dispatch_type}</div>
+                              </div>
+                            ))
+                          }
+                        </div>
                       </div>
                     </div>
                   )}
@@ -269,7 +305,7 @@ export default function Inventory() {
               )}
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: selectedRM ? '1fr 1fr' : '1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: selectedRM ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -304,44 +340,60 @@ export default function Inventory() {
               </div>
 
               {selectedRM && (
-                <div className="card" style={{ alignSelf: 'start', position: 'sticky', top: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <div className="card-title" style={{ margin: 0, fontSize: 12 }}>{selectedRM}</div>
-                    <div style={{ display: 'flex', gap: 6 }}>
+                <div className="card" style={{ position: 'sticky', top: 16, maxHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexShrink: 0 }}>
+                    <div>
+                      <div className="card-title" style={{ margin: 0, fontSize: 12 }}>{selectedRM}</div>
+                      {/* FIXED: Show current RM stock */}
+                      {selectedRMData && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Current Stock</div>
+                          <div style={{ fontSize: 28, fontFamily: 'var(--display)', fontWeight: 800, color: selectedRMData.stock <= 0 ? 'var(--red)' : selectedRMData.stock <= selectedRMData.min_stock ? 'var(--amber)' : 'var(--kk-green)', lineHeight: 1 }}>
+                            {selectedRMData.stock?.toFixed(2)} <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--ink3)' }}>{selectedRMData.unit}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                       {DATE_RANGES.map(r => (
                         <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>
                       ))}
                       <button onClick={() => setSelectedRM(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--ink3)' }}>×</button>
                     </div>
                   </div>
+
                   {historyLoading ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--ink3)' }}>Loading...</div> : (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, overflow: 'hidden', flex: 1 }}>
                       <div>
                         <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>📥 Sourced</div>
-                        {rmHistory.sourcing.length === 0
-                          ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
-                          : rmHistory.sourcing.map((s, i) => (
-                            <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                              <div style={{ fontWeight: 600, color: 'var(--green)' }}>+{s.qty_received} {s.unit}</div>
-                              <div style={{ fontSize: 11, color: 'var(--ink2)' }}>{s.supplier}</div>
-                              <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{s.date}{s.batch_number ? ' · Lot ' + s.batch_number : ''}</div>
-                              {isAdmin && s.cost > 0 && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>${s.cost.toFixed(2)}</div>}
-                            </div>
-                          ))
-                        }
+                        <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 320px)', paddingRight: 4 }}>
+                          {rmHistory.sourcing.length === 0
+                            ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
+                            : rmHistory.sourcing.map((s, i) => (
+                              <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                <div style={{ fontWeight: 600, color: 'var(--green)' }}>+{s.qty_received} {s.unit}</div>
+                                <div style={{ fontSize: 11, color: 'var(--ink2)' }}>{s.supplier}</div>
+                                <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{s.date}{s.batch_number ? ' · Lot ' + s.batch_number : ''}</div>
+                                {isAdmin && s.cost > 0 && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>${s.cost.toFixed(2)}</div>}
+                              </div>
+                            ))
+                          }
+                        </div>
                       </div>
                       <div>
                         <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>🏭 Used In</div>
-                        {rmHistory.used.length === 0
-                          ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
-                          : rmHistory.used.map((p, i) => (
-                            <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                              <div style={{ fontWeight: 600 }}><span className="code-tag" style={{ fontSize: 10 }}>{p.product_code}</span></div>
-                              <div style={{ fontSize: 11, color: 'var(--green)' }}>+{p.output_units} units</div>
-                              <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.date}</div>
-                            </div>
-                          ))
-                        }
+                        <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 320px)', paddingRight: 4 }}>
+                          {rmHistory.used.length === 0
+                            ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
+                            : rmHistory.used.map((p, i) => (
+                              <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                <div style={{ fontWeight: 600 }}><span className="code-tag" style={{ fontSize: 10 }}>{p.product_code}</span></div>
+                                <div style={{ fontSize: 11, color: 'var(--green)' }}>+{p.output_units} units</div>
+                                <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.date}</div>
+                              </div>
+                            ))
+                          }
+                        </div>
                       </div>
                     </div>
                   )}

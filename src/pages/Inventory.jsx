@@ -22,6 +22,8 @@ export default function Inventory() {
   const [editItem, setEditItem] = useState(null)
   const [editVal, setEditVal] = useState('')
   const [editReason, setEditReason] = useState('')
+  const [editFreezerVal, setEditFreezerVal] = useState('')
+  const [editPackedVal, setEditPackedVal] = useState('')
   const [showAlertsOnly, setShowAlertsOnly] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [selectedRM, setSelectedRM] = useState(null)
@@ -178,10 +180,19 @@ export default function Inventory() {
     const field = tab === 'fg' ? 'units' : 'stock'
     const oldVal = tab === 'fg' ? editItem.units : editItem.stock
     const idField = tab === 'fg' ? 'code' : 'name'
-    await supabase.from(table).update({ [field]: newVal }).eq(idField, editItem[idField])
+    if (tab === 'fg') {
+      const freezerVal = parseFloat(editFreezerVal)
+      const packedVal = parseFloat(editPackedVal)
+      const update = { units: newVal }
+      if (!isNaN(freezerVal)) update.freezer_units = freezerVal
+      if (!isNaN(packedVal)) update.packed_units = packedVal
+      await supabase.from('products').update(update).eq('code', editItem.code)
+    } else {
+      await supabase.from('raw_materials').update({ stock: newVal }).eq('name', editItem.name)
+    }
     await supabase.from('stock_adjustments').insert({ type: tab, item_code: editItem.code || editItem.name, item_name: editItem.name || editItem.code, old_value: oldVal, new_value: newVal, reason: editReason || 'Manual correction' })
     await supabase.from('activity').insert({ type: 'stock', title: (editItem.code || editItem.name) + ' corrected', description: oldVal + ' -> ' + newVal + ' — ' + (editReason || 'Manual correction') })
-    setEditItem(null); setEditVal(''); setEditReason('')
+    setEditItem(null); setEditVal(''); setEditReason(''); setEditFreezerVal(''); setEditPackedVal('')
     loadData()
   }
 
@@ -407,7 +418,7 @@ export default function Inventory() {
                           style={{ cursor: 'pointer', outline: isSelected ? '2px solid var(--kk-green)' : 'none', minHeight: 140 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                             <div className="si-code">{p.code}</div>
-                            {(isAdmin || isKitchen) && <button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); }}
+                            {(isAdmin || isKitchen) && <button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); setEditFreezerVal(String(p.freezer_units ?? p.units)); setEditPackedVal(String(p.packed_units ?? 0)); }}
                               style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 2, padding: '1px 6px', fontSize: 9, cursor: 'pointer', color: 'var(--ink3)' }}>edit</button>}
                           </div>
                           <div className="si-name">{p.name}</div>
@@ -624,9 +635,26 @@ export default function Inventory() {
               <div style={{ fontSize: 12, color: 'var(--ink2)', marginTop: 2 }}>{editItem.name || editItem.code}</div>
               <div style={{ fontFamily: 'var(--display)', fontSize: 28, marginTop: 4 }}>{tab==='fg'?editItem.units:editItem.stock} {tab==='rm'?editItem.unit:'units'}</div>
             </div>
-            <div className="field"><label>New Stock ({tab==='rm'?editItem.unit:'units'})</label>
-              <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} step="0.001" style={{ fontSize: 20, textAlign: 'center' }} autoFocus />
-            </div>
+            {tab === 'fg' ? (
+              <div className="field-row3">
+                <div className="field" style={{ margin: 0 }}>
+                  <label>Total Units</label>
+                  <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} style={{ fontSize: 16, textAlign: 'center' }} autoFocus />
+                </div>
+                <div className="field" style={{ margin: 0 }}>
+                  <label>Freezer Units</label>
+                  <input type="number" value={editFreezerVal} onChange={e => setEditFreezerVal(e.target.value)} style={{ fontSize: 16, textAlign: 'center' }} />
+                </div>
+                <div className="field" style={{ margin: 0 }}>
+                  <label>Packed Units</label>
+                  <input type="number" value={editPackedVal} onChange={e => setEditPackedVal(e.target.value)} style={{ fontSize: 16, textAlign: 'center' }} />
+                </div>
+              </div>
+            ) : (
+              <div className="field"><label>New Stock ({editItem.unit})</label>
+                <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} step="0.001" style={{ fontSize: 20, textAlign: 'center' }} autoFocus />
+              </div>
+            )}
             <div className="field"><label>Reason</label>
               <input type="text" value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="e.g. Physical count correction" />
             </div>

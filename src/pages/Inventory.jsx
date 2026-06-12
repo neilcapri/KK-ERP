@@ -137,10 +137,15 @@ export default function Inventory() {
       })
 
       // 2. Update freezer_units and packed_units
+      // Total units stays the same — we're just moving from freezer → packed
+      // packed_units is in PACKS, freezer_units is in raw UNITS
+      const newFreezer = (p.freezer_units || 0) - units
+      const newPacked = (p.packed_units || 0) + packs
+      const newTotal = newFreezer + (newPacked * ps)
       await supabase.from('products').update({
-        freezer_units: (p.freezer_units || 0) - units,
-        packed_units: (p.packed_units || 0) + packs,
-        units: Math.max(0, (p.units || 0) - units + packs), // keep units roughly in sync
+        freezer_units: newFreezer,
+        packed_units: newPacked,
+        units: newTotal,
       }).eq('code', packForm.product_code)
 
       // 3. Deduct packaging materials from raw_materials

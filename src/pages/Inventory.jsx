@@ -635,22 +635,31 @@ export default function Inventory() {
               <div style={{ fontSize: 12, color: 'var(--ink2)', marginTop: 2 }}>{editItem.name || editItem.code}</div>
               <div style={{ fontFamily: 'var(--display)', fontSize: 28, marginTop: 4 }}>{tab==='fg'?editItem.units:editItem.stock} {tab==='rm'?editItem.unit:'units'}</div>
             </div>
-            {tab === 'fg' ? (
-              <div className="field-row3">
-                <div className="field" style={{ margin: 0 }}>
-                  <label>Total Units</label>
-                  <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} style={{ fontSize: 16, textAlign: 'center' }} autoFocus />
+            {tab === 'fg' ? (() => {
+              const ps = PACK_SIZE[editItem.code] || 1
+              const freezer = parseFloat(editFreezerVal) || 0
+              const packed = parseFloat(editPackedVal) || 0
+              const total = freezer + (packed * ps)
+              return (
+                <div>
+                  <div className="field-row" style={{ marginBottom: 12 }}>
+                    <div className="field" style={{ margin: 0 }}>
+                      <label>Freezer Units</label>
+                      <input type="number" value={editFreezerVal} onChange={e => { setEditFreezerVal(e.target.value); const f = parseFloat(e.target.value)||0; setEditVal(String(f + (parseFloat(editPackedVal)||0) * ps)) }} style={{ fontSize: 16, textAlign: 'center' }} autoFocus />
+                    </div>
+                    <div className="field" style={{ margin: 0 }}>
+                      <label>Packed Packs</label>
+                      <input type="number" value={editPackedVal} onChange={e => { setEditPackedVal(e.target.value); const pk = parseFloat(e.target.value)||0; setEditVal(String((parseFloat(editFreezerVal)||0) + pk * ps)) }} style={{ fontSize: 16, textAlign: 'center' }} />
+                    </div>
+                  </div>
+                  <div style={{ background: 'var(--surface2)', borderRadius: 6, padding: '10px 14px', marginBottom: 12, fontSize: 12 }}>
+                    <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 4 }}>Total Units (auto-calculated)</div>
+                    <div style={{ fontSize: 28, fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--kk-green)' }}>{total}</div>
+                    <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{freezer} freezer + ({packed} packs × {ps} u/pk) = {total}</div>
+                  </div>
                 </div>
-                <div className="field" style={{ margin: 0 }}>
-                  <label>Freezer Units</label>
-                  <input type="number" value={editFreezerVal} onChange={e => setEditFreezerVal(e.target.value)} style={{ fontSize: 16, textAlign: 'center' }} />
-                </div>
-                <div className="field" style={{ margin: 0 }}>
-                  <label>Packed Units</label>
-                  <input type="number" value={editPackedVal} onChange={e => setEditPackedVal(e.target.value)} style={{ fontSize: 16, textAlign: 'center' }} />
-                </div>
-              </div>
-            ) : (
+              )
+            })() : (
               <div className="field"><label>New Stock ({editItem.unit})</label>
                 <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} step="0.001" style={{ fontSize: 20, textAlign: 'center' }} autoFocus />
               </div>

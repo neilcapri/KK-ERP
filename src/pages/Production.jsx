@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:54 }
+const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:54,NALCOB:21,NBFB:21 }
 
 const PACK_SIZE = {
   PBB:2, PCC:2, KLR:2,

@@ -11,6 +11,22 @@ const DATE_RANGES = [
   { label: '12 Months', days: 365 },
 ]
 
+// Conversion map: rm name (lowercase) → { divisor, unit, label }
+// Stock is stored in grams, display in purchasing units
+const RM_DISPLAY = {
+  'eggs':               { divisor: 9000,  unit: 'cases', detail: '180 eggs/case' },
+  'coconut milk':       { divisor: 2400,  unit: 'cases', detail: '6 cans × 400g' },
+  'almond butter jar':  { divisor: 750,   unit: 'jars',  detail: '750g/jar' },
+  'almond butter tub':  { divisor: 10000, unit: 'tubs',  detail: '10kg/tub' },
+}
+
+function displayStock(name, stock) {
+  const conv = RM_DISPLAY[name?.toLowerCase()]
+  if (!conv || !stock) return null
+  const converted = stock / conv.divisor
+  return { value: converted % 1 === 0 ? converted : converted.toFixed(2), unit: conv.unit, detail: conv.detail, raw: stock }
+}
+
 export default function Inventory() {
   const { isAdmin, isKitchen } = useAuth()
   const [tab, setTab] = useState('fg')
@@ -32,7 +48,6 @@ export default function Inventory() {
   const [rmHistory, setRMHistory] = useState({ sourcing: [], used: [] })
   const [historyLoading, setHistoryLoading] = useState(false)
 
-  // Packing state
   const [packForm, setPackForm] = useState({ product_code: '', packs: '', date: new Date().toISOString().split('T')[0], notes: '' })
   const [packSaving, setPackSaving] = useState(false)
   const [packLog, setPackLog] = useState([])
@@ -125,30 +140,14 @@ export default function Inventory() {
     }
     setPackSaving(true)
     try {
-      // 1. Log packing run
       await supabase.from('packing_runs').insert({
-        date: packForm.date,
-        product_code: packForm.product_code,
-        product_name: p.name,
-        units_packed: units,
-        packs_produced: packs,
-        units_per_pack: ps,
-        notes: packForm.notes || null,
+        date: packForm.date, product_code: packForm.product_code, product_name: p.name,
+        units_packed: units, packs_produced: packs, units_per_pack: ps, notes: packForm.notes || null,
       })
-
-      // 2. Update freezer_units and packed_units
-      // Total units stays the same — we're just moving from freezer → packed
-      // packed_units is in PACKS, freezer_units is in raw UNITS
       const newFreezer = (p.freezer_units || 0) - units
       const newPacked = (p.packed_units || 0) + packs
       const newTotal = newFreezer + (newPacked * ps)
-      await supabase.from('products').update({
-        freezer_units: newFreezer,
-        packed_units: newPacked,
-        units: newTotal,
-      }).eq('code', packForm.product_code)
-
-      // 3. Deduct packaging materials from raw_materials
+      await supabase.from('products').update({ freezer_units: newFreezer, packed_units: newPacked, units: newTotal }).eq('code', packForm.product_code)
       const { data: bomItems } = await supabase.from('packaging_bom').select('*').eq('product_code', packForm.product_code)
       if (bomItems?.length) {
         for (const item of bomItems) {
@@ -159,32 +158,19 @@ export default function Inventory() {
           }
         }
       }
-
-      // 4. Activity log
-      await supabase.from('activity').insert({
-        type: 'production',
-        title: `Packed: ${p.name}`,
-        description: `${packs} packs (${units} units) · ${packForm.date}`,
-      })
-
+      await supabase.from('activity').insert({ type: 'production', title: `Packed: ${p.name}`, description: `${packs} packs (${units} units) · ${packForm.date}` })
       setPackLog(l => [`✓ Packed ${packs} packs (${units} units) of ${p.name}`, ...l])
       setPackForm(f => ({ ...f, product_code: '', packs: '', notes: '' }))
       setPackPreview(null)
-      await loadData()
-      await loadPackingRuns()
-    } catch(err) {
-      alert('Error: ' + err.message)
-    }
+      await loadData(); await loadPackingRuns()
+    } catch(err) { alert('Error: ' + err.message) }
     setPackSaving(false)
   }
 
   async function saveEdit() {
     const newVal = parseFloat(editVal)
     if (isNaN(newVal)) return
-    const table = tab === 'fg' ? 'products' : 'raw_materials'
-    const field = tab === 'fg' ? 'units' : 'stock'
     const oldVal = tab === 'fg' ? editItem.units : editItem.stock
-    const idField = tab === 'fg' ? 'code' : 'name'
     if (tab === 'fg') {
       const freezerVal = parseFloat(editFreezerVal)
       const packedVal = parseFloat(editPackedVal)
@@ -224,7 +210,6 @@ export default function Inventory() {
     color: active ? '#fff' : 'var(--ink3)',
     cursor: 'pointer', fontSize: 11, fontFamily: 'var(--mono)'
   })
-
   const sel = { width: '100%', padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', outline: 'none' }
 
   const selectedProductData = selectedProduct ? products.find(p => p.code === selectedProduct) : null
@@ -238,7 +223,6 @@ export default function Inventory() {
       </div>
 
       <div className="page-body">
-        {/* Tabs */}
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
           {[
             { key: 'fg', label: '📦 Finished Goods' },
@@ -252,10 +236,8 @@ export default function Inventory() {
           ))}
         </div>
 
-        {/* ── PACKING TAB ── */}
         {tab === 'pack' && (
           <div className="grid2" style={{ alignItems: 'start' }}>
-            {/* Log a packing run */}
             <div>
               <div className="card">
                 <div className="card-title">📦 Log Packing Run</div>
@@ -310,17 +292,11 @@ export default function Inventory() {
                     {packPreview.canPack ? (
                       <>
                         <div style={{ fontWeight: 600, color: 'var(--kk-green)', marginBottom: 4 }}>✓ Ready to pack</div>
-                        <div style={{ color: 'var(--ink2)' }}>
-                          Will use <strong>{packPreview.units} freezer units</strong> → produce <strong>{packForm.packs} packs</strong>
-                        </div>
-                        <div style={{ color: 'var(--ink3)', marginTop: 2 }}>
-                          Freezer after: {packPreview.freezer - packPreview.units} units · Packed after: {packPreview.packed + parseInt(packForm.packs)} packs
-                        </div>
+                        <div style={{ color: 'var(--ink2)' }}>Will use <strong>{packPreview.units} freezer units</strong> → produce <strong>{packForm.packs} packs</strong></div>
+                        <div style={{ color: 'var(--ink3)', marginTop: 2 }}>Freezer after: {packPreview.freezer - packPreview.units} units · Packed after: {packPreview.packed + parseInt(packForm.packs)} packs</div>
                       </>
                     ) : (
-                      <div style={{ color: 'var(--red)', fontWeight: 600 }}>
-                        ✗ Not enough freezer stock. Need {packPreview.units} units, have {packPreview.freezer}.
-                      </div>
+                      <div style={{ color: 'var(--red)', fontWeight: 600 }}>✗ Not enough freezer stock. Need {packPreview.units} units, have {packPreview.freezer}.</div>
                     )}
                   </div>
                 )}
@@ -328,26 +304,19 @@ export default function Inventory() {
                   <label>Notes (optional)</label>
                   <input type="text" style={sel} value={packForm.notes} onChange={e => setPackForm(f => ({ ...f, notes: e.target.value }))} placeholder="e.g. Saturday batch" />
                 </div>
-                <button className="btn btn-green btn-full" onClick={savePacking}
-                  disabled={packSaving || !packForm.product_code || !packForm.packs || (packPreview && !packPreview.canPack)}>
+                <button className="btn btn-green btn-full" onClick={savePacking} disabled={packSaving || !packForm.product_code || !packForm.packs || (packPreview && !packPreview.canPack)}>
                   {packSaving ? 'Saving...' : '📦 Log Packing Run'}
                 </button>
                 {packLog.length > 0 && (
                   <div style={{ marginTop: 12 }}>
-                    {packLog.map((l, i) => (
-                      <div key={i} style={{ fontSize: 11, color: 'var(--kk-green)', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>✓ {l}</div>
-                    ))}
+                    {packLog.map((l, i) => <div key={i} style={{ fontSize: 11, color: 'var(--kk-green)', padding: '4px 0', borderBottom: '1px solid var(--border)' }}>✓ {l}</div>)}
                   </div>
                 )}
               </div>
-
-              {/* Packaging materials that will be used */}
               {packForm.product_code && packForm.packs && packPreview?.canPack && (
                 <PackagingPreview productCode={packForm.product_code} packs={parseInt(packForm.packs)} rms={rms} />
               )}
             </div>
-
-            {/* Recent packing runs */}
             <div className="card">
               <div className="card-title">Recent Packing Runs</div>
               {packingRuns.length === 0
@@ -357,9 +326,7 @@ export default function Inventory() {
                       <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 13 }}>{run.product_name || run.product_code}</div>
-                          <div style={{ fontSize: 11, color: 'var(--ink3)', marginTop: 2 }}>
-                            {run.packs_produced} packs · {run.units_packed} units · {run.date}
-                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--ink3)', marginTop: 2 }}>{run.packs_produced} packs · {run.units_packed} units · {run.date}</div>
                           {run.notes && <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{run.notes}</div>}
                         </div>
                         <span className="code-tag">{run.product_code}</span>
@@ -371,7 +338,6 @@ export default function Inventory() {
           </div>
         )}
 
-        {/* ── FG & RM TABS ── */}
         {tab !== 'pack' && (
           <>
             {tab === 'fg' ? (
@@ -399,9 +365,7 @@ export default function Inventory() {
 
             <div className="filter-bar">
               {(tab === 'fg' ? fgCategories : rmCategories).map(cat => (
-                <button key={cat} className={'filter-btn ' + (catFilter===cat?'active':'')} onClick={() => setCatFilter(cat)}>
-                  {cat === 'all' ? 'All' : cat}
-                </button>
+                <button key={cat} className={'filter-btn ' + (catFilter===cat?'active':'')} onClick={() => setCatFilter(cat)}>{cat === 'all' ? 'All' : cat}</button>
               ))}
               <input className="search-input" placeholder={'Search ' + (tab==='fg'?'product':'material') + '...'} value={search} onChange={e => setSearch(e.target.value)} />
             </div>
@@ -427,7 +391,6 @@ export default function Inventory() {
                               style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 2, padding: '1px 6px', fontSize: 9, cursor: 'pointer', color: 'var(--ink3)' }}>edit</button>}
                           </div>
                           <div className="si-name">{p.name}</div>
-                          {/* Packed first (big), then freezer, then total */}
                           <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', marginTop: 4 }}>
                             <div>
                               <div style={{ fontSize: 32, fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--blue)', lineHeight: 1 }}>{packedPacks}</div>
@@ -459,9 +422,7 @@ export default function Inventory() {
                     <div className="card" style={{ position: 'sticky', top: 16, maxHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexShrink: 0 }}>
                         <div>
-                          <div className="card-title" style={{ margin: 0 }}>
-                            <span className="code-tag">{selectedProduct}</span> History
-                          </div>
+                          <div className="card-title" style={{ margin: 0 }}><span className="code-tag">{selectedProduct}</span> History</div>
                           {selectedProductData && (
                             <div style={{ marginTop: 8, display: 'flex', gap: 16 }}>
                               <div>
@@ -472,9 +433,7 @@ export default function Inventory() {
                               <div>
                                 <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Frozen</div>
                                 <div style={{ fontSize: 24, fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--kk-green)', lineHeight: 1 }}>
-                                  {TRAY_SIZE[selectedProduct]
-                                    ? (selectedProductData.freezer_units / TRAY_SIZE[selectedProduct]).toFixed(1)
-                                    : (selectedProductData.freezer_units ?? 0)}
+                                  {TRAY_SIZE[selectedProduct] ? (selectedProductData.freezer_units / TRAY_SIZE[selectedProduct]).toFixed(1) : (selectedProductData.freezer_units ?? 0)}
                                 </div>
                                 <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{TRAY_SIZE[selectedProduct] ? 'trays' : 'units'}</div>
                               </div>
@@ -487,9 +446,7 @@ export default function Inventory() {
                           )}
                         </div>
                         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                          {DATE_RANGES.map(r => (
-                            <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>
-                          ))}
+                          {DATE_RANGES.map(r => <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>)}
                           <button onClick={() => setSelectedProduct(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--ink3)' }}>×</button>
                         </div>
                       </div>
@@ -531,6 +488,7 @@ export default function Inventory() {
                   )}
                 </div>
               ) : (
+                /* ── RAW MATERIALS TABLE ── */
                 <div style={{ display: 'grid', gridTemplateColumns: selectedRM ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
                   <div className="table-wrap">
                     <table>
@@ -547,13 +505,21 @@ export default function Inventory() {
                           const cls = r.stock <= 0 ? 'red' : r.stock <= r.min_stock ? 'amber' : 'green'
                           const label = r.stock <= 0 ? '🔴 OUT' : r.stock <= r.min_stock ? '⚠️ LOW' : '✅ OK'
                           const isSelected = selectedRM === r.name
+                          const disp = displayStock(r.name, r.stock)
                           return (
                             <tr key={r.name} onClick={() => setSelectedRM(isSelected ? null : r.name)}
                               style={{ cursor: 'pointer', background: isSelected ? 'var(--surface2)' : '' }}>
                               <td style={{ fontWeight: 500 }}>{r.name}</td>
                               <td><span style={{ fontSize: 10, color: 'var(--ink3)' }}>{r.category}</span></td>
-                              <td style={{ fontWeight: 600, color: 'var(--' + cls + ')' }}>{r.stock?.toFixed(3)}</td>
-                              <td style={{ color: 'var(--ink3)' }}>{r.unit}</td>
+                              <td style={{ fontWeight: 600, color: 'var(--' + cls + ')' }}>
+                                {disp ? (
+                                  <span>
+                                    {disp.value} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>{disp.unit}</span>
+                                    <div style={{ fontSize: 10, color: 'var(--ink3)', fontWeight: 400 }}>{disp.raw.toLocaleString()}g</div>
+                                  </span>
+                                ) : r.stock?.toFixed(3)}
+                              </td>
+                              <td style={{ color: 'var(--ink3)' }}>{disp ? disp.unit : r.unit}</td>
                               <td style={{ fontSize: 11 }}>{r.supplier}</td>
                               <td><span className={'badge badge-' + cls}>{label}</span></td>
                               {isAdmin && <td style={{ color: 'var(--ink3)' }}>{r.price_per_unit > 0 ? '$' + r.price_per_unit.toFixed(2) : '—'}</td>}
@@ -570,19 +536,29 @@ export default function Inventory() {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexShrink: 0 }}>
                         <div>
                           <div className="card-title" style={{ margin: 0, fontSize: 12 }}>{selectedRM}</div>
-                          {selectedRMData && (
-                            <div style={{ marginTop: 8 }}>
-                              <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Current Stock</div>
-                              <div style={{ fontSize: 28, fontFamily: 'var(--display)', fontWeight: 800, color: selectedRMData.stock <= 0 ? 'var(--red)' : selectedRMData.stock <= selectedRMData.min_stock ? 'var(--amber)' : 'var(--kk-green)', lineHeight: 1 }}>
-                                {selectedRMData.stock?.toFixed(2)} <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--ink3)' }}>{selectedRMData.unit}</span>
+                          {selectedRMData && (() => {
+                            const disp = displayStock(selectedRM, selectedRMData.stock)
+                            return (
+                              <div style={{ marginTop: 8 }}>
+                                <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Current Stock</div>
+                                {disp ? (
+                                  <>
+                                    <div style={{ fontSize: 32, fontFamily: 'var(--display)', fontWeight: 800, color: selectedRMData.stock <= 0 ? 'var(--red)' : selectedRMData.stock <= selectedRMData.min_stock ? 'var(--amber)' : 'var(--kk-green)', lineHeight: 1 }}>
+                                      {disp.value} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--ink3)' }}>{disp.unit}</span>
+                                    </div>
+                                    <div style={{ fontSize: 11, color: 'var(--ink3)', marginTop: 2 }}>{disp.raw.toLocaleString()}g · {disp.detail}</div>
+                                  </>
+                                ) : (
+                                  <div style={{ fontSize: 28, fontFamily: 'var(--display)', fontWeight: 800, color: selectedRMData.stock <= 0 ? 'var(--red)' : selectedRMData.stock <= selectedRMData.min_stock ? 'var(--amber)' : 'var(--kk-green)', lineHeight: 1 }}>
+                                    {selectedRMData.stock?.toFixed(2)} <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--ink3)' }}>{selectedRMData.unit}</span>
+                                  </div>
+                                )}
                               </div>
-                            </div>
-                          )}
+                            )
+                          })()}
                         </div>
                         <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                          {DATE_RANGES.map(r => (
-                            <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>
-                          ))}
+                          {DATE_RANGES.map(r => <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>)}
                           <button onClick={() => setSelectedRM(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--ink3)' }}>×</button>
                         </div>
                       </div>
@@ -664,11 +640,27 @@ export default function Inventory() {
                   </div>
                 </div>
               )
-            })() : (
-              <div className="field"><label>New Stock ({editItem.unit})</label>
-                <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} step="0.001" style={{ fontSize: 20, textAlign: 'center' }} autoFocus />
-              </div>
-            )}
+            })() : (() => {
+              const disp = displayStock(editItem.name, editItem.stock)
+              return (
+                <div>
+                  {disp && (
+                    <div style={{ background: 'var(--surface2)', borderRadius: 6, padding: '10px 14px', marginBottom: 12, fontSize: 12 }}>
+                      <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 4 }}>Enter in grams — displays as {disp.unit}</div>
+                      <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{disp.detail}</div>
+                    </div>
+                  )}
+                  <div className="field"><label>New Stock (g)</label>
+                    <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} step="0.001" style={{ fontSize: 20, textAlign: 'center' }} autoFocus />
+                  </div>
+                  {disp && editVal && !isNaN(parseFloat(editVal)) && (
+                    <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 12 }}>
+                      = {(parseFloat(editVal) / disp.divisor).toFixed(2)} {disp.unit}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             <div className="field"><label>Reason</label>
               <input type="text" value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="e.g. Physical count correction" />
             </div>
@@ -683,7 +675,6 @@ export default function Inventory() {
   )
 }
 
-// Sub-component: shows packaging materials that will be consumed
 function PackagingPreview({ productCode, packs, rms }) {
   const [items, setItems] = useState([])
   useEffect(() => {
@@ -693,7 +684,6 @@ function PackagingPreview({ productCode, packs, rms }) {
     }
     load()
   }, [productCode])
-
   if (!items.length) return null
   return (
     <div className="card" style={{ marginTop: 0 }}>

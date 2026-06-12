@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
+import LabourVsProduction from '../components/LabourVsProduction'
 
 const ZONE_COLORS = {
   North:  { bg: '#E1F5EE', color: '#085041' },
@@ -97,7 +98,6 @@ export default function Dashboard() {
       setPackList(packRes.data || [])
       setActivity(actRes.data || [])
 
-      // Schedule
       const sched = { Monday:[], Wednesday:[], Thursday:[], Friday:[], Flexible:[] }
       ;(custRes.data || []).forEach(c => {
         const day = c.dispatch_day || 'Flexible'
@@ -106,7 +106,6 @@ export default function Dashboard() {
       })
       setSchedule(sched)
 
-      // Top SKUs — from dispatch_items this month
       const { data: dispItems } = await supabase
         .from('dispatch_items')
         .select('product_code,product_name,units_dispatched,dispatches(date)')
@@ -121,7 +120,6 @@ export default function Dashboard() {
       })
       setTopSKUs(Object.values(skuMap).sort((a,b) => b.units - a.units).slice(0,8))
 
-      // Top customers — orders this month
       const { data: monthOrders } = await supabase
         .from('orders')
         .select('customer_name,order_items(packs,cases,packs_per_case,price_per_pack,quantity,units_per_pack)')
@@ -139,7 +137,6 @@ export default function Dashboard() {
       })
       setTopCustomers(Object.values(custMap).sort((a,b) => b.orders - a.orders).slice(0,10))
 
-      // Weekly revenue — admin only
       if (isAdmin) {
         const weeks = []
         for (let i = 4; i >= 0; i--) {
@@ -164,7 +161,6 @@ export default function Dashboard() {
         }))
       }
 
-      // Initial map load — this month
       loadMapData('month', custRes.data || [])
 
     } catch(e) { console.error(e) }
@@ -181,14 +177,12 @@ export default function Dashboard() {
     }
   }, [])
 
-
   async function loadMapData(range, custData) {
     setMapLoading(true)
     try {
       const now = new Date()
       const days = { week:7, month:30, '3months':90, '6months':180, '12months':365 }[range] || 30
-      const since = new Date(now)
-      since.setDate(now.getDate() - days)
+      const since = new Date(now); since.setDate(now.getDate() - days)
       const sinceStr = since.toISOString().split('T')[0]
 
       const custZoneMap = {}
@@ -203,57 +197,36 @@ export default function Dashboard() {
       const zoneOrders = { City:0, West:0, North:0, East:0, ONFC:0 }
       const zoneUnits  = { City:0, West:0, North:0, East:0, ONFC:0 }
 
-      // Orders received per zone
       const { data: ordersData } = await supabase
-        .from('orders')
-        .select('customer_name')
-        .gte('created_at', sinceStr)
-        .neq('status','archived')
+        .from('orders').select('customer_name').gte('created_at', sinceStr).neq('status','archived')
 
       ;(ordersData || []).forEach(o => {
         const zone = custZoneMap[o.customer_name]
-        if (zone && zoneOrders[zone] !== undefined) {
-          zoneOrders[zone]++
-        } else if (o.customer_name && o.customer_name.toLowerCase().includes('ontario natural food')) {
-          zoneOrders['ONFC']++
-        }
+        if (zone && zoneOrders[zone] !== undefined) zoneOrders[zone]++
+        else if (o.customer_name && o.customer_name.toLowerCase().includes('ontario natural food')) zoneOrders['ONFC']++
       })
 
-      // Units dispatched per zone
-      const { data: monthDispatches } = await supabase
-        .from('dispatches')
-        .select('id, customer_name')
-        .gte('date', sinceStr)
+      const { data: monthDispatches } = await supabase.from('dispatches').select('id, customer_name').gte('date', sinceStr)
 
       if (monthDispatches && monthDispatches.length > 0) {
         const dispatchIds = monthDispatches.map(d => d.id)
         const dispatchCustMap = {}
         monthDispatches.forEach(d => { dispatchCustMap[d.id] = d.customer_name })
-        const { data: dispItems } = await supabase
-          .from('dispatch_items')
-          .select('dispatch_id, units_dispatched')
-          .in('dispatch_id', dispatchIds)
+        const { data: dispItems } = await supabase.from('dispatch_items').select('dispatch_id, units_dispatched').in('dispatch_id', dispatchIds)
         ;(dispItems || []).forEach(item => {
           const cname = dispatchCustMap[item.dispatch_id]
           const zone = custZoneMap[cname]
-          if (zone && zoneUnits[zone] !== undefined) {
-            zoneUnits[zone] += item.units_dispatched || 0
-          } else if (cname && cname.toLowerCase().includes('ontario natural food')) {
-            zoneUnits['ONFC'] += item.units_dispatched || 0
-          }
+          if (zone && zoneUnits[zone] !== undefined) zoneUnits[zone] += item.units_dispatched || 0
+          else if (cname && cname.toLowerCase().includes('ontario natural food')) zoneUnits['ONFC'] += item.units_dispatched || 0
         })
       }
 
-      // Combine into mapUnits: { City: { units, orders }, ... }
       const combined = {}
-      Object.keys(zoneOrders).forEach(zone => {
-        combined[zone] = { units: zoneUnits[zone] || 0, orders: zoneOrders[zone] || 0 }
-      })
+      Object.keys(zoneOrders).forEach(zone => { combined[zone] = { units: zoneUnits[zone] || 0, orders: zoneOrders[zone] || 0 } })
       setMapUnits(combined)
     } catch(e) { console.error(e) }
     setMapLoading(false)
   }
-
 
   const today = new Date().toLocaleDateString('en-CA', { weekday:'long', year:'numeric', month:'long', day:'numeric' })
   const icons = { dispatch:'📋', production:'🏭', sourcing:'📥', stock:'📦', order:'🛒' }
@@ -317,7 +290,7 @@ export default function Dashboard() {
           <button style={tabStyle('schedule')}    onClick={() => setActiveTab('schedule')}>Delivery Schedule</button>
         </div>
 
-        {/* ── Always-visible zone map ── */}
+        {/* ── Always-visible zone map controls ── */}
         <div style={{ marginBottom:8, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
           <span style={{ fontSize:11, color:'var(--ink3)', letterSpacing:'0.5px' }}>Orders received:</span>
           {[
@@ -360,29 +333,24 @@ export default function Dashboard() {
               { key:'ONFC',  label:'ONFC',  color:'#E24B4A', bg:'#FCEBEB', tc:'#791F1F' },
               { key:'North', label:'North', color:'#1D9E75', bg:'#E1F5EE', tc:'#085041' },
               { key:'East',  label:'East',  color:'#378ADD', bg:'#E6F1FB', tc:'#0C447C' },
-            ].map(z => {
-              const maxU = Math.max(...Object.values(mapUnits).map(v => (v||{}).units||0), 1)
-              return (
-                <div key={z.key}
-                  style={{ background:'var(--surface)', border:'0.5px solid var(--border)', borderRadius:6, padding:'7px 10px', cursor:'pointer' }}
-                  onClick={() => { if (window._kkMap) { const c={City:[43.653,-79.383,11],West:[43.38,-80.05,9],ONFC:[43.72,-79.42,11],North:[44.05,-79.50,9],East:[43.88,-78.85,9]}; const [lat,lng,zoom]=c[z.key]||[43.7,-79.4,10]; window._kkMap.flyTo([lat,lng],zoom,{duration:1.2}) }}}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
-                    <span style={{ fontSize:10, fontWeight:500, letterSpacing:'0.5px', textTransform:'uppercase', color:z.tc }}>{z.label}</span>
-                    <span style={{ fontSize:13, fontWeight:500, color:z.tc }}>{((mapUnits[z.key]||{}).units||0).toLocaleString() + ' u / ' + ((mapUnits[z.key]||{}).orders||0) + ' ord'}</span>
-                  </div>
-                  <div style={{ height:3, background:z.bg, borderRadius:2, marginTop:5 }}>
-                    <div style={{ height:3, width: (mapUnits[z.key]||{}).units > 0 ? Math.round(((mapUnits[z.key]||{}).units/Math.max(...Object.values(mapUnits).map(v=>(v||{}).units||0),1))*100)+'%' : '10%', background:z.color, borderRadius:2 }} />
-                  </div>
+            ].map(z => (
+              <div key={z.key}
+                style={{ background:'var(--surface)', border:'0.5px solid var(--border)', borderRadius:6, padding:'7px 10px', cursor:'pointer' }}
+                onClick={() => { if (window._kkMap) { const c={City:[43.653,-79.383,11],West:[43.38,-80.05,9],ONFC:[43.72,-79.42,11],North:[44.05,-79.50,9],East:[43.88,-78.85,9]}; const [lat,lng,zoom]=c[z.key]||[43.7,-79.4,10]; window._kkMap.flyTo([lat,lng],zoom,{duration:1.2}) }}}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline' }}>
+                  <span style={{ fontSize:10, fontWeight:500, letterSpacing:'0.5px', textTransform:'uppercase', color:z.tc }}>{z.label}</span>
+                  <span style={{ fontSize:13, fontWeight:500, color:z.tc }}>{((mapUnits[z.key]||{}).units||0).toLocaleString() + ' u / ' + ((mapUnits[z.key]||{}).orders||0) + ' ord'}</span>
                 </div>
-              )
-            })}
+                <div style={{ height:3, background:z.bg, borderRadius:2, marginTop:5 }}>
+                  <div style={{ height:3, width: (mapUnits[z.key]||{}).units > 0 ? Math.round(((mapUnits[z.key]||{}).units/Math.max(...Object.values(mapUnits).map(v=>(v||{}).units||0),1))*100)+'%' : '10%', background:z.color, borderRadius:2 }} />
+                </div>
+              </div>
+            ))}
           </div>
         </div>
         <MapLoader units={mapUnits} metric={mapMetric} height={300} />
 
-        {/* ─────────────────────────────────────────── */}
-        {/* PERFORMANCE TAB                             */}
-        {/* ─────────────────────────────────────────── */}
+        {/* ── PERFORMANCE TAB ── */}
         {activeTab === 'performance' && (
           <div>
             {isAdmin && (
@@ -391,7 +359,10 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Admin: revenue chart */}
+            {/* ── Labour vs Production Value — admin only ── */}
+            {isAdmin && <LabourVsProduction />}
+
+            {/* Admin: weekly revenue chart */}
             {isAdmin && weeklyRevenue.length > 0 && (
               <div className="card" style={{ marginBottom:16 }}>
                 <div className="card-title">Weekly revenue — last 5 weeks</div>
@@ -477,12 +448,9 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ─────────────────────────────────────────── */}
-        {/* OVERVIEW TAB                                */}
-        {/* ─────────────────────────────────────────── */}
+        {/* ── OVERVIEW TAB ── */}
         {activeTab === 'overview' && (
           <div className="grid2">
-            {/* Pack today */}
             <div className="card">
               <div className="card-title" style={{ display:'flex', justifyContent:'space-between' }}>
                 Pack today — dispatch tomorrow
@@ -510,7 +478,6 @@ export default function Dashboard() {
             </div>
 
             <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-              {/* Stock alerts */}
               <div className="card">
                 <div className="card-title" style={{ display:'flex', justifyContent:'space-between' }}>
                   Stock alerts
@@ -543,7 +510,6 @@ export default function Dashboard() {
                 )}
               </div>
 
-              {/* Activity */}
               <div className="card">
                 <div className="card-title" style={{ display:'flex', justifyContent:'space-between' }}>
                   Recent activity
@@ -569,9 +535,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* ─────────────────────────────────────────── */}
-        {/* DELIVERY SCHEDULE TAB                       */}
-        {/* ─────────────────────────────────────────── */}
+        {/* ── DELIVERY SCHEDULE TAB ── */}
         {activeTab === 'schedule' && (
           <div>
             <div style={{ fontSize:12, color:'var(--ink3)', marginBottom:16 }}>
@@ -634,45 +598,6 @@ export default function Dashboard() {
           </div>
         )}
 
-
-        {/* ─────────────────────────────────────────── */}
-        {/* MAP TAB                                      */}
-        {/* ─────────────────────────────────────────── */}
-        {activeTab === 'map' && (
-          <div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 190px', gap:14, alignItems:'start' }}>
-              <div id="kk-zone-map" style={{ height:460, borderRadius:8, overflow:'hidden', border:'0.5px solid var(--border)' }} />
-              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                <div style={{ fontSize:10, letterSpacing:'1.5px', textTransform:'uppercase', color:'var(--ink3)', marginBottom:4 }}>Zones · this month</div>
-                {[
-                  { key:'City',  label:'City',  day:'Friday',    color:'#7F77DD', bg:'#EEEDFE', textColor:'#3C3489', pct:100 },
-                  { key:'West',  label:'West',  day:'Thursday',  color:'#EF9F27', bg:'#FAEEDA', textColor:'#633806', pct:78 },
-                  { key:'ONFC',  label:'ONFC',  day:'Monday',    color:'#E24B4A', bg:'#FCEBEB', textColor:'#791F1F', pct:59 },
-                  { key:'North', label:'North', day:'Wednesday', color:'#1D9E75', bg:'#E1F5EE', textColor:'#085041', pct:38 },
-                  { key:'East',  label:'East',  day:'Wednesday', color:'#378ADD', bg:'#E6F1FB', textColor:'#0C447C', pct:19 },
-                ].map(z => (
-                  <div key={z.key} style={{ background:'var(--surface)', border:'0.5px solid var(--border)', borderRadius:8, padding:'10px 12px', cursor:'pointer' }}
-                    onClick={() => {
-                      if (window._kkMap) {
-                        const coords = { City:[43.653,-79.383,12], West:[43.48,-79.85,10], ONFC:[43.72,-79.42,13], North:[44.05,-79.50,10], East:[43.88,-78.85,10] }
-                        const [lat,lng,zoom] = coords[z.key] || [43.7,-79.4,10]
-                        window._kkMap.flyTo([lat,lng], zoom, { duration:1.2 })
-                      }
-                    }}>
-                    <div style={{ fontSize:10, fontWeight:500, letterSpacing:'1px', textTransform:'uppercase', color:z.textColor }}>{z.label} · {z.day}</div>
-                    <div style={{ fontSize:22, fontWeight:500, color:z.textColor, lineHeight:1.2 }}>{((mapUnits[z.key]||{}).units||0).toLocaleString() + ' u / ' + ((mapUnits[z.key]||{}).orders||0) + ' ord'}</div>
-                    <div style={{ fontSize:11, color:'var(--ink3)' }}>units dispatched</div>
-                    <div style={{ height:4, background:z.bg, borderRadius:2, marginTop:6 }}>
-                      <div style={{ height:4, width: (mapUnits[z.key]||{}).units > 0 ? Math.round(((mapUnits[z.key]||{}).units / Math.max(...Object.values(mapUnits).map(v=>(v||{}).units||0),1)) * 100) + '%' : '10%', background:z.color, borderRadius:2 }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <MapLoader units={mapUnits} />
-          </div>
-        )}
-
       </div>
     </>
   )
@@ -705,14 +630,12 @@ function initBoundaryMap(units, metric) {
     attribution: '\u00a9 OpenStreetMap contributors', maxZoom:18
   }).addTo(map)
 
-  // Zone definitions — carefully positioned so circles don't overlap at zoom 9
-  // Each zone has a fixed anchor point well separated from others
   const zones = [
-    { key:'City',  label:'City',        lat:43.680, lng:-79.380, color:'#7F77DD', fill:'#EEEDFE' },
-    { key:'North', label:'North',       lat:44.100, lng:-79.480, color:'#1D9E75', fill:'#E1F5EE' },
-    { key:'West',  label:'West',        lat:43.380, lng:-80.050, color:'#EF9F27', fill:'#FAEEDA' },
-    { key:'East',  label:'East',        lat:43.880, lng:-78.820, color:'#378ADD', fill:'#E6F1FB' },
-    { key:'ONFC',  label:'ONFC',        lat:43.580, lng:-79.720, color:'#E24B4A', fill:'#FCEBEB' },
+    { key:'City',  label:'City',  lat:43.680, lng:-79.380, color:'#7F77DD', fill:'#EEEDFE' },
+    { key:'North', label:'North', lat:44.100, lng:-79.480, color:'#1D9E75', fill:'#E1F5EE' },
+    { key:'West',  label:'West',  lat:43.380, lng:-80.050, color:'#EF9F27', fill:'#FAEEDA' },
+    { key:'East',  label:'East',  lat:43.880, lng:-78.820, color:'#378ADD', fill:'#E6F1FB' },
+    { key:'ONFC',  label:'ONFC',  lat:43.580, lng:-79.720, color:'#E24B4A', fill:'#FCEBEB' },
   ]
 
   const showUnits = metric !== 'orders'
@@ -725,16 +648,10 @@ function initBoundaryMap(units, metric) {
     const u      = data.units  || 0
     const o      = data.orders || 0
     const metricVal = showUnits ? u : o
-
-    // Radius 20-55px based on selected metric
     const radius = maxVal > 0 ? Math.round(20 + (metricVal / maxVal) * 35) : 25
 
     const circle = window.L.circleMarker([z.lat, z.lng], {
-      radius:      radius,
-      fillColor:   z.fill,
-      color:       z.color,
-      weight:      2.5,
-      fillOpacity: 0.80,
+      radius, fillColor: z.fill, color: z.color, weight: 2.5, fillOpacity: 0.80,
     }).addTo(map)
 
     circle.bindTooltip(
@@ -746,28 +663,17 @@ function initBoundaryMap(units, metric) {
       { permanent: false, sticky: false, direction: 'top', offset: [0, -radius] }
     )
 
-    // Add a permanent label inside the circle
     const icon = window.L.divIcon({
       className: '',
-      html:
-        '<div style="' +
-          'width:' + (radius*2) + 'px;' +
-          'height:' + (radius*2) + 'px;' +
-          'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-          'pointer-events:none;' +
-        '">' +
-          '<div style="font-size:' + Math.max(9, Math.round(radius * 0.32)) + 'px;font-weight:700;color:' + z.color + ';line-height:1.1">' + z.label + '</div>' +
-          '<div style="font-size:' + Math.max(8, Math.round(radius * 0.30)) + 'px;font-weight:600;color:' + z.color + ';line-height:1.1">' + (showUnits ? u.toLocaleString() + 'u' : o + ' ord') + '</div>' +
-        '</div>',
-      iconSize:   [radius*2, radius*2],
-      iconAnchor: [radius,   radius],
+      html: '<div style="width:' + (radius*2) + 'px;height:' + (radius*2) + 'px;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">' +
+        '<div style="font-size:' + Math.max(9, Math.round(radius * 0.32)) + 'px;font-weight:700;color:' + z.color + ';line-height:1.1">' + z.label + '</div>' +
+        '<div style="font-size:' + Math.max(8, Math.round(radius * 0.30)) + 'px;font-weight:600;color:' + z.color + ';line-height:1.1">' + (showUnits ? u.toLocaleString() + 'u' : o + ' ord') + '</div>' +
+      '</div>',
+      iconSize: [radius*2, radius*2], iconAnchor: [radius, radius],
     })
 
-    window.L.marker([z.lat, z.lng], { icon: icon, interactive: false }).addTo(map)
-
+    window.L.marker([z.lat, z.lng], { icon, interactive: false }).addTo(map)
     circle.on('mouseover', function() { this.setStyle({ weight:4, fillOpacity:0.95 }) })
     circle.on('mouseout',  function() { this.setStyle({ weight:2.5, fillOpacity:0.80 }) })
   })
 }
-
-

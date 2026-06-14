@@ -365,7 +365,10 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
   if (!response.ok) throw new Error('API ' + response.status + ': ' + JSON.stringify(data))
   const text = data.content?.[0]?.text?.trim()
   if (!text) throw new Error('Empty response: ' + JSON.stringify(data))
-  return JSON.parse(text.replace(/```json|```/g, '').trim())
+  let cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
+const arrayMatch = cleaned.match(/\[[\s\S]*\]/)
+if (!arrayMatch) throw new Error('AI did not return a valid order list. Try again or use paste mode.')
+return JSON.parse(arrayMatch[0])
 }
 
 export default function Orders() {

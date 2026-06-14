@@ -53,6 +53,107 @@ function parseSlipDate(dateStr) {
   return new Date().toISOString().split('T')[0]
 }
 
+// ── Auto-packing logic ──────────────────────────────────────
+// Called before dispatching each pack item.
+// If packed_units < packsNeeded, auto-creates a packing run for the shortfall.
+async function autoPackIfNeeded(productCode, packsNeeded, dispatchDate, createdByName, addLog) {
+  if (!productCode || !packsNeeded) return
+
+  // Get current product state
+  const { data: prod } = await supabase
+    .from('products')
+    .select('code, name, units, freezer_units, packed_units')
+    .eq('code', productCode)
+    .single()
+
+  if (!prod) return
+
+  const packedAvailable = prod.packed_units || 0
+  if (packedAvailable >= packsNeeded) return // enough packed stock, no auto-pack needed
+
+  const shortfallPacks = packsNeeded - packedAvailable
+  const ps = PACK_SIZE[productCode] || 1
+  const shortfallUnits = shortfallPacks * ps
+
+  const freezerAvailable = prod.freezer_units || 0
+  if (freezerAvailable < shortfallUnits) {
+    if (addLog) addLog(`⚠ ${productCode}: not enough freezer stock for auto-pack (need ${shortfallUnits}, have ${freezerAvailable})`, 'warn')
+    return
+  }
+
+  if (addLog) addLog(`📦 Auto-packing ${shortfallPacks} packs (${shortfallUnits} units) of ${productCode}...`, '')
+
+  // 1. Log packing run
+  await supabase.from('packing_runs').insert({
+    date: dispatchDate,
+    product_code: productCode,
+    product_name: prod.name,
+    units_packed: shortfallUnits,
+    packs_produced: shortfallPacks,
+    units_per_pack: ps,
+    notes: 'Auto-packed for dispatch',
+    created_by_name: createdByName || 'auto',
+  })
+
+  // 2. Update freezer and packed
+  const newFreezer = freezerAvailable - shortfallUnits
+  const newPacked = packedAvailable + shortfallPacks
+  const newTotal = newFreezer + (newPacked * ps)
+  await supabase.from('products').update({
+    freezer_units: newFreezer,
+    packed_units: newPacked,
+    units: newTotal,
+  }).eq('code', productCode)
+
+  // 3. Deduct packaging materials
+  const { data: bomItems } = await supabase
+    .from('packaging_bom')
+    .select('*')
+    .eq('product_code', productCode)
+
+  if (bomItems?.length) {
+    for (const item of bomItems) {
+      const { data: rm } = await supabase
+        .from('raw_materials')
+        .select('stock')
+        .eq('name', item.material_name)
+        .single()
+      if (rm) {
+        const newStock = Math.max(0, (rm.stock || 0) - (item.qty_per_pack * shortfallPacks))
+        await supabase.from('raw_materials').update({ stock: newStock }).eq('name', item.material_name)
+      }
+    }
+    if (addLog) addLog(`✓ Auto-packed ${productCode}: ${shortfallPacks} packs, packaging deducted`, 'ok')
+  }
+}
+
+// Deduct from packed_units after dispatch
+async function deductFromPacked(productCode, packsDispatched) {
+  const { data: prod } = await supabase
+    .from('products')
+    .select('units, freezer_units, packed_units')
+    .eq('code', productCode)
+    .single()
+  if (!prod) return
+
+  const ps = PACK_SIZE[productCode] || 1
+  const unitsDispatched = packsDispatched * ps
+
+  // Pull from packed first, then freezer
+  let fromPacked = Math.min(prod.packed_units || 0, packsDispatched)
+  let fromFreezer = packsDispatched - fromPacked
+
+  const newPacked = (prod.packed_units || 0) - fromPacked
+  const newFreezer = (prod.freezer_units || 0) - (fromFreezer * ps)
+  const newTotal = Math.max(0, (prod.units || 0) - unitsDispatched)
+
+  await supabase.from('products').update({
+    packed_units: Math.max(0, newPacked),
+    freezer_units: Math.max(0, newFreezer),
+    units: newTotal,
+  }).eq('code', productCode)
+}
+
 export default function Dispatch() {
   const { profile } = useAuth()
   const [view, setView] = useState('ai')
@@ -72,7 +173,6 @@ export default function Dispatch() {
   const [manQty, setManQty] = useState('')
   const [manType, setManType] = useState('pack')
 
-  // ── Edit state ────────────────────────────────────────────
   const [editingDispatch, setEditingDispatch] = useState(null)
   const [editForm, setEditForm] = useState({ date: '', customer_name: '', invoice_number: '' })
   const [editItems, setEditItems] = useState([])
@@ -181,6 +281,7 @@ export default function Dispatch() {
     for (const slip of extracted) {
       const dateStr = parseSlipDate(slip.date)
       addLog(`Saving: ${slip.customer} — date: ${dateStr}`)
+
       const { data: dispatch, error: dispatchErr } = await supabase
         .from('dispatches').insert({
           date: dateStr, customer_name: slip.customer,
@@ -189,11 +290,19 @@ export default function Dispatch() {
         }).select().single()
       if (dispatchErr) { addLog(`❌ Dispatch save error: ${dispatchErr.message}`, 'err'); continue }
       savedSlips++
+
       for (const item of slip.items || []) {
         const units = calcUnits(item.code, item.qty, item.type)
+        const packs = item.type === 'pack' ? item.qty : null
         const prodDateStr = item.production_date ? parseSlipDate(item.production_date) : null
         const key = `${item.code}_${prodDateStr}`
         const prodVerified = prodDateStr ? verifiedItems[key] : null
+
+        // ── Auto-pack if needed (pack items only) ──
+        if (item.type === 'pack' && packs) {
+          await autoPackIfNeeded(item.code, packs, dateStr, profile?.name, addLog)
+        }
+
         const { error: itemErr } = await supabase.from('dispatch_items').insert({
           dispatch_id: dispatch.id,
           product_code: item.code,
@@ -203,10 +312,19 @@ export default function Dispatch() {
           production_verified: prodVerified
         })
         if (itemErr) { addLog(`❌ Item error (${item.code}): ${itemErr.message}`, 'err'); continue }
-        const { data: prod } = await supabase.from('products').select('units').eq('code', item.code).single()
-        if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', item.code)
+
+        // ── Deduct stock (packed first, then freezer) ──
+        if (item.type === 'pack' && packs) {
+          await deductFromPacked(item.code, packs)
+        } else {
+          // bulk/slice — deduct from units directly
+          const { data: prod } = await supabase.from('products').select('units').eq('code', item.code).single()
+          if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - units) }).eq('code', item.code)
+        }
+
         savedLines++
       }
+
       await supabase.from('activity').insert({
         type: 'dispatch', title: `Dispatch: ${slip.customer}`,
         description: `${slip.items?.length} lines · Inv #${slip.invoice || '—'}`,
@@ -223,16 +341,31 @@ export default function Dispatch() {
       .from('dispatches').insert({ date: manForm.date, customer_name: manForm.customer, invoice_number: manForm.invoice, created_by_name: profile?.name || 'admin' })
       .select().single()
     if (err) { alert('Save error: ' + err.message); return }
+
     for (const line of manLines) {
       const units = calcUnits(line.code, line.qty, line.type)
+      const packs = line.type === 'pack' ? line.qty : null
+
+      // ── Auto-pack if needed ──
+      if (line.type === 'pack' && packs) {
+        await autoPackIfNeeded(line.code, packs, manForm.date, profile?.name, null)
+      }
+
       await supabase.from('dispatch_items').insert({
         dispatch_id: dispatch.id, product_code: line.code,
         product_name: products.find(p => p.code === line.code)?.name || line.code,
         qty: line.qty, dispatch_type: line.type, units_dispatched: units
       })
-      const { data: prod } = await supabase.from('products').select('units').eq('code', line.code).single()
-      if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', line.code)
+
+      // ── Deduct stock ──
+      if (line.type === 'pack' && packs) {
+        await deductFromPacked(line.code, packs)
+      } else {
+        const { data: prod } = await supabase.from('products').select('units').eq('code', line.code).single()
+        if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - units) }).eq('code', line.code)
+      }
     }
+
     await supabase.from('activity').insert({
       type: 'dispatch', title: `Dispatch: ${manForm.customer}`,
       description: `${manLines.length} lines · Inv #${manForm.invoice || '—'}`,
@@ -261,14 +394,9 @@ export default function Dispatch() {
     setDeletingId(null)
   }
 
-  // ── Edit functions ────────────────────────────────────────
   function openEdit(dispatch) {
     setEditingDispatch(dispatch)
-    setEditForm({
-      date: dispatch.date,
-      customer_name: dispatch.customer_name,
-      invoice_number: dispatch.invoice_number || '',
-    })
+    setEditForm({ date: dispatch.date, customer_name: dispatch.customer_name, invoice_number: dispatch.invoice_number || '' })
     setEditItems((dispatch.dispatch_items || []).map(i => ({ ...i })))
   }
 
@@ -276,73 +404,40 @@ export default function Dispatch() {
     setEditItems(prev => prev.map((item, i) => {
       if (i !== idx) return item
       const updated = { ...item, [field]: val }
-      // Recalculate units if qty or type changes
       if (field === 'qty' || field === 'dispatch_type') {
-        updated.units_dispatched = calcUnits(
-          updated.product_code,
-          parseFloat(field === 'qty' ? val : updated.qty) || 0,
-          field === 'dispatch_type' ? val : updated.dispatch_type
-        )
+        updated.units_dispatched = calcUnits(updated.product_code, parseFloat(field === 'qty' ? val : updated.qty) || 0, field === 'dispatch_type' ? val : updated.dispatch_type)
       }
       return updated
     }))
   }
 
-  function removeEditItem(idx) {
-    setEditItems(prev => prev.filter((_, i) => i !== idx))
-  }
-
-  function addEditItem() {
-    setEditItems(prev => [...prev, { product_code: '', product_name: '', qty: 1, dispatch_type: 'pack', units_dispatched: 0, production_date: '', isNew: true }])
-  }
+  function removeEditItem(idx) { setEditItems(prev => prev.filter((_, i) => i !== idx)) }
+  function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', qty: 1, dispatch_type: 'pack', units_dispatched: 0, production_date: '', isNew: true }]) }
 
   async function saveEdit() {
     if (!editForm.customer_name) { alert('Customer name required'); return }
     setEditSaving(true)
     try {
-      // Restore old stock
       for (const item of editingDispatch.dispatch_items || []) {
         const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
         if (prod) await supabase.from('products').update({ units: prod.units + item.units_dispatched }).eq('code', item.product_code)
       }
-
-      // Update dispatch header
-      await supabase.from('dispatches').update({
-        date: editForm.date,
-        customer_name: editForm.customer_name,
-        invoice_number: editForm.invoice_number,
-      }).eq('id', editingDispatch.id)
-
-      // Replace all items
+      await supabase.from('dispatches').update({ date: editForm.date, customer_name: editForm.customer_name, invoice_number: editForm.invoice_number }).eq('id', editingDispatch.id)
       await supabase.from('dispatch_items').delete().eq('dispatch_id', editingDispatch.id)
       for (const item of editItems) {
         if (!item.product_code) continue
         const units = calcUnits(item.product_code, parseFloat(item.qty) || 0, item.dispatch_type)
         await supabase.from('dispatch_items').insert({
-          dispatch_id: editingDispatch.id,
-          product_code: item.product_code,
+          dispatch_id: editingDispatch.id, product_code: item.product_code,
           product_name: products.find(p => p.code === item.product_code)?.name || item.product_code,
-          qty: parseFloat(item.qty) || 0,
-          dispatch_type: item.dispatch_type,
-          units_dispatched: units,
-          production_date: item.production_date || null,
-          production_verified: item.production_verified || null,
+          qty: parseFloat(item.qty) || 0, dispatch_type: item.dispatch_type, units_dispatched: units,
+          production_date: item.production_date || null, production_verified: item.production_verified || null,
         })
-        // Deduct updated stock
         const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
         if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', item.product_code)
       }
-
-      await supabase.from('activity').insert({
-        type: 'dispatch',
-        title: `Dispatch Updated: ${editForm.customer_name}`,
-        description: `Inv #${editForm.invoice_number || '—'} — edited`,
-        created_by_name: profile?.name || 'admin'
-      })
-
-      setEditingDispatch(null)
-      setEditItems([])
-      loadData()
+      await supabase.from('activity').insert({ type: 'dispatch', title: `Dispatch Updated: ${editForm.customer_name}`, description: `Inv #${editForm.invoice_number || '—'} — edited`, created_by_name: profile?.name || 'admin' })
+      setEditingDispatch(null); setEditItems([]); loadData()
     } catch(err) { alert('Update failed: ' + err.message) }
     setEditSaving(false)
   }
@@ -428,43 +523,28 @@ export default function Dispatch() {
                           return (
                             <tr key={`${si}-${ii}`}>
                               <td style={{fontSize:11}}>{ii === 0 ? (editingExtracted
-                                ? <input defaultValue={slip.customer} onChange={e => { const s = [...extracted]; s[si].customer = e.target.value; setExtracted(s) }}
-                                    style={{width:'100%',fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
-                                : slip.customer) : ''}
-                              </td>
+                                ? <input defaultValue={slip.customer} onChange={e => { const s = [...extracted]; s[si].customer = e.target.value; setExtracted(s) }} style={{width:'100%',fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                : slip.customer) : ''}</td>
                               <td style={{fontSize:11,color:'var(--ink3)'}}>{ii === 0 ? (editingExtracted
-                                ? <input defaultValue={slip.invoice} onChange={e => { const s = [...extracted]; s[si].invoice = e.target.value; setExtracted(s) }}
-                                    style={{width:60,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
-                                : (slip.invoice || '—')) : ''}
-                              </td>
+                                ? <input defaultValue={slip.invoice} onChange={e => { const s = [...extracted]; s[si].invoice = e.target.value; setExtracted(s) }} style={{width:60,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                : (slip.invoice || '—')) : ''}</td>
                               <td>{editingExtracted
-                                ? <input defaultValue={item.code} onChange={e => { const s = [...extracted]; s[si].items[ii].code = e.target.value.toUpperCase(); setExtracted(s) }}
-                                    style={{width:70,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3,fontFamily:'var(--mono)'}} />
-                                : <span className="code-tag">{item.code}</span>}
-                              </td>
+                                ? <input defaultValue={item.code} onChange={e => { const s = [...extracted]; s[si].items[ii].code = e.target.value.toUpperCase(); setExtracted(s) }} style={{width:70,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3,fontFamily:'var(--mono)'}} />
+                                : <span className="code-tag">{item.code}</span>}</td>
                               <td>{editingExtracted
-                                ? <input type="number" defaultValue={item.qty} onChange={e => { const s = [...extracted]; s[si].items[ii].qty = parseInt(e.target.value)||0; setExtracted(s) }}
-                                    style={{width:50,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
-                                : item.qty}
-                              </td>
+                                ? <input type="number" defaultValue={item.qty} onChange={e => { const s = [...extracted]; s[si].items[ii].qty = parseInt(e.target.value)||0; setExtracted(s) }} style={{width:50,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                : item.qty}</td>
                               <td>{editingExtracted
-                                ? <select defaultValue={item.type} onChange={e => { const s = [...extracted]; s[si].items[ii].type = e.target.value; setExtracted(s) }}
-                                    style={{fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}}>
-                                    <option value="pack">pack</option>
-                                    <option value="bulk">bulk</option>
-                                    <option value="slice">slice</option>
+                                ? <select defaultValue={item.type} onChange={e => { const s = [...extracted]; s[si].items[ii].type = e.target.value; setExtracted(s) }} style={{fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}}>
+                                    <option value="pack">pack</option><option value="bulk">bulk</option><option value="slice">slice</option>
                                   </select>
-                                : <span className={`badge badge-${item.type==='pack'?'amber':'blue'}`}>{item.type}</span>}
-                              </td>
+                                : <span className={`badge badge-${item.type==='pack'?'amber':'blue'}`}>{item.type}</span>}</td>
                               <td style={{color:'var(--green)',fontWeight:500}}>{calcUnits(item.code,item.qty,item.type)}</td>
                               <td style={{fontSize:11}}>{editingExtracted
-                                ? <input defaultValue={item.production_date} onChange={e => { const s = [...extracted]; s[si].items[ii].production_date = e.target.value; setExtracted(s) }}
-                                    style={{width:80,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
-                                : <>{item.production_date || '—'}{prodDateStr && verified !== undefined && <span style={{marginLeft:4}}>{prodBadge(verified)}</span>}</>}
-                              </td>
+                                ? <input defaultValue={item.production_date} onChange={e => { const s = [...extracted]; s[si].items[ii].production_date = e.target.value; setExtracted(s) }} style={{width:80,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                : <>{item.production_date || '—'}{prodDateStr && verified !== undefined && <span style={{marginLeft:4}}>{prodBadge(verified)}</span>}</>}</td>
                               {editingExtracted && <td>
-                                <button onClick={() => { const s = [...extracted]; s[si].items.splice(ii,1); setExtracted([...s]) }}
-                                  style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:14}}>×</button>
+                                <button onClick={() => { const s = [...extracted]; s[si].items.splice(ii,1); setExtracted([...s]) }} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:14}}>×</button>
                               </td>}
                             </tr>
                           )
@@ -526,9 +606,7 @@ export default function Dispatch() {
                   {dispatches.map(d => (
                     <React.Fragment key={d.id}>
                       <tr style={{ background: expandedId === d.id ? 'var(--surface2)' : '' }}>
-                        <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
-                          {expandedId === d.id ? '▼' : '▶'}
-                        </td>
+                        <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{expandedId === d.id ? '▼' : '▶'}</td>
                         <td style={{fontSize:12,cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.date}</td>
                         <td style={{fontWeight:500,cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.customer_name}</td>
                         <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.invoice_number || '—'}</td>
@@ -536,12 +614,8 @@ export default function Dispatch() {
                         <td style={{fontSize:11,color:'var(--ink3)',cursor:'pointer'}} onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>{d.created_by_name}</td>
                         <td>
                           <div style={{ display:'flex', gap:4 }}>
-                            <button onClick={() => openEdit(d)}
-                              style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}>
-                              Edit
-                            </button>
-                            <button onClick={() => deleteDispatch(d)} disabled={deletingId === d.id}
-                              style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === d.id ? 0.5 : 1 }}>
+                            <button onClick={() => openEdit(d)} style={{ background: 'var(--kk-green)', border: 'none', color: '#fff', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)' }}>Edit</button>
+                            <button onClick={() => deleteDispatch(d)} disabled={deletingId === d.id} style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === d.id ? 0.5 : 1 }}>
                               {deletingId === d.id ? '...' : 'Del'}
                             </button>
                           </div>
@@ -573,10 +647,7 @@ export default function Dispatch() {
                                       {item.production_date || '—'}
                                       {item.production_date && item.production_verified !== null && item.production_verified !== undefined && (
                                         <span style={{marginLeft:4}}>
-                                          {item.production_verified
-                                            ? <span style={{color:'var(--green)'}}>✓</span>
-                                            : <span style={{color:'var(--red)'}}>✗</span>
-                                          }
+                                          {item.production_verified ? <span style={{color:'var(--green)'}}>✓</span> : <span style={{color:'var(--red)'}}>✗</span>}
                                         </span>
                                       )}
                                     </td>
@@ -596,7 +667,6 @@ export default function Dispatch() {
         )}
       </div>
 
-      {/* ── EDIT MODAL ── */}
       {editingDispatch && (
         <div className="modal-bg" onClick={e => e.target === e.currentTarget && setEditingDispatch(null)}>
           <div className="modal" style={{ maxWidth: 680 }}>
@@ -605,58 +675,31 @@ export default function Dispatch() {
             <div style={{ fontSize:13, color:'var(--ink3)', marginBottom:16 }}>
               Original: {editingDispatch.customer_name} · Inv #{editingDispatch.invoice_number || '—'}
             </div>
-
             <div className="field-row">
-              <div className="field" style={{margin:0}}>
-                <label>Date</label>
-                <input type="date" value={editForm.date} onChange={e => setEditForm(f => ({...f, date: e.target.value}))} />
-              </div>
-              <div className="field" style={{margin:0}}>
-                <label>Invoice #</label>
-                <input type="text" value={editForm.invoice_number} onChange={e => setEditForm(f => ({...f, invoice_number: e.target.value}))} placeholder="e.g. 4664" />
-              </div>
+              <div className="field" style={{margin:0}}><label>Date</label><input type="date" value={editForm.date} onChange={e => setEditForm(f => ({...f, date: e.target.value}))} /></div>
+              <div className="field" style={{margin:0}}><label>Invoice #</label><input type="text" value={editForm.invoice_number} onChange={e => setEditForm(f => ({...f, invoice_number: e.target.value}))} placeholder="e.g. 4664" /></div>
             </div>
-            <div className="field">
-              <label>Customer</label>
-              <input type="text" value={editForm.customer_name} onChange={e => setEditForm(f => ({...f, customer_name: e.target.value}))} />
-            </div>
-
-            <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>
-              Line Items ({editItems.length})
-            </div>
-
+            <div className="field"><label>Customer</label><input type="text" value={editForm.customer_name} onChange={e => setEditForm(f => ({...f, customer_name: e.target.value}))} /></div>
+            <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>Line Items ({editItems.length})</div>
             {editItems.map((item, idx) => (
               <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
                 <select style={{...sel, flex:2, minWidth:120}} value={item.product_code}
-                  onChange={e => {
-                    const p = products.find(p => p.code === e.target.value)
-                    setEditItems(prev => prev.map((it, i) => i === idx ? { ...it, product_code: e.target.value, product_name: p?.name || e.target.value } : it))
-                  }}>
+                  onChange={e => { const p = products.find(p => p.code === e.target.value); setEditItems(prev => prev.map((it, i) => i === idx ? { ...it, product_code: e.target.value, product_name: p?.name || e.target.value } : it)) }}>
                   <option value="">Select...</option>
                   {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
                 </select>
-                <input type="number" value={item.qty} onChange={e => updateEditItem(idx, 'qty', e.target.value)}
-                  style={{...sel, width:64}} placeholder="Qty" />
+                <input type="number" value={item.qty} onChange={e => updateEditItem(idx, 'qty', e.target.value)} style={{...sel, width:64}} placeholder="Qty" />
                 <select style={{...sel, width:90}} value={item.dispatch_type} onChange={e => updateEditItem(idx, 'dispatch_type', e.target.value)}>
-                  <option value="pack">Pack</option>
-                  <option value="bulk">Bulk</option>
-                  <option value="slice">Slice</option>
+                  <option value="pack">Pack</option><option value="bulk">Bulk</option><option value="slice">Slice</option>
                 </select>
-                <input type="date" value={item.production_date || ''} onChange={e => updateEditItem(idx, 'production_date', e.target.value)}
-                  style={{...sel, flex:1, minWidth:120}} />
-                <span style={{ fontSize:11, color:'var(--kk-green)', fontWeight:600, whiteSpace:'nowrap' }}>
-                  = {calcUnits(item.product_code, parseFloat(item.qty)||0, item.dispatch_type)} u
-                </span>
+                <input type="date" value={item.production_date || ''} onChange={e => updateEditItem(idx, 'production_date', e.target.value)} style={{...sel, flex:1, minWidth:120}} />
+                <span style={{ fontSize:11, color:'var(--kk-green)', fontWeight:600, whiteSpace:'nowrap' }}>= {calcUnits(item.product_code, parseFloat(item.qty)||0, item.dispatch_type)} u</span>
                 <button onClick={() => removeEditItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18 }}>×</button>
               </div>
             ))}
-
             <button className="btn btn-secondary btn-sm" onClick={addEditItem} style={{ marginBottom:16 }}>+ Add Line</button>
-
             <div style={{ display:'flex', gap:10 }}>
-              <button className="btn btn-green btn-full" onClick={saveEdit} disabled={editSaving}>
-                {editSaving ? 'Saving...' : 'Save Changes'}
-              </button>
+              <button className="btn btn-green btn-full" onClick={saveEdit} disabled={editSaving}>{editSaving ? 'Saving...' : 'Save Changes'}</button>
               <button className="btn btn-secondary" onClick={() => setEditingDispatch(null)}>Cancel</button>
             </div>
           </div>

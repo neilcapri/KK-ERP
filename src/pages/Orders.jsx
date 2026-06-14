@@ -14,6 +14,31 @@ const API_HEADERS = {
   'anthropic-dangerous-direct-browser-access': 'true',
 }
 
+// ── Case → Pack conversion map ─────────────────────────────
+// Default: 1 case = 6 packs
+// PVBRG, KCOC: 1 case = 12 packs
+// Cakes: 1 case = 4 packs
+const PACKS_PER_CASE_MAP = {
+  PVBRG: 12, KCOC: 12,
+  KLRCKE: 4, KCCKE: 4, KVCKE: 4,
+  KCC: 4, KVC: 4, KLRCup: 4,
+  PRMC: 4, CMC: 4, LMC: 4, TMC: 4,
+}
+
+function getPacksPerCase(code) {
+  return PACKS_PER_CASE_MAP[code] || 6
+}
+
+// ── Convert item to packs (canonical display unit) ──────────
+function itemToPacks(item) {
+  if (item.item_type === 'bulk') return null // bulk uses units
+  if (item.packs) return Math.round(item.packs)
+  if (item.cases) return Math.round(parseFloat(item.cases) * (item.packs_per_case || getPacksPerCase(item.product_code) || 6))
+  // fallback: quantity / units_per_pack
+  const upp = item.units_per_pack || 1
+  return Math.round((item.quantity || 0) / upp)
+}
+
 const RETAIL_COLS = [
   { code: 'PBB', label: 'PBB' }, { code: 'PCC', label: 'PCC' }, { code: 'KLR', label: 'KLR' },
   { code: 'NACo-S', label: 'NACo Single' }, { code: 'NACo-D', label: 'NACo Double' },
@@ -32,7 +57,6 @@ const RETAIL_COLS = [
   { code: 'CCB', label: 'CCB' }, { code: 'SFNL', label: 'SFNL' }, { code: 'CCBS', label: 'CCBS' },
 ]
 
-// FIXED: Updated cup codes to new product codes
 const BULK_COLS = [
   { code: 'KCC', label: 'Keto Choc Cupcake' }, { code: 'KVC', label: 'Keto Van Cupcake' },
   { code: 'KLRCup', label: 'KLR Cupcake' }, { code: 'CKAC', label: 'Almond Choc Cupcake' },
@@ -53,15 +77,13 @@ const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
 const BULK_MAP = {
   PBB: 'PBBBu', PCC: 'PCCBu', KLR: 'KLRBu',
   KAB: 'KABBu', KWAL: 'KWALBu', HPCo: 'HPCoBu', PVHC: 'PVHCBu', KABIS: 'KABISBu',
-  KSCD: 'KSCDBu',
-  VPCAN: 'VPCANBu', VPB: 'VPBBu', PNF: 'PNFBu',
+  KSCD: 'KSCDBu', VPCAN: 'VPCANBu', VPB: 'VPBBu', PNF: 'PNFBu',
 }
 
 const S = {
   KK_GREEN: '223824', KK_CREAM: 'E3DDD1', KK_PEACH: 'E79B81', CAT_GREEN: '2D4A35',
   TOTAL_BG: 'C8E6C9', TOTAL_FG: '1B5E20', GRAND_BG: '223824', GRAND_FG: 'E3DDD1',
-  DAY_BG: '521B93', DAY_FG: 'F7FFAE', ALT1: 'D6E4D8', ALT2: 'FFFFFF',
-  QTY_FG: '1A3A20', VAL_BG: 'E8F5E9',
+  DAY_BG: '521B93', DAY_FG: 'F7FFAE', QTY_FG: '1A3A20', VAL_BG: 'E8F5E9',
   STORE_PALETTE: ['F7FFAE','F8C7F1','D4E6FF','C1C985','D19EB9','E8F5E9','FFE4B5','E6E0FF','FFDAB9','C8F5F0'],
 }
 
@@ -119,6 +141,15 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
   }
 }
 
+// ── Helper: get packs from an order_item (always packs, never cases/units) ──
+function getItemPacks(item) {
+  if (item.packs) return Math.round(item.packs)
+  const ppc = item.packs_per_case || getPacksPerCase(item.product_code) || 6
+  if (item.cases) return Math.round(parseFloat(item.cases) * ppc)
+  const upp = item.units_per_pack || 1
+  return Math.round((item.quantity || 0) / Math.max(1, upp))
+}
+
 function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const ws = XLSX.utils.aoa_to_sheet([])
   const title = 'KONSCIOUS KITCHEN — ORDER SHEET' + (weekLabel ? ' — ' + weekLabel : '')
@@ -130,7 +161,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   for (const [count, label] of catGroups) { catRow.push(label); for (let i = 1; i < count; i++) catRow.push('') }
   if (includePricing) catRow.push(''); rows.push(catRow)
   const headerRow = ['Store']
-  for (const col of RETAIL_COLS) headerRow.push(col.label + '\n(' + col.code + ')')
+  for (const col of RETAIL_COLS) headerRow.push(col.label + '\n(' + col.code + ')\nPACKS')
   if (includePricing) headerRow.push('ORDER VALUE ($)'); rows.push(headerRow)
   const byDay = {}
   for (const o of orders) { const day = o.delivery_day || 'Unknown'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
@@ -143,21 +174,57 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
     dayRowIdxs.add(rows.length); merges.push({ s: { r: rows.length, c: 0 }, e: { r: rows.length, c: numCols - 1 } }); rows.push(dayRow)
     for (const order of dayOrders) {
-      const items = order.order_items || []; const qtyMap = {}, packsMap = {}, priceMap = {}
-      for (const item of items) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); const packs = item.packs || (item.cases ? item.cases * (item.packs_per_case || 6) : item.quantity); packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs; priceMap[item.product_code] = item.price_per_pack || 0 } }
+      const items = order.order_items || []
+      const packsMap = {}, priceMap = {}
+      for (const item of items) {
+        if (!item.product_code) continue
+        const packs = getItemPacks(item)
+        packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
+        priceMap[item.product_code] = item.price_per_pack || 0
+      }
       const storeRow = [order.customer_name]; let rowTotal = 0
-      for (const col of RETAIL_COLS) { const qty = qtyMap[col.code]; storeRow.push(qty || null); if (qty && priceMap[col.code]) rowTotal += packsMap[col.code] * priceMap[col.code] }
+      for (const col of RETAIL_COLS) {
+        const packs = packsMap[col.code]
+        storeRow.push(packs || null)
+        if (packs && priceMap[col.code]) rowTotal += packs * priceMap[col.code]
+      }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
       storeRowIdxs.add(rows.length); rows.push(storeRow)
     }
     const colTotals = new Array(RETAIL_COLS.length).fill(0); let grandTotal = 0
-    for (const order of dayOrders) { const items = order.order_items || []; const qtyMap = {}, packsMap = {}, priceMap = {}; for (const item of items) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); const packs = item.packs || (item.cases ? item.cases * (item.packs_per_case || 6) : item.quantity); packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs; priceMap[item.product_code] = item.price_per_pack || 0 } }; RETAIL_COLS.forEach((col, ci) => { const qty = qtyMap[col.code] || 0; colTotals[ci] += qty; if (qty && priceMap[col.code]) grandTotal += packsMap[col.code] * priceMap[col.code] }) }
+    for (const order of dayOrders) {
+      const packsMap = {}, priceMap = {}
+      for (const item of (order.order_items || [])) {
+        if (!item.product_code) continue
+        const packs = getItemPacks(item)
+        packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
+        priceMap[item.product_code] = item.price_per_pack || 0
+      }
+      RETAIL_COLS.forEach((col, ci) => {
+        const packs = packsMap[col.code] || 0
+        colTotals[ci] += packs
+        if (packs && priceMap[col.code]) grandTotal += packs * priceMap[col.code]
+      })
+    }
     const totalRow = ['TOTAL', ...colTotals.map(v => v || null)]
     if (includePricing) totalRow.push(grandTotal > 0 ? Math.round(grandTotal * 100) / 100 : null)
     totalRowIdxs.add(rows.length); rows.push(totalRow); rows.push([])
   }
   const grandColTotals = new Array(RETAIL_COLS.length).fill(0); let grandOrderTotal = 0
-  for (const order of orders) { const items = order.order_items || []; const qtyMap = {}, packsMap = {}, priceMap = {}; for (const item of items) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); const packs = item.packs || (item.cases ? item.cases * (item.packs_per_case || 6) : item.quantity); packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs; priceMap[item.product_code] = item.price_per_pack || 0 } }; RETAIL_COLS.forEach((col, ci) => { const qty = qtyMap[col.code] || 0; grandColTotals[ci] += qty; if (qty && priceMap[col.code]) grandOrderTotal += packsMap[col.code] * priceMap[col.code] }) }
+  for (const order of orders) {
+    const packsMap = {}, priceMap = {}
+    for (const item of (order.order_items || [])) {
+      if (!item.product_code) continue
+      const packs = getItemPacks(item)
+      packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
+      priceMap[item.product_code] = item.price_per_pack || 0
+    }
+    RETAIL_COLS.forEach((col, ci) => {
+      const packs = packsMap[col.code] || 0
+      grandColTotals[ci] += packs
+      if (packs && priceMap[col.code]) grandOrderTotal += packs * priceMap[col.code]
+    })
+  }
   const grandTotalRow = ['GRAND TOTAL', ...grandColTotals.map(v => v || null)]
   if (includePricing) grandTotalRow.push(grandOrderTotal > 0 ? Math.round(grandOrderTotal * 100) / 100 : null)
   const grandTotalIdx = rows.length; rows.push(grandTotalRow)
@@ -174,7 +241,7 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const title = 'KONSCIOUS KITCHEN — BULK ORDERS' + (weekLabel ? ' — ' + weekLabel : '')
   const numCols = BULK_COLS.length + 1 + (includePricing ? 1 : 0)
   const rows = []; const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push(''); rows.push(titleRow)
-  const headerRow = ['Store']; for (const col of BULK_COLS) headerRow.push(col.label + '\n(' + col.code + ')')
+  const headerRow = ['Store']; for (const col of BULK_COLS) headerRow.push(col.label + '\n(' + col.code + ')\nUNITS')
   if (includePricing) headerRow.push('ORDER VALUE ($)'); rows.push(headerRow)
   const byDay = {}; for (const o of orders) { const day = o.delivery_day || 'Unknown'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
@@ -184,22 +251,21 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
     const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
     dayRowIdxs.add(rows.length); merges.push({ s: { r: rows.length, c: 0 }, e: { r: rows.length, c: numCols - 1 } }); rows.push(dayRow)
     for (const order of dayOrders) {
-      const items = order.order_items || []; const qtyMap = {}, priceMap2 = {}
-      for (const item of items) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); priceMap2[item.product_code] = item.price_per_pack || 0 } }
+      const items = order.order_items || []; const qtyMap = {}, priceMap = {}
+      for (const item of items) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); priceMap[item.product_code] = item.price_per_pack || 0 } }
       const storeRow = [order.customer_name]; let rowTotal = 0
-      for (const col of BULK_COLS) { const qty = qtyMap[col.code] || null; storeRow.push(qty); if (qty && priceMap2[col.code]) rowTotal += qty * priceMap2[col.code] }
+      for (const col of BULK_COLS) { const qty = qtyMap[col.code] || null; storeRow.push(qty); if (qty && priceMap[col.code]) rowTotal += qty * priceMap[col.code] }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
       storeRowIdxs.add(rows.length); rows.push(storeRow)
     }
     const bulkTotals = new Array(BULK_COLS.length).fill(0); let dayBulkTotal = 0
-    for (const order of dayOrders) { const items = order.order_items || []; const qtyMap = {}, priceMap3 = {}; for (const item of items) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); priceMap3[item.product_code] = item.price_per_pack || 0 } }; BULK_COLS.forEach((col, ci) => { const qty = qtyMap[col.code] || 0; bulkTotals[ci] += qty; if (qty && priceMap3[col.code]) dayBulkTotal += qty * priceMap3[col.code] }) }
+    for (const order of dayOrders) { const qtyMap = {}, priceMap = {}; for (const item of (order.order_items || [])) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); priceMap[item.product_code] = item.price_per_pack || 0 } }; BULK_COLS.forEach((col, ci) => { const qty = qtyMap[col.code] || 0; bulkTotals[ci] += qty; if (qty && priceMap[col.code]) dayBulkTotal += qty * priceMap[col.code] }) }
     const totalRow = ['TOTAL', ...bulkTotals.map(v => v || null)]
     if (includePricing) totalRow.push(dayBulkTotal > 0 ? Math.round(dayBulkTotal * 100) / 100 : null)
     totalRowIdxs.add(rows.length); rows.push(totalRow); rows.push([])
   }
-  const grandBulkTotals = new Array(BULK_COLS.length).fill(0)
-  for (const order of orders) { const items = order.order_items || []; const qtyMap = {}; for (const item of items) { if (item.product_code) qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0) }; BULK_COLS.forEach((col, ci) => { grandBulkTotals[ci] += qtyMap[col.code] || 0 }) }
-  let grandBulkValue = 0; for (const order of orders) { for (const item of (order.order_items || [])) { if (BULK_CODES.has(item.product_code)) grandBulkValue += (item.quantity || 0) * (item.price_per_pack || 0) } }
+  const grandBulkTotals = new Array(BULK_COLS.length).fill(0); let grandBulkValue = 0
+  for (const order of orders) { for (const item of (order.order_items || [])) { if (BULK_CODES.has(item.product_code)) { grandBulkTotals[BULK_COLS.findIndex(c => c.code === item.product_code)] += item.quantity || 0; grandBulkValue += (item.quantity || 0) * (item.price_per_pack || 0) } } }
   const grandTotalRow = ['GRAND TOTAL', ...grandBulkTotals.map(v => v || null)]
   if (includePricing) grandTotalRow.push(grandBulkValue > 0 ? Math.round(grandBulkValue * 100) / 100 : null)
   const grandTotalIdx = rows.length; rows.push(grandTotalRow)
@@ -228,7 +294,6 @@ function isWeekOrder(order, offset = 0) {
   const d = new Date(order.dispatch_date + 'T00:00:00'); return d >= monday && d <= sunday
 }
 
-// FIXED: Added new cupcake/cake codes
 const UNITS_PER_PACK_MAP = {
   PBB: 2, PCC: 2, KLR: 2,
   KAB: 5, KWAL: 5, HPCo: 5, PVHC: 5, KABIS: 5,
@@ -237,73 +302,34 @@ const UNITS_PER_PACK_MAP = {
   PVBRG: 1, KCOC: 1, PVBR: 1,
   CMC: 1, LMC: 1, PRMC: 1, TMC: 1,
   KCC: 1, KVC: 1, KLRCup: 1, KCCKE: 1, KVCKE: 1, KLRCKE: 1,
+  NALCOB: 1, NBFB: 1,
 }
 
-function getPacksPerCase(product) { return product?.packs_per_case || 6 }
-function getUnitsPerPack(product) {
-  const upp = parseInt(product?.units_per_pack) || 0; if (upp > 1) return upp
-  const upc = parseInt(product?.units_per_case) || 0; const ppc = parseInt(product?.packs_per_case) || 6
-  if (upc > ppc) return Math.round(upc / ppc); return UNITS_PER_PACK_MAP[product?.code] || 1
-}
-function getUnitsPerCase(product) {
-  const upc = parseInt(product?.units_per_case) || 0; const ppc = getPacksPerCase(product); const upp = getUnitsPerPack(product)
-  if (upc > ppc) return upc; return ppc * upp
-}
-function packsFromCases(product, cases) { return (parseFloat(cases) || 0) * getPacksPerCase(product) }
-
-function CustomerSelect({ customers, value, onChange, onAddNew }) {
-  const [search, setSearch] = useState(value || '')
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-  useEffect(() => {
-    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-    document.addEventListener('mousedown', handler); return () => document.removeEventListener('mousedown', handler)
-  }, [])
-  const filtered = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 20)
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <input value={search} onChange={e => { setSearch(e.target.value); setOpen(true); onChange('') }} onFocus={() => setOpen(true)}
-        placeholder="Search or select customer..."
-        style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }} />
-      {open && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', zIndex: 200, maxHeight: 240, overflowY: 'auto' }}>
-          {filtered.map(c => (
-            <div key={c.id} onClick={() => { setSearch(c.name); onChange(c.id); setOpen(false) }}
-              style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f0f0f0' }}
-              onMouseEnter={e => e.target.style.background = '#f5f5f5'} onMouseLeave={e => e.target.style.background = ''}>
-              {c.name} <span style={{ fontSize: 10, color: '#888', marginLeft: 6 }}>{c.type}</span>
-            </div>
-          ))}
-          {search.length > 1 && !customers.find(c => c.name.toLowerCase() === search.toLowerCase()) && (
-            <div onClick={() => { onAddNew(search); setOpen(false) }}
-              style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, color: 'var(--kk-green)', fontWeight: 600, borderTop: '1px solid #eee', background: '#f9f9f9' }}>
-              + Add "{search}" as new customer
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// FIXED: Shows packs for pack items, units for bulk. Header updated to "Packs".
+// ── Dispatch slip — packs only for pack items, units for bulk ──
 function printDispatchSlip(ordersInput) {
   const pages = []
   for (let i = 0; i < ordersInput.length; i += 2) pages.push(ordersInput.slice(i, i + 2))
 
   function renderOrder(order) {
     const itemRows = (order.order_items || []).map(function(item) {
-      const isBulk = item.item_type === 'bulk' || (item.product_code && item.product_code.endsWith('Bu'))
-      const packs = item.packs
-        || (item.cases ? Math.round(parseFloat(item.cases) * (item.packs_per_case || 6)) : null)
-        || (item.units_per_pack > 1 ? Math.round(item.quantity / item.units_per_pack) : item.quantity)
-      const qtyDisplay = isBulk ? String(item.quantity) : String(packs)
+      const isBulk = item.item_type === 'bulk' || (item.product_code && (item.product_code.endsWith('Bu') || BULK_CODES.has(item.product_code)))
+      let displayQty
+      if (isBulk) {
+        displayQty = String(item.quantity || 0)
+      } else {
+        const packs = item.packs
+          || (item.cases ? Math.round(parseFloat(item.cases) * (item.packs_per_case || getPacksPerCase(item.product_code) || 6)) : null)
+          || (item.units_per_pack > 1 ? Math.round((item.quantity || 0) / item.units_per_pack) : (item.quantity || 0))
+        displayQty = String(Math.round(packs))
+      }
+      const colHeader = isBulk ? 'Units' : 'Packs'
       return '<tr>' +
         '<td>' + (item.product_name || '') + ' <span style="font-weight:700">(' + (item.product_code || '') + ')</span></td>' +
-        '<td style="text-align:center;font-weight:900">' + qtyDisplay + '</td>' +
+        '<td style="text-align:center;font-weight:900">' + displayQty + '</td>' +
         '<td style="background:#fffde7">&nbsp;</td>' +
         '</tr>'
     }).join('')
+
     return '<div class="order-block">' +
       '<div class="order-header">' +
         '<strong>' + (order.customer_name || '') + '</strong>' +
@@ -312,7 +338,7 @@ function printDispatchSlip(ordersInput) {
       '<div class="table-wrap"><table>' +
         '<thead><tr>' +
           '<th>Product</th>' +
-          '<th style="width:90px;text-align:center">Packs</th>' +
+          '<th style="width:90px;text-align:center">Packs / Units</th>' +
           '<th style="width:80px;background:#fffde7">Prod. Date</th>' +
         '</tr></thead>' +
         '<tbody>' + itemRows + '</tbody>' +
@@ -355,7 +381,7 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
   const productList = products.map(p => p.code + ': ' + p.name).join('\n')
   const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
   const neRule = isNaturesEmporium ? '\nSPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):\n- "brownie ganache 90g" or "brownie ganache pouch" = PVBRG (packaged, retail)\n- "brownie ganache" without 90g or pouch = PVBRG-BULK (bulk order)\n' : ''
-  const prompt = 'You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list using smart semantic understanding.\n\nOUR PRODUCT LIST:\n' + productList + '\n\nSEMANTIC MATCHING GUIDE (common customer names -> our product code):\n- blueberry muffin / paleo muffin = PBB\n- chocolate muffin / choc muffin = PCC\n- lemon raspberry muffin / lemon muffin = KLR\n- hazelnut donut / hazelnut doughnut = KHD\n- peanut butter donut / PB donut / vegan donut = VPBD\n- cinnamon donut = KSCD\n- brownie / mini brownie / brownie bar (NOT ganache) = PVBR\n- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG\n' + neRule + '- pecan bar = VPCAN\n- notella / nutella bar / no\'tella = PNF\n- pistachio bar = VPB\n- hemp cookies / hemp vegan cookie = PVHC\n- hazelnut protein cookie / hazelnut cookie = HPCo\n- ginger cookie / ginger snap = PGCo\n- shortbread / PO shortbread = POS\n- keto almond butter cookie = KAB\n- keto walnut cookie = KWAL\n- snickerdoodle = KSCo\n- collagen cookie / keto collagen = KCCo\n- banana bread / banana loaf = PVBB\n- ginger loaf = GBL\n- pumpkin loaf = KPL\n- focaccia = PFB\n- vanilla strawberry slice = VSCS\n- truffle cake slice = TRFCS\n- hazelnut royale slice / hazel royale = HRCS\n- truffle cake whole = WTC\n- pistachio raspberry mini cake = PRMC\n- carrot mini cake = CMC\n- lemon mini cake = LMC\n- truffle mini cake = TMC\n- almond biscotti / keto biscotti / biscotti shelf stable / almond biscottis = KABIS\n- keto chocolate cupcake = KCC\n- keto vanilla cupcake = KVC\n- klr cupcake = KLRCup\n- keto chocolate cake = KCCKE\n- keto vanilla cake = KVCKE\n- klr cake = KLRCKE\n- Use semantic understanding for anything not listed above\n- If 60% confident it matches, mark matched: true\n\nReturn ONLY a JSON array:\n[\n  {"product_name": "exact name from order", "quantity": 12, "product_code": "MATCHED_CODE", "matched": true},\n  {"product_name": "truly unrecognized item", "quantity": 6, "product_code": null, "matched": false}\n]\nReturn ONLY the JSON array, no other text.'
+  const prompt = 'You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list.\n\nOUR PRODUCT LIST:\n' + productList + '\n\nSEMANTIC MATCHING GUIDE:\n- blueberry muffin / paleo muffin = PBB\n- chocolate muffin / choc muffin = PCC\n- lemon raspberry muffin / lemon muffin = KLR\n- hazelnut donut / hazelnut doughnut = KHD\n- peanut butter donut / PB donut / vegan donut = VPBD\n- cinnamon donut = KSCD\n- brownie / mini brownie / brownie bar (NOT ganache) = PVBR\n- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG\n' + neRule + '- pecan bar = VPCAN\n- notella / nutella bar = PNF\n- pistachio bar = VPB\n- hemp cookies = PVHC\n- hazelnut protein cookie = HPCo\n- ginger cookie / ginger snap = PGCo\n- shortbread = POS\n- keto almond butter cookie = KAB\n- keto walnut cookie = KWAL\n- snickerdoodle = KSCo\n- collagen cookie = KCCo (KCOC)\n- banana bread / banana loaf = PVBB\n- ginger loaf = GBL\n- pumpkin loaf = KPL\n- focaccia = PFB\n- vanilla strawberry slice = VSCS\n- truffle cake slice = TRFCS\n- hazelnut royale slice = HRCS\n- truffle cake whole = WTC (TRFC)\n- pistachio raspberry mini cake = PRMC\n- carrot mini cake = CMC\n- lemon mini cake = LMC\n- truffle mini cake = TMC\n- almond biscotti / keto biscotti = KABIS\n- keto chocolate cupcake = KCC\n- keto vanilla cupcake = KVC\n- klr cupcake = KLRCup\n- keto chocolate cake = KCCKE\n- keto vanilla cake = KVCKE\n- klr cake = KLRCKE\n\nIMPORTANT: quantities in the order may be in cases, packs, or units. Return the quantity exactly as given — the system will handle conversion. Set quantity_type to "cases", "packs", or "units".\n\nReturn ONLY a JSON array:\n[\n  {"product_name": "exact name from order", "quantity": 12, "quantity_type": "packs", "product_code": "MATCHED_CODE", "matched": true},\n  {"product_name": "unrecognized item", "quantity": 6, "quantity_type": "units", "product_code": null, "matched": false}\n]\nReturn ONLY the JSON array, no other text.'
   const isPDF = fileType === 'application/pdf'
   const messages = isImage
     ? [{ role: 'user', content: [isPDF ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: content } } : { type: 'image', source: { type: 'base64', media_type: fileType, data: content } }, { type: 'text', text: prompt }] }]
@@ -364,11 +390,46 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
   const data = await response.json()
   if (!response.ok) throw new Error('API ' + response.status + ': ' + JSON.stringify(data))
   const text = data.content?.[0]?.text?.trim()
-  if (!text) throw new Error('Empty response: ' + JSON.stringify(data))
+  if (!text) throw new Error('Empty response from AI. Please try again.')
   let cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
-const arrayMatch = cleaned.match(/\[[\s\S]*\]/)
-if (!arrayMatch) throw new Error('AI did not return a valid order list. Try again or use paste mode.')
-return JSON.parse(arrayMatch[0])
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/)
+  if (!arrayMatch) throw new Error('AI did not return a valid order list. Try again or use paste mode.')
+  return JSON.parse(arrayMatch[0])
+}
+
+function CustomerSelect({ customers, value, onChange, onAddNew }) {
+  const [search, setSearch] = useState(value || '')
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler); return () => document.removeEventListener('mousedown', handler)
+  }, [])
+  const filtered = customers.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).slice(0, 20)
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <input value={search} onChange={e => { setSearch(e.target.value); setOpen(true); onChange('') }} onFocus={() => setOpen(true)}
+        placeholder="Search or select customer..."
+        style={{ width: '100%', padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', outline: 'none', boxSizing: 'border-box' }} />
+      {open && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid var(--border)', borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', zIndex: 200, maxHeight: 240, overflowY: 'auto' }}>
+          {filtered.map(c => (
+            <div key={c.id} onClick={() => { setSearch(c.name); onChange(c.id); setOpen(false) }}
+              style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f0f0f0' }}
+              onMouseEnter={e => e.target.style.background = '#f5f5f5'} onMouseLeave={e => e.target.style.background = ''}>
+              {c.name} <span style={{ fontSize: 10, color: '#888', marginLeft: 6 }}>{c.type}</span>
+            </div>
+          ))}
+          {search.length > 1 && !customers.find(c => c.name.toLowerCase() === search.toLowerCase()) && (
+            <div onClick={() => { onAddNew(search); setOpen(false) }}
+              style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, color: 'var(--kk-green)', fontWeight: 600, borderTop: '1px solid #eee', background: '#f9f9f9' }}>
+              + Add "{search}" as new customer
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function Orders() {
@@ -421,63 +482,127 @@ export default function Orders() {
   }
 
   function processAIItems(items) {
-    const matched = items.filter(i => i.matched); const unmatched = items.filter(i => !i.matched)
+    const matched = items.filter(i => i.matched)
+    const unmatched = items.filter(i => !i.matched)
     const orderMode = form.order_input_mode || 'cases'
+
     const enriched = matched.map(i => {
-      let productCode = i.product_code; let itemMode = orderMode === 'mix' ? 'pack' : orderMode
-      if (orderMode === 'bulk') { productCode = BULK_MAP[i.product_code] || i.product_code; itemMode = 'bulk' }
+      let productCode = i.product_code
+      let itemType = 'pack'
+      if (orderMode === 'bulk') { productCode = BULK_MAP[i.product_code] || i.product_code; itemType = 'bulk' }
+
       const p = products.find(p => p.code === productCode)
-      const ppc = parseInt(p?.packs_per_case) || 6; const upp = UNITS_PER_PACK_MAP[productCode] || parseInt(p?.units_per_pack) || 1; const upc = ppc * upp
-      const imode = (itemMode === 'bulk') ? 'units' : (orderMode === 'packs' ? 'packs' : 'cases')
-      const cases = imode === 'cases' ? parseFloat(i.quantity) : imode === 'packs' ? parseFloat(i.quantity) / ppc : null
-      const packs = imode === 'cases' ? parseFloat(i.quantity) * ppc : imode === 'packs' ? parseFloat(i.quantity) : null
-      const qty = imode === 'cases' ? parseFloat(i.quantity) * upc : imode === 'packs' ? parseFloat(i.quantity) * upp : parseFloat(i.quantity)
-      return { product_code: productCode, product_name: p?.name || i.product_name, input_mode: imode, item_type: itemMode === 'bulk' ? 'bulk' : 'pack', cases, packs, quantity: qty, packs_per_case: ppc, units_per_pack: upp, units_per_case: upc, price_per_pack: p?.price_per_pack || 0, notes: '' }
+      const ppc = PACKS_PER_CASE_MAP[productCode] || parseInt(p?.packs_per_case) || 6
+      const upp = UNITS_PER_PACK_MAP[productCode] || parseInt(p?.units_per_pack) || 1
+
+      // Convert AI quantity to packs
+      const qType = i.quantity_type || (orderMode === 'packs' ? 'packs' : orderMode === 'bulk' ? 'units' : 'cases')
+      let packs = null, quantity = 0
+
+      if (itemType === 'bulk') {
+        quantity = parseFloat(i.quantity) || 0
+      } else if (qType === 'cases') {
+        packs = Math.round(parseFloat(i.quantity) * ppc)
+        quantity = packs * upp
+      } else if (qType === 'packs') {
+        packs = Math.round(parseFloat(i.quantity))
+        quantity = packs * upp
+      } else {
+        // units — convert to packs
+        quantity = parseFloat(i.quantity) || 0
+        packs = Math.round(quantity / Math.max(1, upp))
+      }
+
+      return {
+        product_code: productCode,
+        product_name: p?.name || i.product_name,
+        input_mode: itemType === 'bulk' ? 'units' : 'packs',
+        item_type: itemType,
+        packs: itemType === 'bulk' ? null : packs,
+        cases: null,
+        quantity,
+        packs_per_case: ppc,
+        units_per_pack: upp,
+        price_per_pack: p?.price_per_pack || 0,
+        notes: ''
+      }
     })
-    setOrderItems(enriched); setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
+    setOrderItems(enriched)
+    setUnmatchedItems(unmatched.map(i => ({ ...i, selected_code: '', quantity: i.quantity })))
   }
 
   async function handleAttachment(e) {
     const file = e.target.files?.[0]; if (!file) return
     setForm(f => ({ ...f, attachment: file, attachment_preview: URL.createObjectURL(file) }))
     setAiLoading(true); setOrderItems([]); setUnmatchedItems([])
-    try { const base64 = await new Promise((res, rej) => { const reader = new FileReader(); reader.onload = () => res(reader.result.split(',')[1]); reader.onerror = rej; reader.readAsDataURL(file) }); processAIItems(await readOrderWithAI(base64, products, form.customer_name, true, file.type)) }
-    catch(err) { alert('Error: ' + err.message) }
+    try {
+      const base64 = await new Promise((res, rej) => { const reader = new FileReader(); reader.onload = () => res(reader.result.split(',')[1]); reader.onerror = rej; reader.readAsDataURL(file) })
+      processAIItems(await readOrderWithAI(base64, products, form.customer_name, true, file.type))
+    } catch(err) { alert('Error: ' + err.message) }
     setAiLoading(false); if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   async function handlePasteRead() {
     if (!pasteText.trim()) { alert('Please paste order text first'); return }
     setAiLoading(true); setOrderItems([]); setUnmatchedItems([])
-    try { processAIItems(await readOrderWithAI(pasteText, products, form.customer_name, false)) } catch(err) { alert('Error: ' + err.message) }
+    try { processAIItems(await readOrderWithAI(pasteText, products, form.customer_name, false)) }
+    catch(err) { alert('Error: ' + err.message) }
     setAiLoading(false)
   }
 
   function handleUnmatchedSelect(idx, code) {
     const p = products.find(p => p.code === code); if (!p) return
-    setOrderItems(prev => [...prev, { product_code: code, product_name: p.name, quantity: unmatchedItems[idx].quantity, price_per_pack: p.price_per_pack || 0, notes: '' }])
+    const ppc = PACKS_PER_CASE_MAP[code] || parseInt(p?.packs_per_case) || 6
+    const upp = UNITS_PER_PACK_MAP[code] || parseInt(p?.units_per_pack) || 1
+    const qty = unmatchedItems[idx].quantity || 1
+    const packs = Math.round(qty / Math.max(1, upp))
+    setOrderItems(prev => [...prev, { product_code: code, product_name: p.name, input_mode: 'packs', item_type: 'pack', packs, cases: null, quantity: packs * upp, packs_per_case: ppc, units_per_pack: upp, price_per_pack: p.price_per_pack || 0, notes: '' }])
     setUnmatchedItems(prev => prev.filter((_, i) => i !== idx))
   }
 
   function updateItem(idx, field, val) { setOrderItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeItem(idx) { setOrderItems(prev => prev.filter((_, i) => i !== idx)) }
+
   function addManualItem() {
-    const m = form.order_input_mode || 'cases'; const isBulk = m === 'bulk'; const imode = isBulk ? 'units' : (m === 'packs' ? 'packs' : 'cases')
-    setOrderItems(prev => [...prev, { product_code: '', product_name: '', input_mode: imode, item_type: isBulk ? 'bulk' : 'pack', cases: imode === 'cases' ? 1 : null, packs: imode === 'packs' ? 1 : null, quantity: imode === 'cases' ? 6 : 1, packs_per_case: 6, units_per_pack: 1, units_per_case: 6, price_per_pack: 0, notes: '' }])
+    const m = form.order_input_mode || 'packs'
+    const isBulk = m === 'bulk'
+    setOrderItems(prev => [...prev, {
+      product_code: '', product_name: '', input_mode: isBulk ? 'units' : 'packs',
+      item_type: isBulk ? 'bulk' : 'pack', packs: isBulk ? null : 1,
+      cases: null, quantity: isBulk ? 1 : 1, packs_per_case: 6, units_per_pack: 1, price_per_pack: 0, notes: ''
+    }])
   }
+
   function updateEditItem(idx, field, val) { setEditItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item)) }
   function removeEditItem(idx) { setEditItems(prev => prev.filter((_, i) => i !== idx)) }
-  function addEditItem() { setEditItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'cases', cases: 1, quantity: 6, units_per_case: 6, price_per_pack: 0, notes: '', isNew: true }]) }
+  function addEditItem() {
+    setEditItems(prev => [...prev, { product_code: '', product_name: '', input_mode: 'packs', item_type: 'pack', packs: 1, cases: null, quantity: 1, packs_per_case: 6, units_per_pack: 1, price_per_pack: 0, notes: '', isNew: true }])
+  }
   function startEditOrder(order) { setEditingOrder({ ...order }); setEditItems((order.order_items || []).map(i => ({ ...i }))); setViewOrder(null) }
 
   async function saveEditOrder() {
     if (editItems.length === 0) { alert('Please add at least one product'); return }
     setEditSaving(true)
     try {
-      const total = editItems.reduce((sum, i) => { const packs = i.packs || (i.cases ? parseFloat(i.cases) * (i.packs_per_case || 6) : parseFloat(i.quantity)); return sum + (packs * parseFloat(i.price_per_pack || 0)) }, 0)
+      const total = editItems.reduce((sum, i) => {
+        const packs = i.item_type === 'bulk' ? 0 : (i.packs || (i.cases ? parseFloat(i.cases) * (i.packs_per_case || 6) : Math.round((i.quantity || 0) / Math.max(1, i.units_per_pack || 1))))
+        return sum + (packs * parseFloat(i.price_per_pack || 0))
+      }, 0)
       await supabase.from('orders').update({ delivery_day: editingOrder.delivery_day || null, dispatch_date: editingOrder.dispatch_date || null, po_number: editingOrder.po_number || null, order_source: editingOrder.order_source, notes: editingOrder.notes || null, status: editingOrder.status, total_value: total, updated_at: new Date().toISOString() }).eq('id', editingOrder.id)
       await supabase.from('order_items').delete().eq('order_id', editingOrder.id)
-      await supabase.from('order_items').insert(editItems.map(i => ({ order_id: editingOrder.id, product_code: i.product_code || null, product_name: i.product_name, cases: parseFloat(i.cases || 1), quantity: parseFloat(i.quantity), units_per_case: parseInt(i.units_per_case || 6), price_per_pack: parseFloat(i.price_per_pack || 0), notes: i.notes || null })))
+      await supabase.from('order_items').insert(editItems.map(i => ({
+        order_id: editingOrder.id,
+        product_code: i.product_code || null,
+        product_name: i.product_name,
+        item_type: i.item_type || 'pack',
+        packs: i.item_type === 'bulk' ? null : (i.packs ? parseFloat(i.packs) : null),
+        cases: null,
+        quantity: parseFloat(i.quantity || 0),
+        packs_per_case: parseInt(i.packs_per_case || 6),
+        units_per_pack: parseInt(i.units_per_pack || 1),
+        price_per_pack: parseFloat(i.price_per_pack || 0),
+        notes: i.notes || null
+      })))
       setEditingOrder(null); setEditItems([]); await loadData()
     } catch(err) { alert('Save failed: ' + err.message) }
     setEditSaving(false)
@@ -490,24 +615,51 @@ export default function Orders() {
     try {
       let attachment_url = null
       if (form.attachment) {
-        const ext = form.attachment.name.split('.').pop(); const path = 'orders/' + Date.now() + '-' + form.customer_name.replace(/\s+/g,'-') + '.' + ext
+        const ext = form.attachment.name.split('.').pop()
+        const path = 'orders/' + Date.now() + '-' + form.customer_name.replace(/\s+/g,'-') + '.' + ext
         const { data: upData } = await supabase.storage.from('order-attachments').upload(path, form.attachment, { contentType: form.attachment.type })
         if (upData) { const { data: { publicUrl } } = supabase.storage.from('order-attachments').getPublicUrl(path); attachment_url = publicUrl }
       }
-      const { data: numData } = await supabase.rpc('generate_order_number'); const order_number = numData || 'KK' + Date.now()
-      const total = orderItems.reduce((sum, i) => { const packs = i.packs || (i.cases ? parseFloat(i.cases) * (i.packs_per_case || 6) : parseFloat(i.quantity)); return sum + (packs * parseFloat(i.price_per_pack || 0)) }, 0)
-      const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true }); const slipNum = 'SLIP-' + String((count || 0) + 1).padStart(3, '0')
-      const { data: order, error } = await supabase.from('orders').insert({ order_number, customer_id: form.customer_id || null, customer_name: form.customer_name, order_source: form.order_source, po_number: form.po_number || null, delivery_day: form.delivery_day || null, dispatch_date: form.dispatch_date || null, notes: form.notes || null, order_attachment_url: attachment_url, total_value: total, status: 'order_sheet', created_by_name: profile?.name, slip_number: slipNum }).select().single()
+      const { data: numData } = await supabase.rpc('generate_order_number')
+      const order_number = numData || 'KK' + Date.now()
+      const total = orderItems.reduce((sum, i) => {
+        const packs = i.item_type === 'bulk' ? 0 : (i.packs || Math.round((i.quantity || 0) / Math.max(1, i.units_per_pack || 1)))
+        return sum + (packs * parseFloat(i.price_per_pack || 0))
+      }, 0)
+      const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true })
+      const slipNum = 'SLIP-' + String((count || 0) + 1).padStart(3, '0')
+      const { data: order, error } = await supabase.from('orders').insert({
+        order_number, customer_id: form.customer_id || null, customer_name: form.customer_name,
+        order_source: form.order_source, po_number: form.po_number || null,
+        delivery_day: form.delivery_day || null, dispatch_date: form.dispatch_date || null,
+        notes: form.notes || null, order_attachment_url: attachment_url,
+        total_value: total, status: 'order_sheet', created_by_name: profile?.name, slip_number: slipNum
+      }).select().single()
       if (error) throw error
-      await supabase.from('order_items').insert(orderItems.map(i => ({ order_id: order.id, product_code: i.product_code || null, product_name: i.product_name, cases: i.cases ? parseFloat(i.cases) : null, packs: i.packs ? parseFloat(i.packs) : null, quantity: parseFloat(i.quantity), packs_per_case: parseInt(i.packs_per_case || 6), units_per_pack: parseInt(i.units_per_pack || 1), units_per_case: parseInt(i.units_per_case || 6), price_per_pack: parseFloat(i.price_per_pack || 0), notes: i.notes || null })))
+      await supabase.from('order_items').insert(orderItems.map(i => ({
+        order_id: order.id,
+        product_code: i.product_code || null,
+        product_name: i.product_name,
+        item_type: i.item_type || 'pack',
+        packs: i.item_type === 'bulk' ? null : (i.packs ? parseFloat(i.packs) : null),
+        cases: null,
+        quantity: parseFloat(i.quantity || 0),
+        packs_per_case: parseInt(i.packs_per_case || 6),
+        units_per_pack: parseInt(i.units_per_pack || 1),
+        price_per_pack: parseFloat(i.price_per_pack || 0),
+        notes: i.notes || null
+      })))
       if (form.customer_id && form.delivery_day) await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
-      await supabase.from('activity').insert({ type: 'dispatch', title: 'Order received: ' + form.customer_name, description: order_number + ' \u00b7 ' + slipNum + ' \u00b7 ' + orderItems.length + ' items \u00b7 $' + total.toFixed(2), created_by_name: profile?.name })
+      await supabase.from('activity').insert({ type: 'dispatch', title: 'Order received: ' + form.customer_name, description: order_number + ' · ' + slipNum + ' · ' + orderItems.length + ' items · $' + total.toFixed(2), created_by_name: profile?.name })
       setShowModal(false); resetForm(); await loadData()
     } catch(err) { alert('Save failed: ' + err.message) }
     setSaving(false)
   }
 
-  function resetForm() { setForm({ customer_id:'', customer_name:'', order_source:'Email', po_number:'', delivery_day:'', dispatch_date:'', notes:'', attachment:null, attachment_preview:null, order_input_mode:'' }); setOrderItems([]); setUnmatchedItems([]); setPasteText(''); setInputMode('upload') }
+  function resetForm() {
+    setForm({ customer_id:'', customer_name:'', order_source:'Email', po_number:'', delivery_day:'', dispatch_date:'', notes:'', attachment:null, attachment_preview:null, order_input_mode:'' })
+    setOrderItems([]); setUnmatchedItems([]); setPasteText(''); setInputMode('upload')
+  }
 
   async function updateStatus(id, status) {
     await supabase.from('orders').update({ status }).eq('id', id)
@@ -522,8 +674,10 @@ export default function Orders() {
     const { data: custData } = await supabase.from('customers').select('name, street_address, city, province, postal_code, phone').in('name', customerNames)
     const custMap = {}; (custData || []).forEach(c => { custMap[c.name] = c })
     const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet([])
-    const rows = []; rows.push(['KONSCIOUS KITCHEN \u2014 DELIVERY MANIFEST \u2014 ' + new Date().toLocaleDateString('en-CA')]); rows.push([]); rows.push(['#', 'Store Name', 'Address', 'City', 'Special Notes'])
-    toExport.forEach((order, i) => { const cust = custMap[order.customer_name] || {}; const addr = [cust.street_address, cust.province, cust.postal_code].filter(Boolean).join(', '); rows.push([i + 1, order.customer_name, addr || '\u2014', cust.city || '\u2014', order.notes || '\u2014']) })
+    const rows = []
+    rows.push(['KONSCIOUS KITCHEN — DELIVERY MANIFEST — ' + new Date().toLocaleDateString('en-CA')]); rows.push([])
+    rows.push(['#', 'Store Name', 'Address', 'City', 'Special Notes'])
+    toExport.forEach((order, i) => { const cust = custMap[order.customer_name] || {}; const addr = [cust.street_address, cust.province, cust.postal_code].filter(Boolean).join(', '); rows.push([i + 1, order.customer_name, addr || '—', cust.city || '—', order.notes || '—']) })
     XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' }); ws['!cols'] = [{ wch: 4 }, { wch: 32 }, { wch: 40 }, { wch: 18 }, { wch: 35 }]
     const encode = (r, c) => XLSX.utils.encode_cell({ r, c })
     for (let c = 0; c < 5; c++) { const a = encode(0, c); if (!ws[a]) ws[a] = { v: '', t: 's' }; ws[a].s = { font: { bold: true, sz: 13, color: { rgb: 'E3DDD1' } }, fill: { fgColor: { rgb: '223824' } }, alignment: { horizontal: 'left' } } }
@@ -538,23 +692,24 @@ export default function Orders() {
   async function exportOrderSheet(includePricing) {
     setExportLoading(true)
     try {
-      const offset = exportWeek === 'next' ? 1 : 0; const sheetOrders = orders.filter(o => isWeekOrder(o, offset))
+      const offset = exportWeek === 'next' ? 1 : 0
+      const sheetOrders = orders.filter(o => isWeekOrder(o, offset))
       if (!sheetOrders.length) { alert('No active orders for ' + (exportWeek === 'next' ? 'next' : 'this') + ' week.'); setExportLoading(false); return }
       const weekLabel = getWeekLabel(offset); const wb = XLSX.utils.book_new()
-      buildRetailSheet(wb, sheetOrders, includePricing, weekLabel); buildBulkSheet(wb, sheetOrders, weekLabel, includePricing)
-      const suffix = includePricing ? 'FULL' : 'TEAM'; const fileLabel = weekLabel.replace(/[^a-zA-Z0-9]/g, '_')
-      XLSX.writeFile(wb, 'KK_Order_Sheet_' + fileLabel + '_' + suffix + '.xlsx')
+      buildRetailSheet(wb, sheetOrders, includePricing, weekLabel)
+      buildBulkSheet(wb, sheetOrders, weekLabel, includePricing)
+      const suffix = includePricing ? 'FULL' : 'TEAM'
+      XLSX.writeFile(wb, 'KK_Order_Sheet_' + weekLabel.replace(/[^a-zA-Z0-9]/g, '_') + '_' + suffix + '.xlsx')
     } catch(err) { alert('Export failed: ' + err.message) }
     setExportLoading(false)
   }
 
   async function resetWeek() {
     const weekLabel = getWeekLabel(0)
-    if (!window.confirm('Archive all active orders for week of ' + weekLabel + ' and start fresh?\n\nNext-week orders will NOT be affected.')) return
+    if (!window.confirm('Archive all active orders for week of ' + weekLabel + '?\n\nNext-week orders will NOT be affected.')) return
     const currentWeekOrders = orders.filter(o => o.status !== 'archived' && isWeekOrder(o, 0))
     if (!currentWeekOrders.length) { alert('No active orders for this week to archive.'); return }
-    const ids = currentWeekOrders.map(o => o.id)
-    const { error } = await supabase.from('orders').update({ status: 'archived' }).in('id', ids)
+    const { error } = await supabase.from('orders').update({ status: 'archived' }).in('id', currentWeekOrders.map(o => o.id))
     if (error) { alert('Reset failed: ' + error.message); return }
     await loadData()
   }
@@ -562,8 +717,8 @@ export default function Orders() {
   function toggleOrder(id) { setSelectedOrders(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next }) }
   function toggleAll(orderList) {
     const allIds = orderList.map(o => o.id); const allSelected = allIds.every(id => selectedOrders.has(id))
-    if (allSelected) { setSelectedOrders(prev => { const next = new Set(prev); allIds.forEach(id => next.delete(id)); return next }) }
-    else { setSelectedOrders(prev => { const next = new Set(prev); allIds.forEach(id => next.add(id)); return next }) }
+    if (allSelected) setSelectedOrders(prev => { const next = new Set(prev); allIds.forEach(id => next.delete(id)); return next })
+    else setSelectedOrders(prev => { const next = new Set(prev); allIds.forEach(id => next.add(id)); return next })
   }
   function printSelected() { const toPrint = orders.filter(o => selectedOrders.has(o.id)); if (!toPrint.length) { alert('No orders selected.'); return }; printDispatchSlip(toPrint) }
 
@@ -627,18 +782,18 @@ export default function Orders() {
                     return (
                       <tr key={o.id} style={{ background: selectedOrders.has(o.id) ? 'var(--green-l)' : isStale ? '#FFF8E1' : '' }}>
                         <td><input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => toggleOrder(o.id)} style={{cursor:'pointer'}} /></td>
-                        <td><span style={{ fontSize:11, color:'var(--ink3)', fontFamily:'var(--mono)' }}>{o.slip_number || '\u2014'}</span></td>
+                        <td><span style={{ fontSize:11, color:'var(--ink3)', fontFamily:'var(--mono)' }}>{o.slip_number || '—'}</span></td>
                         <td><span className="code-tag">{o.order_number}</span></td>
                         <td style={{ fontWeight:500 }}>{o.customer_name}</td>
                         <td style={{ fontSize:11 }}>{o.order_source}</td>
-                        <td style={{ fontSize:11 }}>{o.dispatch_date || o.delivery_day || '\u2014'}</td>
+                        <td style={{ fontSize:11 }}>{o.dispatch_date || o.delivery_day || '—'}</td>
                         <td style={{ fontSize:11 }}>{o.order_items?.length || 0}</td>
                         {isAdmin && <td style={{ fontWeight:600, color:'var(--kk-green)', fontSize:12 }}>${(o.total_value||0).toFixed(2)}</td>}
                         <td><span className={'badge badge-' + STATUS_COLORS[o.status]}>{STATUS_LABELS[o.status]}</span></td>
                         <td style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
                           <button onClick={() => setViewOrder(o)} className="btn btn-secondary btn-sm">View</button>
                           {canEdit && <button onClick={() => startEditOrder(o)} className="btn btn-secondary btn-sm">Edit</button>}
-                          {canEdit && <button onClick={() => updateStatus(o.id, o.status === 'archived' ? 'order_sheet' : 'archived')} className="btn btn-sm" style={{ background: o.status === 'archived' ? '#7e57c2' : 'var(--surface)', color: o.status === 'archived' ? '#fff' : 'var(--ink3)', border: '1px solid var(--border)' }}>{o.status === 'archived' ? '\u21a9' : '🗄'}</button>}
+                          {canEdit && <button onClick={() => updateStatus(o.id, o.status === 'archived' ? 'order_sheet' : 'archived')} className="btn btn-sm" style={{ background: o.status === 'archived' ? '#7e57c2' : 'var(--surface)', color: o.status === 'archived' ? '#fff' : 'var(--ink3)', border: '1px solid var(--border)' }}>{o.status === 'archived' ? '↩' : '🗄'}</button>}
                           {canEdit && <button onClick={async () => { if(window.confirm('Delete order ' + o.order_number + '?')) { await supabase.from('orders').delete().eq('id', o.id); await loadData() }}} className="btn btn-red btn-sm">Del</button>}
                         </td>
                       </tr>
@@ -651,6 +806,7 @@ export default function Orders() {
         </div>
       </div>
 
+      {/* ── NEW ORDER MODAL ── */}
       {showModal && (
         <div className="modal-bg" onClick={e => e.target===e.currentTarget && setShowModal(false)}>
           <div className="modal" style={{ maxWidth: 640 }}>
@@ -667,15 +823,16 @@ export default function Orders() {
             </div>
             <div className="field">
               <label>Order Type</label>
-              <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', marginBottom: form.order_input_mode ? 16 : 0 }}>
+              <div style={{ display:'flex', gap:0, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', marginBottom:8 }}>
                 {[{ key:'cases', label:'📦 Cases' },{ key:'packs', label:'📦 Packs' },{ key:'bulk', label:'🧺 Bulk' },{ key:'mix', label:'🔀 Mix' }].map(m => (
                   <button key={m.key} onClick={() => setForm(f => ({ ...f, order_input_mode: m.key }))} style={{ flex:1, padding:'10px 8px', border:'none', cursor:'pointer', fontSize:12, fontFamily:'var(--display)', letterSpacing:0.5, textTransform:'uppercase', background: form.order_input_mode === m.key ? 'var(--kk-green)' : 'var(--surface)', color: form.order_input_mode === m.key ? 'var(--kk-cream)' : 'var(--ink3)', fontWeight: form.order_input_mode === m.key ? 700 : 400, borderRight: '1px solid var(--border)' }}>{m.label}</button>
                 ))}
               </div>
-              {!form.order_input_mode && <div style={{ fontSize:11, color:'var(--amber)', marginTop:4 }}>⚠️ Select order type to continue</div>}
-              {form.order_input_mode === 'packs' && <div style={{ fontSize:11, color:'var(--ink3)', marginTop:4 }}>📦 Packs = enter pack count directly.</div>}
-              {form.order_input_mode === 'bulk' && <div style={{ fontSize:11, color:'var(--ink3)', marginTop:4 }}>🧺 Bulk = single units. Products auto-switch to bulk codes (Bu).</div>}
-              {form.order_input_mode === 'mix' && <div style={{ fontSize:11, color:'var(--ink3)', marginTop:4 }}>🔀 Mix = set Pack or Bulk per item.</div>}
+              {!form.order_input_mode && <div style={{ fontSize:11, color:'var(--amber)' }}>⚠️ Select order type to continue</div>}
+              {form.order_input_mode === 'cases' && <div style={{ fontSize:11, color:'var(--ink3)' }}>📦 Enter cases — display will show packs. PVBRG/KCOC = 12 pks/case · Cakes = 4 pks/case · Default = 6 pks/case</div>}
+              {form.order_input_mode === 'packs' && <div style={{ fontSize:11, color:'var(--ink3)' }}>📦 Enter pack count directly.</div>}
+              {form.order_input_mode === 'bulk' && <div style={{ fontSize:11, color:'var(--ink3)' }}>🧺 Enter units. Products auto-switch to bulk codes.</div>}
+              {form.order_input_mode === 'mix' && <div style={{ fontSize:11, color:'var(--ink3)' }}>🔀 Set Pack or Bulk per item.</div>}
             </div>
             {form.order_input_mode && (
               <div className="field">
@@ -703,8 +860,8 @@ export default function Orders() {
                 <div style={{ fontSize:12, fontWeight:700, color:'#9E5A3E', marginBottom:8 }}>⚠️ {unmatchedItems.length} item(s) not matched:</div>
                 {unmatchedItems.map((item, idx) => (
                   <div key={idx} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6 }}>
-                    <span style={{ fontSize:12, flex:1 }}>{item.product_name} &times; {item.quantity}</span>
-                    <select style={{ ...sel, width:'auto', flex:2, padding:'6px 10px' }} onChange={e => handleUnmatchedSelect(idx, e.target.value)} defaultValue=""><option value="">Select product...</option>{products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}<option value="OTHER">— Other —</option></select>
+                    <span style={{ fontSize:12, flex:1 }}>{item.product_name} × {item.quantity}</span>
+                    <select style={{ ...sel, width:'auto', flex:2, padding:'6px 10px' }} onChange={e => handleUnmatchedSelect(idx, e.target.value)} defaultValue=""><option value="">Select product...</option>{products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}</select>
                     <button onClick={() => setUnmatchedItems(prev => prev.filter((_,i)=>i!==idx))} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:16 }}>&times;</button>
                   </div>
                 ))}
@@ -713,55 +870,90 @@ export default function Orders() {
             {orderItems.length > 0 && (
               <div style={{ marginBottom:12 }}>
                 <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>Order Items ({orderItems.length})</div>
-                {orderItems.map((item, idx) => (
-                  <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
-                    <div style={{ flex:3, minWidth:180 }}>
-                      {form.order_input_mode === 'mix' && (
-                        <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden', marginBottom:4 }}>
-                          {['pack','bulk'].map(t => (
-                            <button key={t} onClick={() => {
-                              const isBulk = t === 'bulk'; let newCode = item.product_code
-                              if (isBulk && BULK_MAP[item.product_code]) newCode = BULK_MAP[item.product_code]
-                              if (!isBulk) { const rev = Object.entries(BULK_MAP).find(([, v]) => v === item.product_code); if (rev) newCode = rev[0] }
-                              const p = products.find(p => p.code === newCode)
-                              updateItem(idx, 'item_type', t); updateItem(idx, 'input_mode', isBulk ? 'units' : 'cases'); updateItem(idx, 'product_code', newCode); updateItem(idx, 'product_name', p?.name || item.product_name); updateItem(idx, 'price_per_pack', p?.price_per_pack || 0)
-                            }} style={{ flex:1, padding:'3px 8px', border:'none', cursor:'pointer', fontSize:10, fontFamily:'var(--display)', textTransform:'uppercase', background: (item.item_type || 'pack') === t ? '#E79B81' : 'var(--surface)', color: (item.item_type || 'pack') === t ? '#fff' : 'var(--ink3)' }}>{t}</button>
-                          ))}
-                        </div>
-                      )}
-                      <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''} onChange={e => {
-                        if (e.target.value === 'OTHER') { updateItem(idx, 'product_code', 'OTHER'); updateItem(idx, 'product_name', 'Other'); updateItem(idx, 'price_per_pack', 0) }
-                        else { const p = products.find(p => p.code === e.target.value); const ppc = parseInt(p?.packs_per_case) || 6; const upp = UNITS_PER_PACK_MAP[p?.code] || parseInt(p?.units_per_pack) || 1; const upc = ppc * upp; updateItem(idx, 'product_code', p?.code || ''); updateItem(idx, 'product_name', p?.name || item.product_name); updateItem(idx, 'price_per_pack', p?.price_per_pack || 0); updateItem(idx, 'packs_per_case', ppc); updateItem(idx, 'units_per_pack', upp); updateItem(idx, 'units_per_case', upc); if (item.input_mode === 'cases' && item.cases) { updateItem(idx, 'packs', parseFloat(item.cases) * ppc); updateItem(idx, 'quantity', parseFloat(item.cases) * upc) } }
-                      }}><option value="">{item.product_name || 'Select product...'}</option>{products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}<option value="OTHER">— Other —</option></select>
+                {orderItems.map((item, idx) => {
+                  const isBulk = item.item_type === 'bulk'
+                  const ppc = PACKS_PER_CASE_MAP[item.product_code] || item.packs_per_case || 6
+                  const upp = item.units_per_pack || 1
+                  return (
+                    <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
+                      <div style={{ flex:3, minWidth:180 }}>
+                        {form.order_input_mode === 'mix' && (
+                          <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:4, overflow:'hidden', marginBottom:4 }}>
+                            {['pack','bulk'].map(t => (
+                              <button key={t} onClick={() => {
+                                const isBulkT = t === 'bulk'; let newCode = item.product_code
+                                if (isBulkT && BULK_MAP[item.product_code]) newCode = BULK_MAP[item.product_code]
+                                if (!isBulkT) { const rev = Object.entries(BULK_MAP).find(([, v]) => v === item.product_code); if (rev) newCode = rev[0] }
+                                const p = products.find(p => p.code === newCode)
+                                updateItem(idx, 'item_type', t)
+                                updateItem(idx, 'input_mode', isBulkT ? 'units' : 'packs')
+                                updateItem(idx, 'product_code', newCode)
+                                updateItem(idx, 'product_name', p?.name || item.product_name)
+                                updateItem(idx, 'price_per_pack', p?.price_per_pack || 0)
+                              }} style={{ flex:1, padding:'3px 8px', border:'none', cursor:'pointer', fontSize:10, fontFamily:'var(--display)', textTransform:'uppercase', background: (item.item_type || 'pack') === t ? '#E79B81' : 'var(--surface)', color: (item.item_type || 'pack') === t ? '#fff' : 'var(--ink3)' }}>{t}</button>
+                            ))}
+                          </div>
+                        )}
+                        <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''} onChange={e => {
+                          const p = products.find(p => p.code === e.target.value)
+                          const newPpc = PACKS_PER_CASE_MAP[e.target.value] || parseInt(p?.packs_per_case) || 6
+                          const newUpp = UNITS_PER_PACK_MAP[e.target.value] || parseInt(p?.units_per_pack) || 1
+                          updateItem(idx, 'product_code', p?.code || '')
+                          updateItem(idx, 'product_name', p?.name || '')
+                          updateItem(idx, 'price_per_pack', p?.price_per_pack || 0)
+                          updateItem(idx, 'packs_per_case', newPpc)
+                          updateItem(idx, 'units_per_pack', newUpp)
+                          if (item.packs) updateItem(idx, 'quantity', item.packs * newUpp)
+                        }}>
+                          <option value="">{item.product_name || 'Select product...'}</option>
+                          {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                        </select>
+                      </div>
+
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        {isBulk
+                          ? <span style={{ fontSize:10, color:'#E79B81', fontFamily:'var(--display)', letterSpacing:1, padding:'4px 8px', background:'#fff3ee', borderRadius:4 }}>UNITS</span>
+                          : (form.order_input_mode === 'cases' && (
+                            <span style={{ fontSize:10, color:'var(--ink3)', padding:'4px 6px', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4 }}>
+                              1 case = {ppc} packs
+                            </span>
+                          ))
+                        }
+                        <input type="number"
+                          value={isBulk ? (item.quantity || '') : (form.order_input_mode === 'cases' ? (item.cases || '') : (item.packs || ''))}
+                          onChange={e => {
+                            const val = parseFloat(e.target.value) || 0
+                            if (isBulk) {
+                              updateItem(idx, 'quantity', val)
+                            } else if (form.order_input_mode === 'cases') {
+                              const packs = Math.round(val * ppc)
+                              updateItem(idx, 'cases', val)
+                              updateItem(idx, 'packs', packs)
+                              updateItem(idx, 'quantity', packs * upp)
+                            } else {
+                              updateItem(idx, 'packs', Math.round(val))
+                              updateItem(idx, 'cases', null)
+                              updateItem(idx, 'quantity', Math.round(val) * upp)
+                            }
+                          }}
+                          placeholder={isBulk ? 'Units' : form.order_input_mode === 'cases' ? 'Cases' : 'Packs'}
+                          style={{ ...sel, width:70, padding:'6px 8px', fontSize:14, fontWeight:700 }} />
+                        {/* Display: show packs result */}
+                        {!isBulk && form.order_input_mode === 'cases' && item.packs && (
+                          <span style={{ fontSize:12, color:'var(--kk-green)', fontWeight:700, whiteSpace:'nowrap' }}>
+                            = {item.packs} pks
+                          </span>
+                        )}
+                        {!isBulk && form.order_input_mode !== 'cases' && item.packs && (
+                          <span style={{ fontSize:11, color:'var(--ink3)' }}>pks</span>
+                        )}
+                      </div>
+
+                      <input type="text" value={item.notes || ''} placeholder="Notes" onChange={e => updateItem(idx,'notes',e.target.value)} style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
+                      <button onClick={() => removeItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>&times;</button>
                     </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
-                      {(item.item_type !== 'bulk' && form.order_input_mode !== 'bulk') && (
-                        <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden', fontSize:11 }}>
-                          {['cases','packs'].map(m => (
-                            <button key={m} onClick={() => {
-                              updateItem(idx, 'input_mode', m); const p = products.find(p => p.code === item.product_code); const ppc = parseInt(p?.packs_per_case) || 6; const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1; const upc = ppc * upp
-                              if (m === 'cases') { const cs = item.packs ? Math.round(item.packs / ppc) : item.quantity ? Math.round(item.quantity / upc) : 1; updateItem(idx, 'cases', cs); updateItem(idx, 'packs', cs * ppc); updateItem(idx, 'quantity', cs * upc) }
-                              else { const pks = item.cases ? item.cases * ppc : item.quantity ? Math.round(item.quantity / upp) : 1; updateItem(idx, 'packs', pks); updateItem(idx, 'cases', pks / ppc); updateItem(idx, 'quantity', pks * upp) }
-                            }} style={{ padding:'4px 8px', border:'none', cursor:'pointer', fontSize:11, background: (item.input_mode || 'cases') === m ? 'var(--kk-green)' : 'var(--surface)', color: (item.input_mode || 'cases') === m ? 'var(--kk-cream)' : 'var(--ink3)', fontFamily:'var(--display)', letterSpacing:0.5, textTransform:'uppercase' }}>{m}</button>
-                          ))}
-                        </div>
-                      )}
-                      {(item.item_type === 'bulk' || form.order_input_mode === 'bulk') && <span style={{ fontSize:10, color:'#E79B81', fontFamily:'var(--display)', letterSpacing:1, padding:'4px 8px', background:'#fff3ee', borderRadius:4 }}>BULK</span>}
-                      <input type="number" value={item.input_mode === 'cases' ? (item.cases || 1) : item.input_mode === 'packs' ? (item.packs || 1) : item.quantity}
-                        onChange={e => {
-                          const val = parseFloat(e.target.value) || 0; const p = products.find(p => p.code === item.product_code); const ppc = parseInt(p?.packs_per_case) || 6; const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1; const upc = ppc * upp
-                          if (item.input_mode === 'cases') { updateItem(idx, 'cases', e.target.value); updateItem(idx, 'packs', val * ppc); updateItem(idx, 'quantity', val * upc); updateItem(idx, 'packs_per_case', ppc); updateItem(idx, 'units_per_pack', upp); updateItem(idx, 'units_per_case', upc) }
-                          else if (item.input_mode === 'packs') { updateItem(idx, 'packs', e.target.value); updateItem(idx, 'cases', val / ppc); updateItem(idx, 'quantity', val * upp); updateItem(idx, 'packs_per_case', ppc); updateItem(idx, 'units_per_pack', upp); updateItem(idx, 'units_per_case', upc) }
-                          else { updateItem(idx, 'quantity', val); updateItem(idx, 'cases', null); updateItem(idx, 'packs', null) }
-                        }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
-                      {item.input_mode === 'cases' && item.packs_per_case > 1 && <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.packs || (item.cases||1) * (item.packs_per_case||6)} pks / {item.quantity} u</span>}
-                      {item.input_mode === 'cases' && (item.packs_per_case||6) === 1 && <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>}
-                      {item.input_mode === 'packs' && (item.units_per_pack||1) > 1 && <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>}
-                    </div>
-                    <input type="text" value={item.notes || ''} placeholder="Notes" onChange={e => updateItem(idx,'notes',e.target.value)} style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
-                    <button onClick={() => removeItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>&times;</button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
             <button className="btn btn-secondary btn-sm" onClick={addManualItem} style={{ marginBottom:12 }}>+ Add Item Manually</button>
@@ -774,6 +966,7 @@ export default function Orders() {
         </div>
       )}
 
+      {/* ── VIEW ORDER MODAL ── */}
       {viewOrder && (
         <div className="modal-bg" onClick={e => e.target===e.currentTarget && setViewOrder(null)}>
           <div className="modal" style={{ maxWidth: 640 }}>
@@ -785,7 +978,7 @@ export default function Orders() {
                   <span className="code-tag">{viewOrder.order_number}</span>
                   {viewOrder.slip_number && <span style={{ fontSize:11, color:'var(--ink3)', fontFamily:'var(--mono)' }}>{viewOrder.slip_number}</span>}
                   <span className={'badge badge-' + STATUS_COLORS[viewOrder.status]}>{STATUS_LABELS[viewOrder.status]}</span>
-                  <span style={{ fontSize:11, color:'var(--ink3)' }}>{viewOrder.order_source}{viewOrder.po_number ? ' \u00b7 PO: ' + viewOrder.po_number : ''}</span>
+                  <span style={{ fontSize:11, color:'var(--ink3)' }}>{viewOrder.order_source}{viewOrder.po_number ? ' · PO: ' + viewOrder.po_number : ''}</span>
                 </div>
               </div>
               <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
@@ -795,33 +988,47 @@ export default function Orders() {
               </div>
             </div>
             {canEdit && (
-              <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
-                <button onClick={() => updateStatus(viewOrder.id, viewOrder.status === 'archived' ? 'order_sheet' : 'archived')} style={{ padding:'6px 14px', borderRadius:20, border:'1px solid var(--border)', cursor:'pointer', fontSize:11, fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase', background: viewOrder.status === 'archived' ? '#7e57c2' : 'var(--surface)', color: viewOrder.status === 'archived' ? '#fff' : 'var(--ink3)' }}>{viewOrder.status === 'archived' ? '\u21a9 Unarchive' : '🗄 Archive'}</button>
+              <div style={{ display:'flex', gap:6, marginBottom:16 }}>
+                <button onClick={() => updateStatus(viewOrder.id, viewOrder.status === 'archived' ? 'order_sheet' : 'archived')} style={{ padding:'6px 14px', borderRadius:20, border:'1px solid var(--border)', cursor:'pointer', fontSize:11, fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase', background: viewOrder.status === 'archived' ? '#7e57c2' : 'var(--surface)', color: viewOrder.status === 'archived' ? '#fff' : 'var(--ink3)' }}>{viewOrder.status === 'archived' ? '↩ Unarchive' : '🗄 Archive'}</button>
               </div>
             )}
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16, fontSize:12 }}>
-              <div><span style={{ color:'var(--ink3)' }}>Packing Day:</span> <strong>{viewOrder.delivery_day || '\u2014'}</strong></div>
-              <div><span style={{ color:'var(--ink3)' }}>Dispatch Date:</span> <strong>{viewOrder.dispatch_date || '\u2014'}</strong></div>
+              <div><span style={{ color:'var(--ink3)' }}>Packing Day:</span> <strong>{viewOrder.delivery_day || '—'}</strong></div>
+              <div><span style={{ color:'var(--ink3)' }}>Dispatch Date:</span> <strong>{viewOrder.dispatch_date || '—'}</strong></div>
               {isAdmin && <div><span style={{ color:'var(--ink3)' }}>Total Value:</span> <strong style={{ color:'var(--kk-green)' }}>${(viewOrder.total_value||0).toFixed(2)}</strong></div>}
               <div><span style={{ color:'var(--ink3)' }}>Created by:</span> <strong>{viewOrder.created_by_name}</strong></div>
             </div>
             {viewOrder.order_attachment_url && <div style={{ marginBottom:16 }}><a href={viewOrder.order_attachment_url} target="_blank" rel="noopener noreferrer" className="btn btn-secondary btn-sm">📎 View Original Order</a></div>}
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Product</th><th>Code</th><th>Cases</th><th>Packs</th><th>Units</th>{isAdmin && <th>Pack $</th>}{isAdmin && <th>Line Total</th>}<th>Notes</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Code</th>
+                    <th>Packs</th>
+                    {isAdmin && <th>Pack $</th>}
+                    {isAdmin && <th>Line Total</th>}
+                    <th>Notes</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {(viewOrder.order_items || []).map(item => (
-                    <tr key={item.id}>
-                      <td style={{ fontWeight:500, fontSize:12 }}>{item.product_name}</td>
-                      <td>{item.product_code ? <span className="code-tag">{item.product_code}</span> : '\u2014'}</td>
-                      <td style={{ fontWeight:600 }}>{item.cases || '\u2014'}</td>
-                      <td style={{ fontWeight:600, color:'var(--ink2)' }}>{item.packs || (item.cases ? (item.cases * (item.packs_per_case||6)) : '\u2014')}</td>
-                      <td style={{ fontWeight:600, color:'var(--kk-green)' }}>{item.quantity}</td>
-                      {isAdmin && <td style={{ fontSize:11, color:'var(--ink3)' }}>${(item.price_per_pack||0).toFixed(2)}</td>}
-                      {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${((item.packs || (item.cases ? item.cases*(item.packs_per_case||6) : item.quantity)) * (item.price_per_pack||0)).toFixed(2)}</td>}
-                      <td style={{ fontSize:11, color:'var(--ink3)' }}>{item.notes || '\u2014'}</td>
-                    </tr>
-                  ))}
+                  {(viewOrder.order_items || []).map(item => {
+                    const isBulk = item.item_type === 'bulk' || (item.product_code && BULK_CODES.has(item.product_code))
+                    const packs = isBulk ? null : getItemPacks(item)
+                    const lineTotal = isBulk ? (item.quantity * (item.price_per_pack || 0)) : (packs * (item.price_per_pack || 0))
+                    return (
+                      <tr key={item.id}>
+                        <td style={{ fontWeight:500, fontSize:12 }}>{item.product_name}</td>
+                        <td>{item.product_code ? <span className="code-tag">{item.product_code}</span> : '—'}</td>
+                        <td style={{ fontWeight:700, color: isBulk ? 'var(--blue)' : 'var(--kk-green)', fontSize:13 }}>
+                          {isBulk ? `${item.quantity} units` : `${packs} packs`}
+                        </td>
+                        {isAdmin && <td style={{ fontSize:11, color:'var(--ink3)' }}>${(item.price_per_pack||0).toFixed(2)}</td>}
+                        {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${lineTotal.toFixed(2)}</td>}
+                        <td style={{ fontSize:11, color:'var(--ink3)' }}>{item.notes || '—'}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -830,12 +1037,13 @@ export default function Orders() {
         </div>
       )}
 
+      {/* ── EDIT ORDER MODAL ── */}
       {editingOrder && (
         <div className="modal-bg" onClick={e => e.target===e.currentTarget && setEditingOrder(null)}>
           <div className="modal" style={{ maxWidth: 640 }}>
             <button className="modal-close" onClick={() => setEditingOrder(null)}>&times;</button>
             <div className="modal-title">EDIT ORDER — {editingOrder.order_number}</div>
-            <div style={{ fontSize:13, color:'var(--ink3)', marginBottom:16 }}>{editingOrder.customer_name} \u00b7 {editingOrder.slip_number}</div>
+            <div style={{ fontSize:13, color:'var(--ink3)', marginBottom:16 }}>{editingOrder.customer_name} · {editingOrder.slip_number}</div>
             <div className="field-row">
               <div className="field" style={{ margin:0 }}><label>Order Source</label><select style={sel} value={editingOrder.order_source} onChange={e => setEditingOrder(o=>({...o,order_source:e.target.value}))}><option>Email</option><option>PO</option><option>Direct</option><option>KK Website</option></select></div>
               <div className="field" style={{ margin:0 }}><label>PO Number</label><input style={sel} value={editingOrder.po_number || ''} onChange={e => setEditingOrder(o=>({...o,po_number:e.target.value}))} placeholder="e.g. PO-12345" /></div>
@@ -846,38 +1054,49 @@ export default function Orders() {
             </div>
             <div className="field"><label>Status</label><select style={sel} value={editingOrder.status} onChange={e => setEditingOrder(o=>({...o,status:e.target.value}))}><option value="order_sheet">Active</option><option value="archived">Archived</option></select></div>
             <div style={{ fontSize:11, letterSpacing:2, textTransform:'uppercase', color:'var(--ink3)', marginBottom:8, fontFamily:'var(--display)' }}>Order Items ({editItems.length})</div>
-            {editItems.map((item, idx) => (
-              <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
-                <div style={{ flex:3, minWidth:180 }}>
-                  <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''} onChange={e => {
-                    if (e.target.value === 'OTHER') { updateEditItem(idx, 'product_code', 'OTHER'); updateEditItem(idx, 'product_name', 'Other'); updateEditItem(idx, 'price_per_pack', 0) }
-                    else { const p = products.find(p => p.code === e.target.value); updateEditItem(idx, 'product_code', p?.code || ''); updateEditItem(idx, 'product_name', p?.name || item.product_name); updateEditItem(idx, 'price_per_pack', p?.price_per_pack || 0) }
-                  }}><option value="">{item.product_name || 'Select product...'}</option>{products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}<option value="OTHER">— Other —</option></select>
-                </div>
-                <div style={{ display:'flex', alignItems:'center', gap:4, flexWrap:'wrap' }}>
-                  <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:6, overflow:'hidden' }}>
-                    {['cases','packs'].map(m => (
-                      <button key={m} onClick={() => {
-                        updateEditItem(idx, 'input_mode', m); const p = products.find(p => p.code === item.product_code); const ppc = parseInt(p?.packs_per_case) || 6; const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1; const upc = ppc * upp
-                        if (m === 'cases') { const cs = item.quantity ? Math.round(item.quantity / upc) : 1; updateEditItem(idx, 'cases', cs); updateEditItem(idx, 'quantity', cs * upc) }
-                        else { const pks = item.cases ? item.cases * ppc : item.quantity ? Math.round(item.quantity / upp) : 1; updateEditItem(idx, 'packs', pks); updateEditItem(idx, 'cases', pks / ppc); updateEditItem(idx, 'quantity', pks * upp) }
-                      }} style={{ padding:'4px 8px', border:'none', cursor:'pointer', fontSize:11, background: (item.input_mode || 'cases') === m ? 'var(--kk-green)' : 'var(--surface)', color: (item.input_mode || 'cases') === m ? 'var(--kk-cream)' : 'var(--ink3)', fontFamily:'var(--display)', letterSpacing:0.5, textTransform:'uppercase' }}>{m}</button>
-                    ))}
+            {editItems.map((item, idx) => {
+              const isBulk = item.item_type === 'bulk'
+              const ppc = PACKS_PER_CASE_MAP[item.product_code] || item.packs_per_case || 6
+              const upp = item.units_per_pack || UNITS_PER_PACK_MAP[item.product_code] || 1
+              return (
+                <div key={idx} style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6, background:'var(--surface2)', padding:'8px 10px', borderRadius:6, flexWrap:'wrap' }}>
+                  <div style={{ flex:3, minWidth:180 }}>
+                    <select style={{ ...sel, padding:'6px 10px', fontSize:12 }} value={item.product_code || ''} onChange={e => {
+                      const p = products.find(p => p.code === e.target.value)
+                      updateEditItem(idx, 'product_code', p?.code || '')
+                      updateEditItem(idx, 'product_name', p?.name || '')
+                      updateEditItem(idx, 'price_per_pack', p?.price_per_pack || 0)
+                      updateEditItem(idx, 'packs_per_case', PACKS_PER_CASE_MAP[p?.code] || parseInt(p?.packs_per_case) || 6)
+                      updateEditItem(idx, 'units_per_pack', UNITS_PER_PACK_MAP[p?.code] || parseInt(p?.units_per_pack) || 1)
+                    }}>
+                      <option value="">{item.product_name || 'Select product...'}</option>
+                      {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                    </select>
                   </div>
-                  <input type="number" value={(item.input_mode || 'cases') === 'cases' ? (item.cases || Math.round(item.quantity / (item.units_per_case || 6))) : item.input_mode === 'packs' ? (item.packs || Math.round(item.quantity / (item.units_per_pack || 1))) : item.quantity}
-                    onChange={e => {
-                      const val = parseFloat(e.target.value) || 0; const p = products.find(p => p.code === item.product_code); const ppc = parseInt(p?.packs_per_case) || 6; const upp = UNITS_PER_PACK_MAP[item.product_code] || parseInt(p?.units_per_pack) || 1; const upc = ppc * upp
-                      if ((item.input_mode || 'cases') === 'cases') { updateEditItem(idx, 'cases', e.target.value); updateEditItem(idx, 'quantity', val * upc); updateEditItem(idx, 'units_per_case', upc) }
-                      else if (item.input_mode === 'packs') { updateEditItem(idx, 'packs', e.target.value); updateEditItem(idx, 'cases', val / ppc); updateEditItem(idx, 'quantity', val * upp); updateEditItem(idx, 'units_per_pack', upp) }
-                      else { updateEditItem(idx, 'quantity', val); updateEditItem(idx, 'cases', null) }
-                    }} style={{ ...sel, width:64, padding:'6px 8px', fontSize:13, fontWeight:600 }} />
-                  {(item.input_mode || 'cases') === 'cases' && <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>}
-                  {item.input_mode === 'packs' && <span style={{ fontSize:11, color:'var(--ink3)' }}>= {item.quantity} u</span>}
+                  <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                    {isBulk
+                      ? <span style={{ fontSize:10, color:'#E79B81', fontFamily:'var(--display)', letterSpacing:1, padding:'4px 8px', background:'#fff3ee', borderRadius:4 }}>UNITS</span>
+                      : <span style={{ fontSize:10, color:'var(--ink3)' }}>packs</span>
+                    }
+                    <input type="number"
+                      value={isBulk ? (item.quantity || '') : (item.packs || Math.round((item.quantity || 0) / Math.max(1, upp)) || '')}
+                      onChange={e => {
+                        const val = parseFloat(e.target.value) || 0
+                        if (isBulk) {
+                          updateEditItem(idx, 'quantity', val)
+                        } else {
+                          updateEditItem(idx, 'packs', Math.round(val))
+                          updateEditItem(idx, 'quantity', Math.round(val) * upp)
+                          updateEditItem(idx, 'cases', null)
+                        }
+                      }}
+                      style={{ ...sel, width:70, padding:'6px 8px', fontSize:14, fontWeight:700 }} />
+                  </div>
+                  <input type="text" value={item.notes || ''} placeholder="Notes" onChange={e => updateEditItem(idx,'notes',e.target.value)} style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
+                  <button onClick={() => removeEditItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>&times;</button>
                 </div>
-                <input type="text" value={item.notes || ''} placeholder="Notes" onChange={e => updateEditItem(idx,'notes',e.target.value)} style={{ ...sel, flex:1, minWidth:80, padding:'6px 8px', fontSize:11 }} />
-                <button onClick={() => removeEditItem(idx)} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:18, lineHeight:1 }}>&times;</button>
-              </div>
-            ))}
+              )
+            })}
             <button className="btn btn-secondary btn-sm" onClick={addEditItem} style={{ marginBottom:12 }}>+ Add Item</button>
             <div className="field"><label>Notes</label><textarea style={{ ...sel, minHeight:60 }} value={editingOrder.notes || ''} onChange={e => setEditingOrder(o=>({...o,notes:e.target.value}))} placeholder="Special instructions..." /></div>
             <div style={{ display:'flex', gap:10 }}>

@@ -25,6 +25,12 @@ const PACKS_PER_CASE_MAP = {
   PRMC: 4, CMC: 4, LMC: 4, TMC: 4,
 }
 
+// Natures Emporium-specific bulk case sizes
+const NATURES_BULK_CASE_MAP = {
+  KWAL: 12, KAB: 12,       // 12 units per case
+  KCC: 6, KVC: 6, KLRCup: 6, // 6 units per case
+}
+
 function getPacksPerCase(code) {
   return PACKS_PER_CASE_MAP[code] || 6
 }
@@ -492,7 +498,10 @@ export default function Orders() {
       if (orderMode === 'bulk') { productCode = BULK_MAP[i.product_code] || i.product_code; itemType = 'bulk' }
 
       const p = products.find(p => p.code === productCode)
-      const ppc = PACKS_PER_CASE_MAP[productCode] || parseInt(p?.packs_per_case) || 6
+      const isNatures = form.customer_name.toLowerCase().includes('natures emporium') || form.customer_name.toLowerCase().includes('nature emporium')
+      const ppc = (isNatures && itemType === 'bulk' && NATURES_BULK_CASE_MAP[productCode])
+        ? NATURES_BULK_CASE_MAP[productCode]
+        : PACKS_PER_CASE_MAP[productCode] || parseInt(p?.packs_per_case) || 6
       const upp = UNITS_PER_PACK_MAP[productCode] || parseInt(p?.units_per_pack) || 1
 
       // Convert AI quantity to packs

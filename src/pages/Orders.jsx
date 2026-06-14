@@ -590,19 +590,15 @@ export default function Orders() {
       }, 0)
       await supabase.from('orders').update({ delivery_day: editingOrder.delivery_day || null, dispatch_date: editingOrder.dispatch_date || null, po_number: editingOrder.po_number || null, order_source: editingOrder.order_source, notes: editingOrder.notes || null, status: editingOrder.status, total_value: total, updated_at: new Date().toISOString() }).eq('id', editingOrder.id)
       await supabase.from('order_items').delete().eq('order_id', editingOrder.id)
-      await supabase.from('order_items').insert(editItems.map(i => ({
-        order_id: editingOrder.id,
-        product_code: i.product_code || null,
-        product_name: i.product_name,
-        item_type: i.item_type || 'pack',
-        packs: i.item_type === 'bulk' ? null : (i.packs ? parseFloat(i.packs) : null),
-        cases: null,
-        quantity: parseFloat(i.quantity || 0),
-        packs_per_case: parseInt(i.packs_per_case || 6),
-        units_per_pack: parseInt(i.units_per_pack || 1),
-        price_per_pack: parseFloat(i.price_per_pack || 0),
-        notes: i.notes || null
-      })))
+      const editItemsToInsert = editItems.map(i => {
+        const isBulk = i.item_type === 'bulk'
+        const upp = i.units_per_pack || UNITS_PER_PACK_MAP[i.product_code] || 1
+        const ppc = i.packs_per_case || PACKS_PER_CASE_MAP[i.product_code] || 6
+        const packs = isBulk ? null : (i.packs ? parseFloat(i.packs) : Math.round((i.quantity || 0) / Math.max(1, upp)))
+        return { order_id: editingOrder.id, product_code: i.product_code || null, product_name: i.product_name || '', packs, cases: null, quantity: parseFloat(i.quantity || 0), packs_per_case: ppc, units_per_pack: upp, price_per_pack: parseFloat(i.price_per_pack || 0), notes: i.notes || null }
+      })
+      const { error: editItemsError } = await supabase.from('order_items').insert(editItemsToInsert)
+      if (editItemsError) throw new Error('Items save failed: ' + editItemsError.message)
       setEditingOrder(null); setEditItems([]); await loadData()
     } catch(err) { alert('Save failed: ' + err.message) }
     setEditSaving(false)
@@ -620,8 +616,7 @@ export default function Orders() {
         const { data: upData } = await supabase.storage.from('order-attachments').upload(path, form.attachment, { contentType: form.attachment.type })
         if (upData) { const { data: { publicUrl } } = supabase.storage.from('order-attachments').getPublicUrl(path); attachment_url = publicUrl }
       }
-      const { data: numData } = await supabase.rpc('generate_order_number')
-      const order_number = numData || 'KK' + Date.now()
+      const order_number = 'KK' + Date.now()
       const total = orderItems.reduce((sum, i) => {
         const packs = i.item_type === 'bulk' ? 0 : (i.packs || Math.round((i.quantity || 0) / Math.max(1, i.units_per_pack || 1)))
         return sum + (packs * parseFloat(i.price_per_pack || 0))
@@ -636,19 +631,34 @@ export default function Orders() {
         total_value: total, status: 'order_sheet', created_by_name: profile?.name, slip_number: slipNum
       }).select().single()
       if (error) throw error
-      await supabase.from('order_items').insert(orderItems.map(i => ({
-        order_id: order.id,
-        product_code: i.product_code || null,
-        product_name: i.product_name,
-        item_type: i.item_type || 'pack',
-        packs: i.item_type === 'bulk' ? null : (i.packs ? parseFloat(i.packs) : null),
-        cases: null,
-        quantity: parseFloat(i.quantity || 0),
-        packs_per_case: parseInt(i.packs_per_case || 6),
-        units_per_pack: parseInt(i.units_per_pack || 1),
-        price_per_pack: parseFloat(i.price_per_pack || 0),
-        notes: i.notes || null
-      })))
+      const itemsToInsert = orderItems.map(i => {
+        const isBulk = i.item_type === 'bulk'
+        const upp = i.units_per_pack || UNITS_PER_PACK_MAP[i.product_code] || 1
+        const ppc = i.packs_per_case || PACKS_PER_CASE_MAP[i.product_code] || 6
+        // Always calculate packs for pack items — never let it be null
+        let packs = null
+        if (!isBulk) {
+          packs = i.packs
+            ? parseFloat(i.packs)
+            : i.cases
+              ? Math.round(parseFloat(i.cases) * ppc)
+              : Math.round((i.quantity || 0) / Math.max(1, upp))
+        }
+        return {
+          order_id: order.id,
+          product_code: i.product_code || null,
+          product_name: i.product_name || '',
+          packs: packs,
+          cases: null,
+          quantity: parseFloat(i.quantity || 0),
+          packs_per_case: ppc,
+          units_per_pack: upp,
+          price_per_pack: parseFloat(i.price_per_pack || 0),
+          notes: i.notes || null
+        }
+      })
+      const { error: itemsError } = await supabase.from('order_items').insert(itemsToInsert)
+      if (itemsError) throw new Error('Items save failed: ' + itemsError.message)
       if (form.customer_id && form.delivery_day) await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
       await supabase.from('activity').insert({ type: 'dispatch', title: 'Order received: ' + form.customer_name, description: order_number + ' · ' + slipNum + ' · ' + orderItems.length + ' items · $' + total.toFixed(2), created_by_name: profile?.name })
       setShowModal(false); resetForm(); await loadData()

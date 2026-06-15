@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1 }
+const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,WSBIS:5,COBIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1 }
 const TRAY_SIZE = { VPB: 64, VPCAN: 36, PNF: 40, PVBRG: 36, PVBR: 12 }
 const DATE_RANGES = [
   { label: '3 Months', days: 90 },
@@ -11,8 +11,15 @@ const DATE_RANGES = [
   { label: '12 Months', days: 365 },
 ]
 
+// Bulk codes — tracked via freezer_units, excluded from FG inventory cards
+const BULK_FG_EXCLUDE = new Set([
+  'PBBBu','PCCBu','KLRBu','KABBu','KWALBu','HPCoBu','PVHCBu',
+  'VPCANBu','VPBBu','PNFBu','KABISBu','KSCDBu',
+  'PVBBSL','PVBBSLF',
+  'CKAC','CKHH',
+])
+
 // Conversion map: rm name (lowercase) → { divisor, unit, label }
-// Stock is stored in grams, display in purchasing units
 const RM_DISPLAY = {
   'eggs':               { divisor: 9000,  unit: 'cases', detail: '180 eggs/case' },
   'coconut milk':       { divisor: 2400,  unit: 'cases', detail: '6 cans × 400g' },
@@ -187,21 +194,31 @@ export default function Inventory() {
     loadData()
   }
 
-  const fgCategories = ['all', ...new Set(products.map(p => p.category))]
+  const fgCategories = ['all', ...new Set(
+    products.filter(p => !BULK_FG_EXCLUDE.has(p.code)).map(p => p.category)
+  )]
   const rmCategories = ['all', ...new Set(rms.map(r => r.category))]
+
   const filteredFG = products.filter(p => {
+    if (BULK_FG_EXCLUDE.has(p.code)) return false
     if (showAlertsOnly && p.units > p.min_stock) return false
     if (catFilter !== 'all' && p.category !== catFilter) return false
     if (search && !p.code.toLowerCase().includes(search.toLowerCase()) && !p.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
+
   const filteredRM = rms.filter(r => {
     if (showAlertsOnly && r.stock > r.min_stock) return false
     if (catFilter !== 'all' && r.category !== catFilter) return false
     if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
-  const fgStats = { total: products.reduce((s,p)=>s+Math.max(0,p.units),0), low: products.filter(p=>p.units>0&&p.units<=p.min_stock).length, out: products.filter(p=>p.units<=0).length }
+
+  const fgStats = {
+    total: products.filter(p => !BULK_FG_EXCLUDE.has(p.code)).reduce((s,p)=>s+Math.max(0,p.units),0),
+    low: products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.units>0 && p.units<=p.min_stock).length,
+    out: products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.units<=0).length
+  }
   const rmStats = { total: rms.length, low: rms.filter(r=>r.stock>0&&r.stock<=r.min_stock).length, out: rms.filter(r=>r.stock<=0).length }
 
   const btnStyle = (active) => ({
@@ -245,7 +262,7 @@ export default function Inventory() {
                   <label>Product</label>
                   <select style={sel} value={packForm.product_code} onChange={e => setPackForm(f => ({ ...f, product_code: e.target.value, packs: '' }))}>
                     <option value="">Select product...</option>
-                    {products.filter(p => !p.code.startsWith('WIP') && !p.code.endsWith('Bu')).map(p => (
+                    {products.filter(p => !p.code.startsWith('WIP') && !BULK_FG_EXCLUDE.has(p.code)).map(p => (
                       <option key={p.code} value={p.code}>{p.code} — {p.name}</option>
                     ))}
                   </select>
@@ -343,7 +360,7 @@ export default function Inventory() {
             {tab === 'fg' ? (
               <div className="grid4" style={{ marginBottom: 16 }}>
                 <div className="stat green"><div className="stat-label">Total Units</div><div className="stat-value">{fgStats.total.toLocaleString()}</div></div>
-                <div className="stat"><div className="stat-label">SKUs</div><div className="stat-value">{products.length}</div></div>
+                <div className="stat"><div className="stat-label">SKUs</div><div className="stat-value">{filteredFG.length}</div></div>
                 <div className="stat amber"><div className="stat-label">Low Stock</div><div className="stat-value">{fgStats.low}</div></div>
                 <div className="stat red"><div className="stat-label">Out of Stock</div><div className="stat-value">{fgStats.out}</div></div>
               </div>
@@ -488,7 +505,6 @@ export default function Inventory() {
                   )}
                 </div>
               ) : (
-                /* ── RAW MATERIALS TABLE ── */
                 <div style={{ display: 'grid', gridTemplateColumns: selectedRM ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
                   <div className="table-wrap">
                     <table>

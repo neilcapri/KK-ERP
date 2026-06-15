@@ -3,11 +3,12 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
 const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:54,NALCOB:21,NBFB:21 }
+const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 
 const PACK_SIZE = {
   PBB:2, PCC:2, KLR:2,
   VPCAN:3, PNF:3, VPB:3,
-  KAB:5, KWAL:5, HPCo:5, PVHC:5, KABIS:5,
+  KAB:5, KWAL:5, HPCo:5, PVHC:5, KABIS:5, WSBIS:5, COBIS:5,
   KSCD:4,
   VPBD:2, KHD:2,
 }
@@ -72,7 +73,8 @@ export default function Production() {
   function calcOutput(code, inputType, qty) {
     const q = parseFloat(qty) || 0
     if (inputType === 'trays' && TRAY_YIELD[code]) return Math.round(q * TRAY_YIELD[code])
-    if (inputType === 'logs') return Math.round(q * 11)
+    if (inputType === 'logs' && LOG_YIELD[code]) return Math.round(q * LOG_YIELD[code])
+    if (inputType === 'logs') return Math.round(q * 10)
     return Math.round(q)
   }
 
@@ -347,16 +349,30 @@ export default function Production() {
               )}
             </div>
             <div className="card">
-              <div className="card-title">Tray Yields Reference</div>
+              <div className="card-title">Yields Reference</div>
               <div className="table-wrap">
+                <div style={{ fontSize:10, letterSpacing:'1.5px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', marginBottom:6 }}>Tray Yields</div>
                 <table>
                   <thead><tr><th>Code</th><th>Product</th><th>Units/Tray</th></tr></thead>
                   <tbody>
-                    {Object.entries(TRAY_YIELD).map(([code, yield_]) => (
+                    {Object.entries(TRAY_YIELD).map(([code, y]) => (
                       <tr key={code}>
                         <td><span className="code-tag">{code}</span></td>
                         <td style={{fontSize:11}}>{products.find(p=>p.code===code)?.name||code}</td>
-                        <td style={{fontWeight:500,color:'var(--green)'}}>{yield_}</td>
+                        <td style={{fontWeight:500,color:'var(--green)'}}>{y}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ fontSize:10, letterSpacing:'1.5px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', margin:'14px 0 6px' }}>Log Yields (Biscotti)</div>
+                <table>
+                  <thead><tr><th>Code</th><th>Product</th><th>Units/Log</th></tr></thead>
+                  <tbody>
+                    {Object.entries(LOG_YIELD).map(([code, y]) => (
+                      <tr key={code}>
+                        <td><span className="code-tag">{code}</span></td>
+                        <td style={{fontSize:11}}>{products.find(p=>p.code===code)?.name||code}</td>
+                        <td style={{fontWeight:500,color:'var(--blue)'}}>{y}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -431,13 +447,11 @@ export default function Production() {
           </div>
         )}
 
-        {/* ── HISTORY TAB — date separated ── */}
         {view === 'history' && (
           <div>
             {Object.keys(historyByDate).length === 0 ? (
               <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>No production history yet.</div>
             ) : Object.entries(historyByDate).map(([date, entries]) => {
-              // Calculate day total value
               const dayValue = entries.reduce((sum, h) => {
                 const prod = products.find(p => p.code === h.product_code)
                 const ppp = prod?.price_per_pack || 0
@@ -445,10 +459,8 @@ export default function Production() {
                 return sum + (packs * ppp)
               }, 0)
               const dayUnits = entries.reduce((sum, h) => sum + (h.output_units || 0), 0)
-
               return (
                 <div key={date} style={{ marginBottom: 24 }}>
-                  {/* Date separator */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: 'var(--kk-green)', borderRadius: '6px 6px 0 0' }}>
                     <div style={{ fontFamily: 'var(--display)', fontSize: 13, letterSpacing: 2, color: 'var(--kk-cream)', textTransform: 'uppercase' }}>
                       {new Date(date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
@@ -470,13 +482,9 @@ export default function Production() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr>
-                          <th style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>Product</th>
-                          <th style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>Input</th>
-                          <th style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>Output</th>
-                          <th style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>Value</th>
-                          <th style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>By</th>
-                          <th style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>Notes</th>
-                          <th style={{ background: 'var(--surface2)', padding: '8px 14px', width: 60, borderBottom: '1px solid var(--border)' }}></th>
+                          {['Product','Input','Output','Value','By','Notes',''].map((h,i) => (
+                            <th key={i} style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
@@ -532,7 +540,10 @@ export default function Production() {
               <div className="field" style={{margin:0}}>
                 <label>Input Type</label>
                 <select style={selectStyle} value={schedForm.input_type} onChange={e => setSchedForm(f=>({...f,input_type:e.target.value}))}>
-                  <option value="trays">Trays</option><option value="units">Units</option><option value="loaves">Loaves</option>
+                  <option value="trays">Trays</option>
+                  <option value="units">Units</option>
+                  <option value="loaves">Loaves</option>
+                  <option value="logs">Logs (Biscotti)</option>
                 </select>
               </div>
               <div className="field" style={{margin:0}}><label>Planned Qty</label>
@@ -582,7 +593,10 @@ export default function Production() {
               <div className="field" style={{margin:0}}>
                 <label>Input Type</label>
                 <select style={selectStyle} value={editForm.input_type} onChange={e => setEditForm(f=>({...f,input_type:e.target.value}))}>
-                  <option value="trays">Trays</option><option value="units">Units</option><option value="loaves">Loaves</option>
+                  <option value="trays">Trays</option>
+                  <option value="units">Units</option>
+                  <option value="loaves">Loaves</option>
+                  <option value="logs">Logs (Biscotti)</option>
                 </select>
               </div>
               <div className="field" style={{margin:0}}><label>Planned Qty</label>

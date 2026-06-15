@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:54,NALCOB:21,NBFB:21 }
+const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:64,CMC:24,LMC:24,PRMC:24,TMC:24 }
+const CAKE_YIELD  = { TRFCS:8 }  // per 9-inch cake
+const CAKE_PRICES = { '6inch': 15, '9inch': 25 } // frosting cake prices per cake
 const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 
 const PACK_SIZE = {
@@ -75,6 +77,8 @@ export default function Production() {
     if (inputType === 'trays' && TRAY_YIELD[code]) return Math.round(q * TRAY_YIELD[code])
     if (inputType === 'logs' && LOG_YIELD[code]) return Math.round(q * LOG_YIELD[code])
     if (inputType === 'logs') return Math.round(q * 10)
+    if (inputType === 'cakes' && CAKE_YIELD[code]) return Math.round(q * CAKE_YIELD[code])
+    if (inputType === '6inch' || inputType === '9inch') return Math.round(q) // 1 cake = 1 unit
     return Math.round(q)
   }
 
@@ -322,6 +326,9 @@ export default function Production() {
                     <option value="trays">Trays</option>
                     <option value="loaves">Loaves</option>
                     <option value="logs">Logs (Biscotti)</option>
+                    <option value="cakes">Cakes (9 inch)</option>
+                    <option value="6inch">6 inch Frosting Cake ($15 each)</option>
+                    <option value="9inch">9 inch Frosting Cake ($25 each)</option>
                   </select>
                 </div>
                 <div className="field" style={{margin:0}}>
@@ -373,6 +380,19 @@ export default function Production() {
                         <td><span className="code-tag">{code}</span></td>
                         <td style={{fontSize:11}}>{products.find(p=>p.code===code)?.name||code}</td>
                         <td style={{fontWeight:500,color:'var(--blue)'}}>{y}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ fontSize:10, letterSpacing:'1.5px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', margin:'14px 0 6px' }}>Cake Yields (per 9" cake)</div>
+                <table>
+                  <thead><tr><th>Code</th><th>Product</th><th>Units/Cake</th></tr></thead>
+                  <tbody>
+                    {Object.entries(CAKE_YIELD).map(([code, y]) => (
+                      <tr key={code}>
+                        <td><span className="code-tag">{code}</span></td>
+                        <td style={{fontSize:11}}>{products.find(p=>p.code===code)?.name||code}</td>
+                        <td style={{fontWeight:500,color:'var(--purple)'}}>{y}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -544,6 +564,9 @@ export default function Production() {
                   <option value="units">Units</option>
                   <option value="loaves">Loaves</option>
                   <option value="logs">Logs (Biscotti)</option>
+                  <option value="cakes">Cakes (9 inch)</option>
+                  <option value="6inch">6 inch Frosting Cake ($15 each)</option>
+                  <option value="9inch">9 inch Frosting Cake ($25 each)</option>
                 </select>
               </div>
               <div className="field" style={{margin:0}}><label>Planned Qty</label>
@@ -597,6 +620,9 @@ export default function Production() {
                   <option value="units">Units</option>
                   <option value="loaves">Loaves</option>
                   <option value="logs">Logs (Biscotti)</option>
+                  <option value="cakes">Cakes (9 inch)</option>
+                  <option value="6inch">6 inch Frosting Cake ($15 each)</option>
+                  <option value="9inch">9 inch Frosting Cake ($25 each)</option>
                 </select>
               </div>
               <div className="field" style={{margin:0}}><label>Planned Qty</label>

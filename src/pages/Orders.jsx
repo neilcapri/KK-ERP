@@ -511,7 +511,7 @@ export default function Orders() {
       let packs = null, quantity = 0
 
       if (itemType === 'bulk') {
-        quantity = parseFloat(i.quantity) || 0
+        quantity = Math.max(1, parseFloat(i.quantity) || 0)
       } else if (qType === 'cases') {
         packs = Math.round(parseFloat(i.quantity) * ppc)
         quantity = packs * upp
@@ -596,8 +596,11 @@ export default function Orders() {
     setEditSaving(true)
     try {
       const total = editItems.reduce((sum, i) => {
-        const packs = i.item_type === 'bulk' ? 0 : (i.packs || (i.cases ? parseFloat(i.cases) * (i.packs_per_case || 6) : Math.round((i.quantity || 0) / Math.max(1, i.units_per_pack || 1))))
-        return sum + (packs * parseFloat(i.price_per_pack || 0))
+        const isBulkE = i.item_type === 'bulk' || (i.packs === null && i.cases === null)
+        const value = isBulkE
+          ? (i.quantity || 0) * parseFloat(i.price_per_pack || 0)
+          : (i.packs || (i.cases ? parseFloat(i.cases) * (i.packs_per_case || 6) : Math.round((i.quantity || 0) / Math.max(1, i.units_per_pack || 1)))) * parseFloat(i.price_per_pack || 0)
+        return sum + value
       }, 0)
       await supabase.from('orders').update({ delivery_day: editingOrder.delivery_day || null, dispatch_date: editingOrder.dispatch_date || null, po_number: editingOrder.po_number || null, order_source: editingOrder.order_source, notes: editingOrder.notes || null, status: editingOrder.status, total_value: total, updated_at: new Date().toISOString() }).eq('id', editingOrder.id)
       await supabase.from('order_items').delete().eq('order_id', editingOrder.id)
@@ -629,8 +632,11 @@ export default function Orders() {
       }
       const order_number = 'KK' + Date.now()
       const total = orderItems.reduce((sum, i) => {
-        const packs = i.item_type === 'bulk' ? 0 : (i.packs || Math.round((i.quantity || 0) / Math.max(1, i.units_per_pack || 1)))
-        return sum + (packs * parseFloat(i.price_per_pack || 0))
+        const isBulk = i.item_type === 'bulk' || (i.packs === null && i.cases === null)
+        const value = isBulk
+          ? (i.quantity || 0) * parseFloat(i.price_per_pack || 0)
+          : (i.packs || Math.round((i.quantity || 0) / Math.max(1, i.units_per_pack || 1))) * parseFloat(i.price_per_pack || 0)
+        return sum + value
       }, 0)
       const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true })
       const slipNum = 'SLIP-' + String((count || 0) + 1).padStart(3, '0')
@@ -661,7 +667,7 @@ export default function Orders() {
           product_name: i.product_name || '',
           packs: packs,
           cases: null,
-          quantity: parseFloat(i.quantity || 0),
+          quantity: Math.max(isBulk ? 1 : 0, parseFloat(i.quantity || 0)),
           packs_per_case: ppc,
           units_per_pack: upp,
           price_per_pack: parseFloat(i.price_per_pack || 0),

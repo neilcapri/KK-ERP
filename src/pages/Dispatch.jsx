@@ -54,12 +54,9 @@ function parseSlipDate(dateStr) {
 }
 
 // ── Auto-packing logic ──────────────────────────────────────
-// Called before dispatching each pack item.
-// If packed_units < packsNeeded, auto-creates a packing run for the shortfall.
 async function autoPackIfNeeded(productCode, packsNeeded, dispatchDate, createdByName, addLog) {
   if (!productCode || !packsNeeded) return
 
-  // Get current product state
   const { data: prod } = await supabase
     .from('products')
     .select('code, name, units, freezer_units, packed_units')
@@ -69,7 +66,7 @@ async function autoPackIfNeeded(productCode, packsNeeded, dispatchDate, createdB
   if (!prod) return
 
   const packedAvailable = prod.packed_units || 0
-  if (packedAvailable >= packsNeeded) return // enough packed stock, no auto-pack needed
+  if (packedAvailable >= packsNeeded) return
 
   const shortfallPacks = packsNeeded - packedAvailable
   const ps = PACK_SIZE[productCode] || 1
@@ -83,7 +80,6 @@ async function autoPackIfNeeded(productCode, packsNeeded, dispatchDate, createdB
 
   if (addLog) addLog(`📦 Auto-packing ${shortfallPacks} packs (${shortfallUnits} units) of ${productCode}...`, '')
 
-  // 1. Log packing run
   await supabase.from('packing_runs').insert({
     date: dispatchDate,
     product_code: productCode,
@@ -95,7 +91,6 @@ async function autoPackIfNeeded(productCode, packsNeeded, dispatchDate, createdB
     created_by_name: createdByName || 'auto',
   })
 
-  // 2. Update freezer and packed
   const newFreezer = freezerAvailable - shortfallUnits
   const newPacked = packedAvailable + shortfallPacks
   const newTotal = newFreezer + (newPacked * ps)
@@ -105,7 +100,6 @@ async function autoPackIfNeeded(productCode, packsNeeded, dispatchDate, createdB
     units: newTotal,
   }).eq('code', productCode)
 
-  // 3. Deduct packaging materials
   const { data: bomItems } = await supabase
     .from('packaging_bom')
     .select('*')
@@ -127,7 +121,6 @@ async function autoPackIfNeeded(productCode, packsNeeded, dispatchDate, createdB
   }
 }
 
-// Deduct from packed_units after dispatch
 async function deductFromPacked(productCode, packsDispatched) {
   const { data: prod } = await supabase
     .from('products')
@@ -139,7 +132,6 @@ async function deductFromPacked(productCode, packsDispatched) {
   const ps = PACK_SIZE[productCode] || 1
   const unitsDispatched = packsDispatched * ps
 
-  // Pull from packed first, then freezer
   let fromPacked = Math.min(prod.packed_units || 0, packsDispatched)
   let fromFreezer = packsDispatched - fromPacked
 
@@ -162,6 +154,7 @@ export default function Dispatch() {
   const [extracted, setExtracted] = useState([])
   const [editingExtracted, setEditingExtracted] = useState(false)
   const [verifiedItems, setVerifiedItems] = useState({})
+  const [duplicateFlags, setDuplicateFlags] = useState({}) // slipIndex -> {existing info}
   const [log, setLog] = useState([])
   const [products, setProducts] = useState([])
   const [dispatches, setDispatches] = useState([])
@@ -223,9 +216,27 @@ export default function Dispatch() {
     return verified
   }
 
+  // ── Check each extracted slip against existing dispatches for duplicate invoice numbers ──
+  async function checkDuplicateInvoices(slips) {
+    const flags = {}
+    for (let i = 0; i < slips.length; i++) {
+      const slip = slips[i]
+      if (!slip.invoice) continue
+      const { data: existing } = await supabase
+        .from('dispatches')
+        .select('id, date, customer_name, invoice_number')
+        .eq('invoice_number', slip.invoice)
+        .limit(1)
+      if (existing?.length) {
+        flags[i] = existing[0]
+      }
+    }
+    return flags
+  }
+
   async function processSlips() {
     if (!files.length) return
-    setProcessing(true); setLog([]); setExtracted([]); setVerifiedItems({})
+    setProcessing(true); setLog([]); setExtracted([]); setVerifiedItems({}); setDuplicateFlags({})
     addLog(`Processing ${files.length} file(s)...`)
     const allSlips = []
     for (let i = 0; i < files.length; i += 4) {
@@ -270,6 +281,16 @@ export default function Dispatch() {
       const found = Object.values(verified).filter(Boolean).length
       const total = Object.keys(verified).length
       addLog(`✓ Production date check: ${found}/${total} verified`, 'ok')
+
+      addLog('Checking for duplicate invoice numbers...', '')
+      const dupFlags = await checkDuplicateInvoices(allSlips)
+      setDuplicateFlags(dupFlags)
+      const dupCount = Object.keys(dupFlags).length
+      if (dupCount > 0) {
+        addLog(`⛔ ${dupCount} slip(s) flagged as DUPLICATE — already exist in the system. Remove or skip before saving.`, 'err')
+      } else {
+        addLog(`✓ No duplicate invoices found`, 'ok')
+      }
     }
     addLog('Done!', 'ok')
     setProcessing(false)
@@ -278,8 +299,26 @@ export default function Dispatch() {
   async function saveExtracted() {
     let savedSlips = 0
     let savedLines = 0
-    for (const slip of extracted) {
+    let skippedDupes = 0
+
+    for (let si = 0; si < extracted.length; si++) {
+      const slip = extracted[si]
       const dateStr = parseSlipDate(slip.date)
+
+      // ── Duplicate check: same invoice number already exists ──
+      if (slip.invoice) {
+        const { data: existing } = await supabase
+          .from('dispatches')
+          .select('id, date, customer_name')
+          .eq('invoice_number', slip.invoice)
+          .limit(1)
+        if (existing?.length) {
+          addLog(`⛔ SKIPPED: Invoice #${slip.invoice} (${slip.customer}) already exists — saved as ${existing[0].customer_name} on ${existing[0].date}. Not re-saved.`, 'err')
+          skippedDupes++
+          continue
+        }
+      }
+
       addLog(`Saving: ${slip.customer} — date: ${dateStr}`)
 
       const { data: dispatch, error: dispatchErr } = await supabase
@@ -298,7 +337,6 @@ export default function Dispatch() {
         const key = `${item.code}_${prodDateStr}`
         const prodVerified = prodDateStr ? verifiedItems[key] : null
 
-        // ── Auto-pack if needed (pack items only) ──
         if (item.type === 'pack' && packs) {
           await autoPackIfNeeded(item.code, packs, dateStr, profile?.name, addLog)
         }
@@ -313,11 +351,9 @@ export default function Dispatch() {
         })
         if (itemErr) { addLog(`❌ Item error (${item.code}): ${itemErr.message}`, 'err'); continue }
 
-        // ── Deduct stock (packed first, then freezer) ──
         if (item.type === 'pack' && packs) {
           await deductFromPacked(item.code, packs)
         } else {
-          // bulk/slice — deduct from units directly
           const { data: prod } = await supabase.from('products').select('units').eq('code', item.code).single()
           if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - units) }).eq('code', item.code)
         }
@@ -331,12 +367,27 @@ export default function Dispatch() {
         created_by_name: profile?.name || 'admin'
       })
     }
-    addLog(`✓ Saved ${savedSlips} slip(s), ${savedLines} lines. Stock updated.`, 'ok')
-    setExtracted([]); setFiles([]); setVerifiedItems({}); loadData()
+
+    addLog(`✓ Saved ${savedSlips} slip(s), ${savedLines} lines. ${skippedDupes > 0 ? skippedDupes + ' duplicate(s) skipped.' : ''} Stock updated.`, 'ok')
+    setExtracted([]); setFiles([]); setVerifiedItems({}); setDuplicateFlags({}); loadData()
   }
 
   async function saveManual() {
     if (!manForm.customer || !manLines.length) { alert('Add customer and at least one line.'); return }
+
+    // ── Duplicate check for manual entry too ──
+    if (manForm.invoice) {
+      const { data: existing } = await supabase
+        .from('dispatches')
+        .select('id, date, customer_name')
+        .eq('invoice_number', manForm.invoice)
+        .limit(1)
+      if (existing?.length) {
+        alert(`Invoice #${manForm.invoice} already exists for ${existing[0].customer_name} on ${existing[0].date}. Not saved — please check before re-entering.`)
+        return
+      }
+    }
+
     const { data: dispatch, error: err } = await supabase
       .from('dispatches').insert({ date: manForm.date, customer_name: manForm.customer, invoice_number: manForm.invoice, created_by_name: profile?.name || 'admin' })
       .select().single()
@@ -346,7 +397,6 @@ export default function Dispatch() {
       const units = calcUnits(line.code, line.qty, line.type)
       const packs = line.type === 'pack' ? line.qty : null
 
-      // ── Auto-pack if needed ──
       if (line.type === 'pack' && packs) {
         await autoPackIfNeeded(line.code, packs, manForm.date, profile?.name, null)
       }
@@ -357,7 +407,6 @@ export default function Dispatch() {
         qty: line.qty, dispatch_type: line.type, units_dispatched: units
       })
 
-      // ── Deduct stock ──
       if (line.type === 'pack' && packs) {
         await deductFromPacked(line.code, packs)
       } else {
@@ -416,6 +465,21 @@ export default function Dispatch() {
 
   async function saveEdit() {
     if (!editForm.customer_name) { alert('Customer name required'); return }
+
+    // ── Duplicate check on edit — only if invoice number changed ──
+    if (editForm.invoice_number && editForm.invoice_number !== editingDispatch.invoice_number) {
+      const { data: existing } = await supabase
+        .from('dispatches')
+        .select('id, date, customer_name')
+        .eq('invoice_number', editForm.invoice_number)
+        .neq('id', editingDispatch.id)
+        .limit(1)
+      if (existing?.length) {
+        alert(`Invoice #${editForm.invoice_number} already exists for ${existing[0].customer_name} on ${existing[0].date}. Choose a different invoice number.`)
+        return
+      }
+    }
+
     setEditSaving(true)
     try {
       for (const item of editingDispatch.dispatch_items || []) {
@@ -450,6 +514,8 @@ export default function Dispatch() {
   }
 
   const sel = { width: '100%', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 4, background: 'var(--surface)', color: 'var(--ink)', fontSize: 12 }
+
+  const hasDuplicates = Object.keys(duplicateFlags).length > 0
 
   return (
     <>
@@ -506,6 +572,11 @@ export default function Dispatch() {
               {extracted.length > 0 && (
                 <div className="card">
                   <div className="card-title">✅ Review Extracted Data</div>
+                  {hasDuplicates && (
+                    <div style={{ background:'var(--red-l)', border:'1px solid var(--red)', borderRadius:6, padding:'10px 14px', marginBottom:12, fontSize:12, color:'var(--red)' }}>
+                      <strong>⛔ {Object.keys(duplicateFlags).length} duplicate slip(s) detected.</strong> These invoice numbers already exist in the system and will be SKIPPED automatically on save. Remove them from this list if you don't want to see this warning, or verify them first in History.
+                    </div>
+                  )}
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
                     <span style={{fontSize:12,color:'var(--ink3)'}}>Review and correct before saving</span>
                     <button className="btn btn-secondary btn-sm" onClick={() => setEditingExtracted(e => !e)}>
@@ -516,45 +587,55 @@ export default function Dispatch() {
                     <table>
                       <thead><tr><th>Customer</th><th>Inv #</th><th>Code</th><th>Qty</th><th>Type</th><th>Units</th><th>Prod Date</th>{editingExtracted && <th></th>}</tr></thead>
                       <tbody>
-                        {extracted.map((slip, si) => (slip.items || []).map((item, ii) => {
-                          const prodDateStr = item.production_date ? parseSlipDate(item.production_date) : null
-                          const key = `${item.code}_${prodDateStr}`
-                          const verified = prodDateStr ? verifiedItems[key] : undefined
-                          return (
-                            <tr key={`${si}-${ii}`}>
-                              <td style={{fontSize:11}}>{ii === 0 ? (editingExtracted
-                                ? <input defaultValue={slip.customer} onChange={e => { const s = [...extracted]; s[si].customer = e.target.value; setExtracted(s) }} style={{width:'100%',fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
-                                : slip.customer) : ''}</td>
-                              <td style={{fontSize:11,color:'var(--ink3)'}}>{ii === 0 ? (editingExtracted
-                                ? <input defaultValue={slip.invoice} onChange={e => { const s = [...extracted]; s[si].invoice = e.target.value; setExtracted(s) }} style={{width:60,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
-                                : (slip.invoice || '—')) : ''}</td>
-                              <td>{editingExtracted
-                                ? <input defaultValue={item.code} onChange={e => { const s = [...extracted]; s[si].items[ii].code = e.target.value.toUpperCase(); setExtracted(s) }} style={{width:70,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3,fontFamily:'var(--mono)'}} />
-                                : <span className="code-tag">{item.code}</span>}</td>
-                              <td>{editingExtracted
-                                ? <input type="number" defaultValue={item.qty} onChange={e => { const s = [...extracted]; s[si].items[ii].qty = parseInt(e.target.value)||0; setExtracted(s) }} style={{width:50,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
-                                : item.qty}</td>
-                              <td>{editingExtracted
-                                ? <select defaultValue={item.type} onChange={e => { const s = [...extracted]; s[si].items[ii].type = e.target.value; setExtracted(s) }} style={{fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}}>
-                                    <option value="pack">pack</option><option value="bulk">bulk</option><option value="slice">slice</option>
-                                  </select>
-                                : <span className={`badge badge-${item.type==='pack'?'amber':'blue'}`}>{item.type}</span>}</td>
-                              <td style={{color:'var(--green)',fontWeight:500}}>{calcUnits(item.code,item.qty,item.type)}</td>
-                              <td style={{fontSize:11}}>{editingExtracted
-                                ? <input defaultValue={item.production_date} onChange={e => { const s = [...extracted]; s[si].items[ii].production_date = e.target.value; setExtracted(s) }} style={{width:80,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
-                                : <>{item.production_date || '—'}{prodDateStr && verified !== undefined && <span style={{marginLeft:4}}>{prodBadge(verified)}</span>}</>}</td>
-                              {editingExtracted && <td>
-                                <button onClick={() => { const s = [...extracted]; s[si].items.splice(ii,1); setExtracted([...s]) }} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:14}}>×</button>
-                              </td>}
-                            </tr>
-                          )
-                        }))}
+                        {extracted.map((slip, si) => {
+                          const isDupe = !!duplicateFlags[si]
+                          return (slip.items || []).map((item, ii) => {
+                            const prodDateStr = item.production_date ? parseSlipDate(item.production_date) : null
+                            const key = `${item.code}_${prodDateStr}`
+                            const verified = prodDateStr ? verifiedItems[key] : undefined
+                            return (
+                              <tr key={`${si}-${ii}`} style={{ background: isDupe ? 'var(--red-l)' : '' }}>
+                                <td style={{fontSize:11}}>{ii === 0 ? (
+                                  <>
+                                    {isDupe && <span style={{ marginRight:4 }}>⛔</span>}
+                                    {editingExtracted
+                                      ? <input defaultValue={slip.customer} onChange={e => { const s = [...extracted]; s[si].customer = e.target.value; setExtracted(s) }} style={{width:'100%',fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                      : slip.customer}
+                                  </>
+                                ) : ''}</td>
+                                <td style={{fontSize:11,color: isDupe ? 'var(--red)' : 'var(--ink3)', fontWeight: isDupe ? 700 : 400}}>{ii === 0 ? (editingExtracted
+                                  ? <input defaultValue={slip.invoice} onChange={e => { const s = [...extracted]; s[si].invoice = e.target.value; setExtracted(s) }} style={{width:60,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                  : (slip.invoice || '—')) : ''}</td>
+                                <td>{editingExtracted
+                                  ? <input defaultValue={item.code} onChange={e => { const s = [...extracted]; s[si].items[ii].code = e.target.value.toUpperCase(); setExtracted(s) }} style={{width:70,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3,fontFamily:'var(--mono)'}} />
+                                  : <span className="code-tag">{item.code}</span>}</td>
+                                <td>{editingExtracted
+                                  ? <input type="number" defaultValue={item.qty} onChange={e => { const s = [...extracted]; s[si].items[ii].qty = parseInt(e.target.value)||0; setExtracted(s) }} style={{width:50,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                  : item.qty}</td>
+                                <td>{editingExtracted
+                                  ? <select defaultValue={item.type} onChange={e => { const s = [...extracted]; s[si].items[ii].type = e.target.value; setExtracted(s) }} style={{fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}}>
+                                      <option value="pack">pack</option><option value="bulk">bulk</option><option value="slice">slice</option>
+                                    </select>
+                                  : <span className={`badge badge-${item.type==='pack'?'amber':'blue'}`}>{item.type}</span>}</td>
+                                <td style={{color:'var(--green)',fontWeight:500}}>{calcUnits(item.code,item.qty,item.type)}</td>
+                                <td style={{fontSize:11}}>{editingExtracted
+                                  ? <input defaultValue={item.production_date} onChange={e => { const s = [...extracted]; s[si].items[ii].production_date = e.target.value; setExtracted(s) }} style={{width:80,fontSize:11,padding:'2px 4px',border:'1px solid var(--border)',borderRadius:3}} />
+                                  : <>{item.production_date || '—'}{prodDateStr && verified !== undefined && <span style={{marginLeft:4}}>{prodBadge(verified)}</span>}</>}</td>
+                                {editingExtracted && <td>
+                                  <button onClick={() => { const s = [...extracted]; s[si].items.splice(ii,1); setExtracted([...s]) }} style={{background:'none',border:'none',color:'var(--red)',cursor:'pointer',fontSize:14}}>×</button>
+                                </td>}
+                              </tr>
+                            )
+                          })
+                        })}
                       </tbody>
                     </table>
                   </div>
                   <div style={{display:'flex',gap:10,marginTop:12}}>
-                    <button className="btn btn-primary btn-full" onClick={saveExtracted}>Save All to Inventory</button>
-                    <button className="btn btn-secondary" onClick={() => { setExtracted([]); setVerifiedItems({}); setEditingExtracted(false) }}>Discard</button>
+                    <button className="btn btn-primary btn-full" onClick={saveExtracted}>
+                      {hasDuplicates ? `Save All (${Object.keys(duplicateFlags).length} duplicate will be skipped)` : 'Save All to Inventory'}
+                    </button>
+                    <button className="btn btn-secondary" onClick={() => { setExtracted([]); setVerifiedItems({}); setDuplicateFlags({}); setEditingExtracted(false) }}>Discard</button>
                   </div>
                 </div>
               )}

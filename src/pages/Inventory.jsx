@@ -50,6 +50,8 @@ export default function Inventory() {
   const [showAlertsOnly, setShowAlertsOnly] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [selectedRM, setSelectedRM] = useState(null)
+  const [selectedWIP, setSelectedWIP] = useState(null)
+  const [wipHistory, setWIPHistory] = useState({ productions: [], usedIn: [] })
   const [dateRange, setDateRange] = useState(90)
   const [productHistory, setProductHistory] = useState({ productions: [], dispatches: [] })
   const [rmHistory, setRMHistory] = useState({ sourcing: [], used: [] })
@@ -71,10 +73,12 @@ export default function Inventory() {
     if (tabParam === 'rm') setTab('rm')
     if (tabParam === 'fg') setTab('fg')
     if (tabParam === 'pack') setTab('pack')
+    if (tabParam === 'wip') setTab('wip')
     if (filterParam === 'alerts') setShowAlertsOnly(true)
   }, [location.search])
   useEffect(() => { if (selectedProduct) loadProductHistory(selectedProduct, dateRange) }, [selectedProduct, dateRange])
   useEffect(() => { if (selectedRM) loadRMHistory(selectedRM, dateRange) }, [selectedRM, dateRange])
+  useEffect(() => { if (selectedWIP) loadWIPHistory(selectedWIP, dateRange) }, [selectedWIP, dateRange])
   useEffect(() => { if (tab === 'pack') loadPackingRuns() }, [tab])
   useEffect(() => {
     if (packForm.product_code && packForm.packs) {
@@ -134,6 +138,26 @@ export default function Inventory() {
     setHistoryLoading(false)
   }
 
+  async function loadWIPHistory(code, days) {
+    setHistoryLoading(true)
+    const since = new Date(); since.setDate(since.getDate() - days)
+    const sinceStr = since.toISOString().split('T')[0]
+    const [prod, bom] = await Promise.all([
+      supabase.from('productions').select('*').eq('product_code', code).gte('date', sinceStr).order('date', { ascending: false }),
+      supabase.from('bom').select('product_code,qty_per_unit,unit').eq('wip_code', code),
+    ])
+    let usedIn = []
+    if (bom.data?.length) {
+      const codes = [...new Set(bom.data.map(b => b.product_code))]
+      const { data: prods } = await supabase.from('products').select('code,name').in('code', codes)
+      const qtyByCode = {}
+      bom.data.forEach(b => { qtyByCode[b.product_code] = b }) // 1 wip-consuming row assumed per FG for display purposes
+      usedIn = (prods || []).map(p => ({ code: p.code, name: p.name, qty: qtyByCode[p.code]?.qty_per_unit, unit: qtyByCode[p.code]?.unit }))
+    }
+    setWIPHistory({ productions: prod.data || [], usedIn })
+    setHistoryLoading(false)
+  }
+
   async function savePacking() {
     if (!packForm.product_code || !packForm.packs) return
     const p = products.find(x => x.code === packForm.product_code)
@@ -177,7 +201,7 @@ export default function Inventory() {
   async function saveEdit() {
     const newVal = parseFloat(editVal)
     if (isNaN(newVal)) return
-    const oldVal = tab === 'fg' ? editItem.units : editItem.stock
+    const oldVal = (tab === 'fg' || tab === 'wip') ? editItem.units : editItem.stock
     if (tab === 'fg') {
       const freezerVal = parseFloat(editFreezerVal)
       const packedVal = parseFloat(editPackedVal)
@@ -185,6 +209,8 @@ export default function Inventory() {
       if (!isNaN(freezerVal)) update.freezer_units = freezerVal
       if (!isNaN(packedVal)) update.packed_units = packedVal
       await supabase.from('products').update(update).eq('code', editItem.code)
+    } else if (tab === 'wip') {
+      await supabase.from('products').update({ units: newVal }).eq('code', editItem.code)
     } else {
       await supabase.from('raw_materials').update({ stock: newVal }).eq('name', editItem.name)
     }
@@ -195,14 +221,24 @@ export default function Inventory() {
   }
 
   const fgCategories = ['all', ...new Set(
-    products.filter(p => !BULK_FG_EXCLUDE.has(p.code)).map(p => p.category)
+    products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.category !== 'WIP').map(p => p.category)
   )]
   const rmCategories = ['all', ...new Set(rms.map(r => r.category))]
+  const wipCategories = ['all', ...new Set(products.filter(p => p.category === 'WIP').map(p => p.name?.match(/frosting|jam|curd|cream|ganache/i) ? 'Batch (g)' : 'Cake Layer (ea)'))]
 
   const filteredFG = products.filter(p => {
-    if (BULK_FG_EXCLUDE.has(p.code)) return false
+    if (BULK_FG_EXCLUDE.has(p.code) || p.category === 'WIP') return false
     if (showAlertsOnly && p.units > p.min_stock) return false
     if (catFilter !== 'all' && p.category !== catFilter) return false
+    if (search && !p.code.toLowerCase().includes(search.toLowerCase()) && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
+  const filteredWIP = products.filter(p => {
+    if (p.category !== 'WIP') return false
+    const kind = p.wip_unit === 'ea' ? 'Cake Layer (ea)' : 'Batch (g)'
+    if (showAlertsOnly && p.units > p.min_stock) return false
+    if (catFilter !== 'all' && kind !== catFilter) return false
     if (search && !p.code.toLowerCase().includes(search.toLowerCase()) && !p.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
@@ -215,11 +251,17 @@ export default function Inventory() {
   })
 
   const fgStats = {
-    total: products.filter(p => !BULK_FG_EXCLUDE.has(p.code)).reduce((s,p)=>s+Math.max(0,p.units),0),
-    low: products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.units>0 && p.units<=p.min_stock).length,
-    out: products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.units<=0).length
+    total: products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.category !== 'WIP').reduce((s,p)=>s+Math.max(0,p.units),0),
+    low: products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.category !== 'WIP' && p.units>0 && p.units<=p.min_stock).length,
+    out: products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.category !== 'WIP' && p.units<=0).length
   }
   const rmStats = { total: rms.length, low: rms.filter(r=>r.stock>0&&r.stock<=r.min_stock).length, out: rms.filter(r=>r.stock<=0).length }
+  const wipProducts = products.filter(p => p.category === 'WIP')
+  const wipStats = {
+    items: wipProducts.length,
+    low: wipProducts.filter(p => p.units>0 && p.units<=p.min_stock).length,
+    out: wipProducts.filter(p => p.units<=0).length,
+  }
 
   const btnStyle = (active) => ({
     padding: '5px 12px', border: '1px solid var(--border)', borderRadius: 3,
@@ -243,10 +285,11 @@ export default function Inventory() {
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
           {[
             { key: 'fg', label: '📦 Finished Goods' },
+            { key: 'wip', label: '🧁 WIP' },
             { key: 'pack', label: '📦 Packing' },
             { key: 'rm', label: '🌿 Raw Materials' },
           ].map(t => (
-            <button key={t.key} onClick={() => { setTab(t.key); setCatFilter('all'); setSearch(''); setSelectedProduct(null); setSelectedRM(null); }}
+            <button key={t.key} onClick={() => { setTab(t.key); setCatFilter('all'); setSearch(''); setSelectedProduct(null); setSelectedRM(null); setSelectedWIP(null); }}
               style={{ padding: '12px 24px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: tab===t.key ? 'var(--ink)' : 'var(--ink3)', borderBottom: tab===t.key ? '2px solid var(--ink)' : '2px solid transparent', marginBottom: -1 }}>
               {t.label}
             </button>
@@ -364,6 +407,13 @@ export default function Inventory() {
                 <div className="stat amber"><div className="stat-label">Low Stock</div><div className="stat-value">{fgStats.low}</div></div>
                 <div className="stat red"><div className="stat-label">Out of Stock</div><div className="stat-value">{fgStats.out}</div></div>
               </div>
+            ) : tab === 'wip' ? (
+              <div className="grid4" style={{ marginBottom: 16 }}>
+                <div className="stat blue"><div className="stat-label">WIP Items</div><div className="stat-value">{wipStats.items}</div></div>
+                <div className="stat green"><div className="stat-label">Showing</div><div className="stat-value">{filteredWIP.length}</div></div>
+                <div className="stat amber"><div className="stat-label">Low Stock</div><div className="stat-value">{wipStats.low}</div></div>
+                <div className="stat red"><div className="stat-label">Out of Stock</div><div className="stat-value">{wipStats.out}</div></div>
+              </div>
             ) : (
               <div className="grid4" style={{ marginBottom: 16 }}>
                 <div className="stat blue"><div className="stat-label">Total RMs</div><div className="stat-value">{rmStats.total}</div></div>
@@ -381,10 +431,10 @@ export default function Inventory() {
             )}
 
             <div className="filter-bar">
-              {(tab === 'fg' ? fgCategories : rmCategories).map(cat => (
+              {(tab === 'fg' ? fgCategories : tab === 'wip' ? wipCategories : rmCategories).map(cat => (
                 <button key={cat} className={'filter-btn ' + (catFilter===cat?'active':'')} onClick={() => setCatFilter(cat)}>{cat === 'all' ? 'All' : cat}</button>
               ))}
-              <input className="search-input" placeholder={'Search ' + (tab==='fg'?'product':'material') + '...'} value={search} onChange={e => setSearch(e.target.value)} />
+              <input className="search-input" placeholder={'Search ' + (tab==='fg'?'product':tab==='wip'?'WIP item':'material') + '...'} value={search} onChange={e => setSearch(e.target.value)} />
             </div>
 
             {loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Loading...</div> : (
@@ -494,6 +544,87 @@ export default function Inventory() {
                                     <div style={{ fontWeight: 600, color: 'var(--red)' }}>-{d.units_dispatched} units</div>
                                     <div style={{ fontSize: 11, color: 'var(--ink2)' }}>{d.dispatches?.customer_name}</div>
                                     <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{d.dispatches?.date} · {d.qty} {d.dispatch_type}</div>
+                                  </div>
+                                ))
+                              }
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : tab === 'wip' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: selectedWIP ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
+                  <div className="stock-grid">
+                    {filteredWIP.length === 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--ink3)', padding: 24, textAlign: 'center' }}>No WIP items match this filter.</div>
+                    )}
+                    {filteredWIP.map(p => {
+                      const cls = p.units <= 0 ? 'critical' : p.units <= p.min_stock ? 'low' : 'healthy'
+                      const bar = p.units <= 0 ? 'var(--red)' : p.units <= p.min_stock ? 'var(--amber)' : 'var(--green)'
+                      const isSelected = selectedWIP === p.code
+                      const unitLabel = p.wip_unit === 'ea' ? 'ea' : 'g'
+                      return (
+                        <div key={p.code} className={'stock-item ' + cls}
+                          onClick={() => setSelectedWIP(isSelected ? null : p.code)}
+                          style={{ cursor: 'pointer', outline: isSelected ? '2px solid var(--kk-green)' : 'none', minHeight: 120 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div className="si-code">{p.code}</div>
+                            {(isAdmin || isKitchen) && <button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); }}
+                              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 2, padding: '1px 6px', fontSize: 9, cursor: 'pointer', color: 'var(--ink3)' }}>edit</button>}
+                          </div>
+                          <div className="si-name">{p.name}</div>
+                          <div style={{ fontSize: 28, fontFamily: 'var(--display)', fontWeight: 800, color: bar, lineHeight: 1, marginTop: 6 }}>
+                            {p.units?.toLocaleString()} <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--ink3)' }}>{unitLabel}</span>
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--ink3)', marginTop: 4 }}>{p.wip_unit === 'ea' ? 'cake layer' : 'batch component'} · min {p.min_stock}{unitLabel}</div>
+                          <div className="stock-bar"><div className="stock-bar-fill" style={{ width: Math.min(100,Math.max(0,p.units/(p.min_stock*2)*100)) + '%', background: bar }} /></div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {selectedWIP && (
+                    <div className="card" style={{ position: 'sticky', top: 16, maxHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexShrink: 0 }}>
+                        <div>
+                          <div className="card-title" style={{ margin: 0 }}><span className="code-tag">{selectedWIP}</span></div>
+                          <div style={{ marginTop: 8, fontSize: 24, fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--kk-green)' }}>
+                            {products.find(p=>p.code===selectedWIP)?.units?.toLocaleString()} <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--ink3)' }}>{products.find(p=>p.code===selectedWIP)?.wip_unit === 'ea' ? 'ea' : 'g'} in stock</span>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                          {DATE_RANGES.map(r => <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>)}
+                          <button onClick={() => setSelectedWIP(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--ink3)' }}>×</button>
+                        </div>
+                      </div>
+                      {historyLoading ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--ink3)' }}>Loading...</div> : (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, overflow: 'hidden', flex: 1 }}>
+                          <div>
+                            <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>🏭 Produced</div>
+                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 380px)', paddingRight: 4 }}>
+                              {wipHistory.productions.length === 0
+                                ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
+                                : wipHistory.productions.map((p, i) => (
+                                  <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                    <div style={{ fontWeight: 600, color: 'var(--green)' }}>+{p.output_units} {products.find(x=>x.code===selectedWIP)?.wip_unit === 'ea' ? 'ea' : 'g'}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.date} · {p.input_qty} {p.input_type}</div>
+                                    {p.notes && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{p.notes}</div>}
+                                  </div>
+                                ))
+                              }
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>🧁 Used In</div>
+                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 380px)', paddingRight: 4 }}>
+                              {wipHistory.usedIn.length === 0
+                                ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>Not used in any finished good yet</div>
+                                : wipHistory.usedIn.map((u, i) => (
+                                  <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                    <div style={{ fontWeight: 600 }}><span className="code-tag" style={{ fontSize: 10 }}>{u.code}</span> {u.name}</div>
+                                    {u.qty != null && <div style={{ fontSize: 11, color: 'var(--ink3)' }}>uses {u.qty} {u.unit} per unit</div>}
                                   </div>
                                 ))
                               }
@@ -630,7 +761,7 @@ export default function Inventory() {
             <div style={{ background: 'var(--surface2)', padding: 14, borderRadius: 3, marginBottom: 16 }}>
               <div style={{ fontSize: 10, color: 'var(--ink3)', letterSpacing: 1, textTransform: 'uppercase' }}>{editItem.code || editItem.name}</div>
               <div style={{ fontSize: 12, color: 'var(--ink2)', marginTop: 2 }}>{editItem.name || editItem.code}</div>
-              <div style={{ fontFamily: 'var(--display)', fontSize: 28, marginTop: 4 }}>{tab==='fg'?editItem.units:editItem.stock} {tab==='rm'?editItem.unit:'units'}</div>
+              <div style={{ fontFamily: 'var(--display)', fontSize: 28, marginTop: 4 }}>{(tab==='fg'||tab==='wip')?editItem.units:editItem.stock} {tab==='rm'?editItem.unit:(tab==='wip'?(editItem.wip_unit==='ea'?'ea':'g'):'units')}</div>
             </div>
             {tab === 'fg' ? (() => {
               const ps = PACK_SIZE[editItem.code] || 1
@@ -656,7 +787,11 @@ export default function Inventory() {
                   </div>
                 </div>
               )
-            })() : (() => {
+            })() : tab === 'wip' ? (
+              <div className="field"><label>New Stock ({editItem.wip_unit === 'ea' ? 'cake layers' : 'grams'})</label>
+                <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} step={editItem.wip_unit === 'ea' ? '1' : '0.1'} style={{ fontSize: 20, textAlign: 'center' }} autoFocus />
+              </div>
+            ) : (() => {
               const disp = displayStock(editItem.name, editItem.stock)
               return (
                 <div>

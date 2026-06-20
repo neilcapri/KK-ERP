@@ -83,13 +83,19 @@ export default function Production() {
   }
 
   async function checkRM(code, outputUnits) {
-    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', code)
+    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (!bom?.length) return []
     const warns = []
     for (const item of bom) {
-      const neededKg = (item.qty_per_unit * outputUnits) / 1000
-      const { data: rm } = await supabase.from('raw_materials').select('stock,unit').eq('name', item.rm_name).single()
-      if (rm && rm.stock < neededKg) warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3), have: rm.stock.toFixed(3) })
+      if (item.component_type === 'wip') {
+        const needed = item.qty_per_unit * outputUnits
+        const { data: wip } = await supabase.from('products').select('units,name').eq('code', item.wip_code).single()
+        if (wip && wip.units < needed) warns.push({ rm: (wip.name || item.wip_code) + ' (WIP)', needed: needed.toFixed(1) + (item.unit==='ea'?' ea':'g'), have: wip.units.toFixed(1) + (item.unit==='ea'?' ea':'g'), isWip: true })
+      } else {
+        const neededKg = (item.qty_per_unit * outputUnits) / 1000
+        const { data: rm } = await supabase.from('raw_materials').select('stock,unit').eq('name', item.rm_name).single()
+        if (rm && rm.stock < neededKg) warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3) + 'kg', have: rm.stock.toFixed(3) + 'kg' })
+      }
     }
     return warns
   }
@@ -190,14 +196,21 @@ export default function Production() {
     const newUnits = (prod?.units || 0) + output
     await supabase.from('products').update({ units: newUnits }).eq('code', code)
     addLog('✓ FG stock updated: ' + prod?.units + ' → ' + newUnits, 'ok')
-    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', code)
+    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', code)
     if (bom?.length) {
+      let rmCount = 0, wipCount = 0
       for (const item of bom) {
-        const deductKg = (item.qty_per_unit * output) / 1000
-        const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
-        if (rm) await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductKg) }).eq('name', item.rm_name)
+        if (item.component_type === 'wip') {
+          const deductQty = item.qty_per_unit * output
+          const { data: wip } = await supabase.from('products').select('units').eq('code', item.wip_code).single()
+          if (wip) { await supabase.from('products').update({ units: Math.max(0, wip.units - deductQty) }).eq('code', item.wip_code); wipCount++ }
+        } else {
+          const deductKg = (item.qty_per_unit * output) / 1000
+          const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
+          if (rm) { await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductKg) }).eq('name', item.rm_name); rmCount++ }
+        }
       }
-      addLog('✓ ' + bom.length + ' RMs deducted via BOM', 'ok')
+      addLog('✓ ' + rmCount + ' RMs' + (wipCount ? ' + ' + wipCount + ' WIP components' : '') + ' deducted via BOM', 'ok')
     }
     await supabase.from('productions').insert({ date, product_code: code, product_name: prod?.name || code, input_qty: parseFloat(inputQty), input_type: inputType, output_units: output, notes, created_by_name: profile?.name })
     await supabase.from('activity').insert({ type: 'production', title: code + ': +' + output + ' units', description: inputQty + ' ' + inputType + ' · ' + (prod?.name), created_by_name: profile?.name })
@@ -213,12 +226,18 @@ export default function Production() {
     try {
       const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
       if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - h.output_units) }).eq('code', h.product_code)
-      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', h.product_code)
+      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', h.product_code)
       if (bom?.length) {
         for (const item of bom) {
-          const restoreKg = (item.qty_per_unit * h.output_units) / 1000
-          const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
-          if (rm) await supabase.from('raw_materials').update({ stock: rm.stock + restoreKg }).eq('name', item.rm_name)
+          if (item.component_type === 'wip') {
+            const restoreQty = item.qty_per_unit * h.output_units
+            const { data: wip } = await supabase.from('products').select('units').eq('code', item.wip_code).single()
+            if (wip) await supabase.from('products').update({ units: wip.units + restoreQty }).eq('code', item.wip_code)
+          } else {
+            const restoreKg = (item.qty_per_unit * h.output_units) / 1000
+            const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
+            if (rm) await supabase.from('raw_materials').update({ stock: rm.stock + restoreKg }).eq('name', item.rm_name)
+          }
         }
       }
       await supabase.from('productions').delete().eq('id', h.id)
@@ -315,7 +334,7 @@ export default function Production() {
                 <label>Product</label>
                 <select style={selectStyle} value={form.code} onChange={e => handleCodeChange(e.target.value)}>
                   <option value="">Select product...</option>
-                  {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                  {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
                 </select>
               </div>
               <div className="field-row">
@@ -344,7 +363,7 @@ export default function Production() {
               {rmWarnings.length > 0 && (
                 <div className="alert alert-red" style={{ flexDirection: 'column', gap: 4 }}>
                   <strong>⚠️ Insufficient RM stock:</strong>
-                  {rmWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}kg, have {w.have}kg</div>)}
+                  {rmWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}, have {w.have}</div>)}
                 </div>
               )}
               <div className="field"><label>Notes</label><textarea value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Batch notes..." rows={2} /></div>
@@ -553,7 +572,7 @@ export default function Production() {
               <label>Product</label>
               <select style={selectStyle} value={schedForm.product_code} onChange={e => handleSchedProductChange(e.target.value)}>
                 <option value="">Select...</option>
-                {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
               </select>
             </div>
             <div className="field-row">
@@ -581,7 +600,7 @@ export default function Production() {
             {scheduleRMWarnings.length > 0 && (
               <div className="alert alert-red" style={{ flexDirection: 'column', gap: 4, marginBottom: 12 }}>
                 <strong>⚠️ Insufficient RM stock:</strong>
-                {scheduleRMWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}kg, have {w.have}kg</div>)}
+                {scheduleRMWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}, have {w.have}</div>)}
               </div>
             )}
             {scheduleRMWarnings.length === 0 && schedForm.product_code && schedForm.planned_input && (
@@ -609,7 +628,7 @@ export default function Production() {
               <label>Product</label>
               <select style={selectStyle} value={editForm.product_code} onChange={e => handleEditProductChange(e.target.value)}>
                 <option value="">Select...</option>
-                {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
+                {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
               </select>
             </div>
             <div className="field-row">
@@ -637,7 +656,7 @@ export default function Production() {
             {editRMWarnings.length > 0 && (
               <div className="alert alert-red" style={{ flexDirection: 'column', gap: 4, marginBottom: 12 }}>
                 <strong>⚠️ Insufficient RM stock:</strong>
-                {editRMWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}kg, have {w.have}kg</div>)}
+                {editRMWarnings.map((w,i) => <div key={i} style={{fontSize:11}}>{w.rm}: need {w.needed}, have {w.have}</div>)}
               </div>
             )}
             {editRMWarnings.length === 0 && editForm.product_code && editForm.planned_input && (
@@ -687,30 +706,49 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
       const { data: p } = await supabase.from('products').select('price_per_pack').eq('code', s.product_code).single()
       setBatchValue(p?.price_per_pack ? sellableQty(s.product_code, out) * p.price_per_pack : 0)
-      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', s.product_code)
+      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', s.product_code)
       if (!bom?.length) { setRMStatus([]); return }
-      const rmNames = bom.map(b => b.rm_name)
-      const { data: rms } = await supabase.from('raw_materials').select('name,stock').in('name', rmNames)
+      const rmNames = bom.filter(b => b.component_type !== 'wip').map(b => b.rm_name)
+      const wipCodes = bom.filter(b => b.component_type === 'wip').map(b => b.wip_code)
+      const [rmsRes, wipsRes] = await Promise.all([
+        rmNames.length ? supabase.from('raw_materials').select('name,stock').in('name', rmNames) : Promise.resolve({ data: [] }),
+        wipCodes.length ? supabase.from('products').select('code,units').in('code', wipCodes) : Promise.resolve({ data: [] }),
+      ])
       const stockMap = {}
-      ;(rms || []).forEach(r => { stockMap[r.name] = r.stock })
+      ;(rmsRes.data || []).forEach(r => { stockMap[r.name] = r.stock })
+      const wipStockMap = {}
+      ;(wipsRes.data || []).forEach(w => { wipStockMap[w.code] = w.units })
       const myIndex = allSchedule.findIndex(x => x.id === s.id)
       const priorBatches = allSchedule.slice(0, myIndex).filter(x => x.status === 'planned' || x.status === 'in_progress')
       const committedMap = {}
+      const committedWipMap = {}
       for (const prior of priorBatches) {
-        const { data: priorBom } = await supabase.from('bom').select('rm_name,qty_per_unit').eq('product_code', prior.product_code)
+        const { data: priorBom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', prior.product_code)
         const priorOut = prior.planned_output || calcOutput(prior.product_code, prior.input_type, prior.planned_input)
         ;(priorBom || []).forEach(item => {
-          const needed = (item.qty_per_unit * priorOut) / 1000
-          committedMap[item.rm_name] = (committedMap[item.rm_name] || 0) + needed
+          if (item.component_type === 'wip') {
+            committedWipMap[item.wip_code] = (committedWipMap[item.wip_code] || 0) + item.qty_per_unit * priorOut
+          } else {
+            const needed = (item.qty_per_unit * priorOut) / 1000
+            committedMap[item.rm_name] = (committedMap[item.rm_name] || 0) + needed
+          }
         })
       }
       const warns = []
       for (const item of bom) {
-        const neededKg = (item.qty_per_unit * out) / 1000
-        const currentStock = stockMap[item.rm_name] || 0
-        const committed = committedMap[item.rm_name] || 0
-        const remaining = currentStock - committed
-        if (remaining < neededKg) warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3), remaining: remaining.toFixed(3), shortBy: (neededKg - remaining).toFixed(3) })
+        if (item.component_type === 'wip') {
+          const needed = item.qty_per_unit * out
+          const currentStock = wipStockMap[item.wip_code] || 0
+          const committed = committedWipMap[item.wip_code] || 0
+          const remaining = currentStock - committed
+          if (remaining < needed) warns.push({ rm: item.wip_code + ' (WIP)', needed: needed.toFixed(1), remaining: remaining.toFixed(1), shortBy: (needed - remaining).toFixed(1) })
+        } else {
+          const neededKg = (item.qty_per_unit * out) / 1000
+          const currentStock = stockMap[item.rm_name] || 0
+          const committed = committedMap[item.rm_name] || 0
+          const remaining = currentStock - committed
+          if (remaining < neededKg) warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3), remaining: remaining.toFixed(3), shortBy: (neededKg - remaining).toFixed(3) })
+        }
       }
       setRMStatus(warns)
     }

@@ -96,7 +96,7 @@ const S = {
 
 function cellStyle(bg, fg, bold = false, size = 10, wrap = false, halign = 'center') {
   return {
-    font: { name: 'Arial', sz: size, bold, color: { rgb: fg || '000000' } },
+    font: { name: 'Calibri', sz: size, bold, color: { rgb: fg || '000000' } },
     fill: { fgColor: { rgb: bg || 'FFFFFF' } },
     alignment: { horizontal: halign, vertical: 'center', wrapText: wrap },
     border: {
@@ -125,7 +125,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       }
       if (r === 1 && headerRowIdx !== 1) {
         const bg = (catColorByCol && catColorByCol[c]) || S.CAT_GREEN
-        ws[addr].s = cellStyle(bg, S.KK_CREAM, true, 10, false, 'center'); continue
+        ws[addr].s = cellStyle(bg, S.KK_CREAM, true, 25, false, 'center'); continue
       }
       if (grandTotalIdx !== undefined && r === grandTotalIdx) {
         ws[addr].s = c === 0 ? cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left') : cellStyle(S.GRAND_BG, S.GRAND_FG, true, 20, false, 'center')
@@ -145,7 +145,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         else if (notesColIdx !== undefined && c === notesColIdx) {
           const hasNote = ws[addr].v && ws[addr].v !== ''
           ws[addr].s = hasNote
-            ? { font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '3E2723' } }, fill: { fgColor: { rgb: 'FFF9C4' } }, alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: { top: { style: 'medium', color: { rgb: 'FBC02D' } }, bottom: { style: 'medium', color: { rgb: 'FBC02D' } }, left: { style: 'medium', color: { rgb: 'FBC02D' } }, right: { style: 'medium', color: { rgb: 'FBC02D' } } } }
+            ? { font: { name: 'Calibri', sz: 11, bold: true, color: { rgb: '3E2723' } }, fill: { fgColor: { rgb: 'FFF9C4' } }, alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: { top: { style: 'medium', color: { rgb: 'FBC02D' } }, bottom: { style: 'medium', color: { rgb: 'FBC02D' } }, left: { style: 'medium', color: { rgb: 'FBC02D' } }, right: { style: 'medium', color: { rgb: 'FBC02D' } } } }
             : cellStyle(rowBg, 'BBBBBB', false, 10, false, 'center')
         }
         else if (includePricing && c === numCols - 1 && notesColIdx === undefined) { const hasVal = ws[addr].v && ws[addr].v !== ''; ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 20, false, 'center') }

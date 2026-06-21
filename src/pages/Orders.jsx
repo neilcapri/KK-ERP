@@ -108,7 +108,7 @@ function cellStyle(bg, fg, bold = false, size = 10, wrap = false, halign = 'cent
   }
 }
 
-function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx) {
+function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, headerRowIdx) {
   const encode = (r, c) => XLSX.utils.encode_cell({ r, c })
   const storeArr = [...storeRowIdxs]
   for (let r = 0; r < totalRows; r++) {
@@ -116,13 +116,13 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       const addr = encode(r, c)
       if (!ws[addr]) ws[addr] = { v: '', t: 's' }
       if (r === 0) { ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 14, false, c === 0 ? 'left' : 'center'); continue }
-      if (r === 1) { ws[addr].s = cellStyle(S.CAT_GREEN, S.KK_CREAM, true, 10, false, 'center'); continue }
-      if (r === 2) {
+      if (r === headerRowIdx) {
         if (c === 0) ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'left')
         else if (includePricing && c === numCols - 1) ws[addr].s = cellStyle(S.KK_PEACH, 'FFFFFF', true, 10, true, 'center')
         else ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'center')
         continue
       }
+      if (r === 1 && headerRowIdx !== 1) { ws[addr].s = cellStyle(S.CAT_GREEN, S.KK_CREAM, true, 10, false, 'center'); continue }
       if (grandTotalIdx !== undefined && r === grandTotalIdx) {
         ws[addr].s = c === 0 ? cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left') : cellStyle(S.GRAND_BG, S.GRAND_FG, true, 20, false, 'center')
         continue
@@ -176,6 +176,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   let catColIdx = 1
   for (const [count] of catGroups) { if (count > 1) merges.push({ s: { r: 1, c: catColIdx }, e: { r: 1, c: catColIdx + count - 1 } }); catColIdx += count }
   const dayRowIdxs = new Set(), totalRowIdxs = new Set(), storeRowIdxs = new Set()
+  const noteByRow = {}
   const ALL_DAY_GROUPS = [...DELIVERY_DAYS, 'Unscheduled']
   for (const day of ALL_DAY_GROUPS) {
     const dayOrders = byDay[day] || []; if (!dayOrders.length) continue
@@ -191,13 +192,15 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
         packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
         priceMap[item.product_code] = item.price_per_pack || 0
       }
-      const storeRow = [order.customer_name]; let rowTotal = 0
+      const storeLabel = order.customer_name + (order.po_number ? '  (PO: ' + order.po_number + ')' : '')
+      const storeRow = [storeLabel]; let rowTotal = 0
       for (const col of RETAIL_COLS) {
         const packs = packsMap[col.code]
         storeRow.push(packs || null)
         if (packs && priceMap[col.code]) rowTotal += packs * priceMap[col.code]
       }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
+      if (order.notes) noteByRow[rows.length] = order.notes
       storeRowIdxs.add(rows.length); rows.push(storeRow)
     }
     const colTotals = new Array(RETAIL_COLS.length).fill(0); let grandTotal = 0
@@ -241,7 +244,13 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const colWidths = [{ wch: 52 }]; for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 9 }); if (includePricing) colWidths.push({ wch: 14 })
   ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 52 }, { hpt: 90 }]
   for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 45 }
-  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx)
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 2)
+  // Order notes as native Excel comment bubbles on the store name cell
+  for (const [rowIdxStr, noteText] of Object.entries(noteByRow)) {
+    const addr = XLSX.utils.encode_cell({ r: parseInt(rowIdxStr), c: 0 })
+    if (!ws[addr]) ws[addr] = { v: '', t: 's' }
+    ws[addr].c = [{ a: 'KK ERP', t: noteText }]
+  }
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
 }
 
@@ -255,6 +264,7 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const byDay = {}; for (const o of orders) { const day = o.delivery_day || 'Unscheduled'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
   const dayRowIdxs = new Set(), totalRowIdxs = new Set(), storeRowIdxs = new Set()
+  const noteByRowBulk = {}
   const ALL_DAY_GROUPS_BULK = [...DELIVERY_DAYS, 'Unscheduled']
   for (const day of ALL_DAY_GROUPS_BULK) {
     const dayOrders = (byDay[day] || []).filter(o => (o.order_items || []).some(item => BULK_CODES.has(item.product_code))); if (!dayOrders.length) continue
@@ -264,9 +274,11 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
     for (const order of dayOrders) {
       const items = order.order_items || []; const qtyMap = {}, priceMap = {}
       for (const item of items) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); priceMap[item.product_code] = item.price_per_pack || 0 } }
-      const storeRow = [order.customer_name]; let rowTotal = 0
+      const storeLabel = order.customer_name + (order.po_number ? '  (PO: ' + order.po_number + ')' : '')
+      const storeRow = [storeLabel]; let rowTotal = 0
       for (const col of BULK_COLS) { const qty = qtyMap[col.code] || null; storeRow.push(qty); if (qty && priceMap[col.code]) rowTotal += qty * priceMap[col.code] }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
+      if (order.notes) noteByRowBulk[rows.length] = order.notes
       storeRowIdxs.add(rows.length); rows.push(storeRow)
     }
     const bulkTotals = new Array(BULK_COLS.length).fill(0); let dayBulkTotal = 0
@@ -284,7 +296,12 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const colWidths = [{ wch: 52 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 14 }); if (includePricing) colWidths.push({ wch: 14 })
   ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 90 }]
   for (let i = 2; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 45 }
-  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx)
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 1)
+  for (const [rowIdxStr, noteText] of Object.entries(noteByRowBulk)) {
+    const addr = XLSX.utils.encode_cell({ r: parseInt(rowIdxStr), c: 0 })
+    if (!ws[addr]) ws[addr] = { v: '', t: 's' }
+    ws[addr].c = [{ a: 'KK ERP', t: noteText }]
+  }
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
 }
 

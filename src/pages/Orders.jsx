@@ -117,10 +117,10 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       if (!ws[addr]) ws[addr] = { v: '', t: 's' }
       if (r === 0) { ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 14, false, c === 0 ? 'left' : 'center'); continue }
       if (r === headerRowIdx) {
-        if (c === 0) ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'left')
+        if (c === 0) ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 30, true, 'left')
         else if (notesColIdx !== undefined && c === notesColIdx) ws[addr].s = cellStyle('FBC02D', '3E2723', true, 10, true, 'center')
         else if (includePricing && c === numCols - 1) ws[addr].s = cellStyle(S.KK_PEACH, 'FFFFFF', true, 10, true, 'center')
-        else ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'center')
+        else ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 16, true, 'center')
         continue
       }
       if (r === 1 && headerRowIdx !== 1) {
@@ -131,7 +131,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         ws[addr].s = c === 0 ? cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left') : cellStyle(S.GRAND_BG, S.GRAND_FG, true, 20, false, 'center')
         continue
       }
-      if (dayRowIdxs.has(r)) { ws[addr].s = cellStyle(S.DAY_BG, S.DAY_FG, true, 12, false, c === 0 ? 'left' : 'center'); continue }
+      if (dayRowIdxs.has(r)) { ws[addr].s = cellStyle(S.DAY_BG, S.DAY_FG, true, 20, false, c === 0 ? 'left' : 'center'); continue }
       if (totalRowIdxs.has(r)) {
         if (c === 0) ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 20, false, 'left')
         else if (includePricing && c === numCols - 1 && notesColIdx === undefined) ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 20, false, 'center')
@@ -141,7 +141,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       if (storeRowIdxs.has(r)) {
         const storePos = storeArr.indexOf(r)
         const rowBg = S.STORE_PALETTE[storePos % S.STORE_PALETTE.length]
-        if (c === 0) ws[addr].s = cellStyle(rowBg, '111111', true, 16, false, 'left')
+        if (c === 0) ws[addr].s = cellStyle(rowBg, '111111', true, 20, false, 'left')
         else if (notesColIdx !== undefined && c === notesColIdx) {
           const hasNote = ws[addr].v && ws[addr].v !== ''
           ws[addr].s = hasNote
@@ -245,7 +245,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
   let catColIdx = 1
   for (const [count] of catGroups) { if (count > 1) merges.push({ s: { r: 1, c: catColIdx }, e: { r: 1, c: catColIdx + count - 1 } }); catColIdx += count }
-  const CAT_COLORS = ['8D6E63','558B2F','AD1457','795548','EF6C00','C2185B','6D4C41','00695C','F9A825','8E24AA','00897B','D84315']
+  const CAT_COLORS = ['8D6E63','558B2F','AD1457','795548','EF6C00','C2185B','6D4C41','00695C','A0522D','8E24AA','00897B','D84315']
   const catColorByCol = {}
   let ccIdx = 1
   catGroups.forEach(([count], gi) => { for (let k = 0; k < count; k++) catColorByCol[ccIdx + k] = CAT_COLORS[gi % CAT_COLORS.length]; ccIdx += count })

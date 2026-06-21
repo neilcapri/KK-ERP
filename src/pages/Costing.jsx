@@ -1,0 +1,302 @@
+import { useEffect, useState, useMemo } from 'react'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
+
+const MARGIN_THRESHOLD = 30 // %
+const LABOUR_PCT_OF_PRICE = 0.22 // labour cost = 22% of list price (per unit)
+
+function fmt(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—'
+  return '$' + n.toFixed(2)
+}
+
+export default function Costing() {
+  const { isAdmin } = useAuth()
+  const [products, setProducts] = useState([])
+  const [bom, setBom] = useState([])
+  const [rmPriceMap, setRmPriceMap] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [catFilter, setCatFilter] = useState('all')
+  const [flagOnly, setFlagOnly] = useState(false)
+  const [selected, setSelected] = useState(null)
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const [{ data: prods }, { data: bomRows }, { data: rms }] = await Promise.all([
+      supabase.from('products').select('*').order('category').order('code'),
+      supabase.from('bom').select('product_code, rm_name, qty_per_unit, unit'),
+      supabase.from('raw_materials').select('name, price_per_unit'),
+    ])
+
+    const priceMap = {}
+    ;(rms || []).forEach(r => { priceMap[r.name] = r.price_per_unit || 0 })
+
+    setProducts(prods || [])
+    setBom(bomRows || [])
+    setRmPriceMap(priceMap)
+    setLoading(false)
+  }
+
+  const bomByProduct = useMemo(() => {
+    const map = {}
+    bom.forEach(b => {
+      if (!map[b.product_code]) map[b.product_code] = []
+      map[b.product_code].push(b)
+    })
+    return map
+  }, [bom])
+
+  function rmCostFor(code) {
+    const items = bomByProduct[code] || []
+    return items.reduce((sum, item) => {
+      const price = rmPriceMap[item.rm_name] || 0
+      const cost = item.unit === 'ea'
+        ? price * item.qty_per_unit
+        : price * item.qty_per_unit / 1000
+      return sum + cost
+    }, 0)
+  }
+
+  // List price lives on products.price_per_pack (the default/base price used
+  // app-wide as the starting price on new order lines). Convert to a per-unit
+  // figure using units_per_pack so it lines up with RM/packaging, which are per unit.
+  function rowFor(p) {
+    const rmCost = rmCostFor(p.code)
+    const packagingCost = p.packaging_cost_per_unit || 0
+    const unitsPerPack = p.units_per_pack || 1
+    const listPricePerUnit = (p.price_per_pack || 0) / unitsPerPack
+    const labourCost = listPricePerUnit > 0 ? listPricePerUnit * LABOUR_PCT_OF_PRICE : null
+    const totalCost = rmCost + packagingCost + (labourCost || 0)
+    const marginDollar = listPricePerUnit > 0 ? listPricePerUnit - totalCost : null
+    const marginPct = listPricePerUnit > 0 ? (marginDollar / listPricePerUnit) * 100 : null
+    return { rmCost, packagingCost, unitsPerPack, listPricePerUnit, labourCost, totalCost, marginDollar, marginPct }
+  }
+
+  const categories = useMemo(() => {
+    const set = new Set(products.map(p => p.category).filter(Boolean))
+    return ['all', ...Array.from(set).sort()]
+  }, [products])
+
+  const filtered = useMemo(() => {
+    return products.filter(p => {
+      if (catFilter !== 'all' && p.category !== catFilter) return false
+      if (search && !(p.name?.toLowerCase().includes(search.toLowerCase()) || p.code?.toLowerCase().includes(search.toLowerCase()))) return false
+      if (flagOnly) {
+        const r = rowFor(p)
+        if (r.marginPct === null || r.marginPct >= MARGIN_THRESHOLD) return false
+      }
+      return true
+    })
+  }, [products, search, catFilter, flagOnly, bomByProduct, rmPriceMap])
+
+  async function savePackagingCost(code, value) {
+    const num = value === '' ? null : parseFloat(value)
+    await supabase.from('products').update({ packaging_cost_per_unit: num }).eq('code', code)
+    setProducts(prev => prev.map(p => p.code === code ? { ...p, packaging_cost_per_unit: num } : p))
+  }
+
+  // Editing happens in per-unit terms here, but the underlying field is price_per_pack —
+  // convert back using the product's units_per_pack before writing.
+  async function saveListPricePerUnit(p, value) {
+    const perUnit = value === '' ? 0 : parseFloat(value)
+    const unitsPerPack = p.units_per_pack || 1
+    const newPricePerPack = Math.round(perUnit * unitsPerPack * 100) / 100
+    await supabase.from('products').update({ price_per_pack: newPricePerPack }).eq('code', p.code)
+    setProducts(prev => prev.map(x => x.code === p.code ? { ...x, price_per_pack: newPricePerPack } : x))
+  }
+
+  const sel = { padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, background: 'var(--surface)', color: 'var(--ink)' }
+  const editInput = {
+    width: 70, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)',
+    fontSize: 11, background: 'var(--surface)', color: 'var(--ink)', textAlign: 'right',
+  }
+
+  const flaggedCount = useMemo(() => products.filter(p => {
+    const r = rowFor(p)
+    return r.marginPct !== null && r.marginPct < MARGIN_THRESHOLD
+  }).length, [products, bomByProduct, rmPriceMap])
+
+  const avgMargin = useMemo(() => {
+    const withPrice = products.map(p => rowFor(p)).filter(r => r.marginPct !== null)
+    if (withPrice.length === 0) return null
+    return withPrice.reduce((s, r) => s + r.marginPct, 0) / withPrice.length
+  }, [products, bomByProduct, rmPriceMap])
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--ink3)' }}>Loading product costing...</div>
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h2 style={{ fontFamily: 'var(--display)', fontSize: 20, letterSpacing: 1, margin: 0 }}>Product Costing</h2>
+          <p style={{ color: 'var(--ink3)', fontSize: 12, margin: '4px 0 0' }}>
+            RM auto-calculated from BOM · Labour = {(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}% of list price · List price pulls from your base order pricing (price_per_pack ÷ units/pack) · Packaging is editable
+          </p>
+        </div>
+      </div>
+
+      <div className="grid2" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 20 }}>
+        <div className="stat">
+          <div className="stat-label">Products Tracked</div>
+          <div className="stat-value">{products.length}</div>
+        </div>
+        <div className="stat" style={{ borderTop: '3px solid ' + (avgMargin === null ? 'var(--border)' : avgMargin >= 50 ? 'var(--kk-green)' : avgMargin >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)') }}>
+          <div className="stat-label">Avg Margin (priced items)</div>
+          <div className="stat-value">{avgMargin === null ? '—' : avgMargin.toFixed(1) + '%'}</div>
+        </div>
+        <div className="stat" style={{ borderTop: '3px solid ' + (flaggedCount > 0 ? 'var(--red)' : 'var(--kk-green)') }}>
+          <div className="stat-label">Below {MARGIN_THRESHOLD}% Margin</div>
+          <div className="stat-value" style={{ color: flaggedCount > 0 ? 'var(--red)' : 'inherit' }}>{flaggedCount}</div>
+          <div className="stat-sub">{flaggedCount > 0 ? '🔴 Needs review' : '🟢 All healthy'}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          placeholder="Search product..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ ...sel, width: 200 }}
+        />
+        <select value={catFilter} onChange={e => setCatFilter(e.target.value)} style={sel}>
+          {categories.map(c => <option key={c} value={c}>{c === 'all' ? 'All Categories' : c}</option>)}
+        </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink2)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={flagOnly} onChange={e => setFlagOnly(e.target.checked)} />
+          Flagged only
+        </label>
+      </div>
+
+      <div className="card">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Product</th>
+                <th>RM Cost</th>
+                <th>Packaging /u</th>
+                <th>Labour /u ({(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}%)</th>
+                <th>Total Cost</th>
+                <th>List Price /u</th>
+                <th>Margin %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(p => {
+                const r = rowFor(p)
+                const flagged = r.marginPct !== null && r.marginPct < MARGIN_THRESHOLD
+                return (
+                  <tr key={p.code} style={flagged ? { background: 'rgba(200,60,60,0.06)' } : {}}>
+                    <td><span className="code-tag" style={{ cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.code}</span></td>
+                    <td style={{ fontWeight: 500, cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.name}</td>
+                    <td style={{ color: 'var(--ink2)' }}>{fmt(r.rmCost)}</td>
+                    <td>
+                      {isAdmin ? (
+                        <input
+                          type="number" step="0.01" style={editInput}
+                          defaultValue={p.packaging_cost_per_unit || ''}
+                          onBlur={e => savePackagingCost(p.code, e.target.value)}
+                        />
+                      ) : fmt(r.packagingCost)}
+                    </td>
+                    <td style={{ color: 'var(--ink2)' }}>{r.labourCost === null ? '—' : fmt(r.labourCost)}</td>
+                    <td style={{ fontFamily: 'var(--display)', fontSize: 13 }}>{fmt(r.totalCost)}</td>
+                    <td>
+                      {isAdmin ? (
+                        <input
+                          type="number" step="0.01" style={editInput}
+                          defaultValue={r.listPricePerUnit ? r.listPricePerUnit.toFixed(2) : ''}
+                          onBlur={e => saveListPricePerUnit(p, e.target.value)}
+                        />
+                      ) : fmt(r.listPricePerUnit)}
+                    </td>
+                    <td>
+                      {r.marginPct === null
+                        ? <span style={{ color: 'var(--ink3)', fontSize: 11 }}>No price set</span>
+                        : <span style={{
+                            fontFamily: 'var(--display)', fontSize: 13,
+                            color: r.marginPct >= 50 ? 'var(--kk-green)' : r.marginPct >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)',
+                          }}>
+                            {flagged && '🔴 '}{r.marginPct.toFixed(1)}%
+                          </span>
+                      }
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {selected && (() => {
+        const p = products.find(x => x.code === selected)
+        if (!p) return null
+        const r = rowFor(p)
+        const bomItems = bomByProduct[p.code] || []
+        return (
+          <div className="modal-bg" onClick={() => setSelected(null)}>
+            <div className="modal" onClick={e => e.stopPropagation()}>
+              <button className="modal-close" onClick={() => setSelected(null)}>×</button>
+              <div className="modal-title">{p.name}</div>
+              <div style={{ fontSize: 11, color: 'var(--ink3)', marginBottom: 16 }}>
+                <span className="code-tag">{p.code}</span> · {p.category} · {r.unitsPerPack} unit(s)/pack
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: 'var(--display)', fontSize: 11, letterSpacing: 1, color: 'var(--ink3)', marginBottom: 8 }}>RAW MATERIALS</div>
+                {bomItems.length === 0
+                  ? <div style={{ fontSize: 12, color: 'var(--ink3)' }}>No BOM defined</div>
+                  : bomItems.map((b, i) => {
+                      const price = rmPriceMap[b.rm_name] || 0
+                      const cost = b.unit === 'ea' ? price * b.qty_per_unit : price * b.qty_per_unit / 1000
+                      return (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+                          <span>{b.rm_name} ({b.qty_per_unit}{b.unit})</span>
+                          <span style={{ color: 'var(--ink2)' }}>{fmt(cost)}</span>
+                        </div>
+                      )
+                    })
+                }
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, marginBottom: 16 }}>
+                <Row label="RM Cost" value={fmt(r.rmCost)} />
+                <Row label="Packaging Cost" value={fmt(r.packagingCost)} />
+                <Row label={`Labour Cost (${(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}% of list price)`} value={r.labourCost === null ? 'Set list price' : fmt(r.labourCost)} />
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--display)', fontSize: 15 }}>
+                  <span>TOTAL COST /u</span>
+                  <span style={{ color: 'var(--kk-brown)' }}>{fmt(r.totalCost)}</span>
+                </div>
+                <Row label="List Price /u" value={fmt(r.listPricePerUnit)}
+                  sub={`= price_per_pack (${fmt(p.price_per_pack)}) ÷ ${r.unitsPerPack} unit(s)/pack`} />
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--display)', fontSize: 16 }}>
+                  <span>MARGIN</span>
+                  <span style={{ color: r.marginPct === null ? 'var(--ink3)' : r.marginPct >= 50 ? 'var(--kk-green)' : r.marginPct >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)' }}>
+                    {r.marginPct === null ? '—' : `${fmt(r.marginDollar)} (${r.marginPct.toFixed(1)}%)`}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
+
+function Row({ label, value, sub }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div>
+        <div style={{ color: 'var(--ink2)' }}>{label}</div>
+        {sub && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{sub}</div>}
+      </div>
+      <span>{value}</span>
+    </div>
+  )
+}

@@ -171,14 +171,16 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   for (const col of RETAIL_COLS) headerRow.push(col.label + '\n(' + col.code + ')\nPACKS')
   if (includePricing) headerRow.push('ORDER VALUE ($)'); rows.push(headerRow)
   const byDay = {}
-  for (const o of orders) { const day = o.delivery_day || 'Unknown'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
+  for (const o of orders) { const day = o.delivery_day || 'Unscheduled'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
   let catColIdx = 1
   for (const [count] of catGroups) { if (count > 1) merges.push({ s: { r: 1, c: catColIdx }, e: { r: 1, c: catColIdx + count - 1 } }); catColIdx += count }
   const dayRowIdxs = new Set(), totalRowIdxs = new Set(), storeRowIdxs = new Set()
-  for (const day of DELIVERY_DAYS) {
+  const ALL_DAY_GROUPS = [...DELIVERY_DAYS, 'Unscheduled']
+  for (const day of ALL_DAY_GROUPS) {
     const dayOrders = byDay[day] || []; if (!dayOrders.length) continue
-    const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
+    const dayLabel = day === 'Unscheduled' ? 'UNSCHEDULED / NO PACKING DAY SET' : day.toUpperCase()
+    const dayRow = [dayLabel]; for (let i = 1; i < numCols; i++) dayRow.push('')
     dayRowIdxs.add(rows.length); merges.push({ s: { r: rows.length, c: 0 }, e: { r: rows.length, c: numCols - 1 } }); rows.push(dayRow)
     for (const order of dayOrders) {
       const items = order.order_items || []
@@ -250,12 +252,14 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const rows = []; const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push(''); rows.push(titleRow)
   const headerRow = ['Store']; for (const col of BULK_COLS) headerRow.push(col.label + '\n(' + col.code + ')\nUNITS')
   if (includePricing) headerRow.push('ORDER VALUE ($)'); rows.push(headerRow)
-  const byDay = {}; for (const o of orders) { const day = o.delivery_day || 'Unknown'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
+  const byDay = {}; for (const o of orders) { const day = o.delivery_day || 'Unscheduled'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
   const dayRowIdxs = new Set(), totalRowIdxs = new Set(), storeRowIdxs = new Set()
-  for (const day of DELIVERY_DAYS) {
+  const ALL_DAY_GROUPS_BULK = [...DELIVERY_DAYS, 'Unscheduled']
+  for (const day of ALL_DAY_GROUPS_BULK) {
     const dayOrders = (byDay[day] || []).filter(o => (o.order_items || []).some(item => BULK_CODES.has(item.product_code))); if (!dayOrders.length) continue
-    const dayRow = [day.toUpperCase()]; for (let i = 1; i < numCols; i++) dayRow.push('')
+    const dayLabel = day === 'Unscheduled' ? 'UNSCHEDULED / NO PACKING DAY SET' : day.toUpperCase()
+    const dayRow = [dayLabel]; for (let i = 1; i < numCols; i++) dayRow.push('')
     dayRowIdxs.add(rows.length); merges.push({ s: { r: rows.length, c: 0 }, e: { r: rows.length, c: numCols - 1 } }); rows.push(dayRow)
     for (const order of dayOrders) {
       const items = order.order_items || []; const qtyMap = {}, priceMap = {}

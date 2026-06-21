@@ -47,10 +47,10 @@ function itemToPacks(item) {
 
 const RETAIL_COLS = [
   { code: 'PBB', label: 'PBB' }, { code: 'PCC', label: 'PCC' }, { code: 'KLR', label: 'KLR' },
-  { code: 'NACo-S', label: 'NACo Single' }, { code: 'NACo-D', label: 'NACo Double' },
+  { code: 'NALCO-S', label: 'NACo Single' }, { code: 'NALCO-D', label: 'NACo Double' },
   { code: 'NALCOB', label: 'NALCOB' }, { code: 'NBFB', label: 'NBFB' },
-  { code: 'TRFC', label: 'WTC' }, { code: 'KLRCKE', label: 'KLRCKE' }, { code: 'KCC', label: 'KCC' },
-  { code: 'PFB', label: 'PFB' }, { code: 'PVBB', label: 'PVBB' }, { code: 'KPL', label: 'KPL' }, { code: 'GBL', label: 'GBL' },
+  { code: 'TRFC', label: 'WTC' }, { code: 'KLRCKE', label: 'KLRCKE' }, { code: 'KCCKE', label: 'KCC' },
+  { code: 'PVFB', label: 'PFB' }, { code: 'PVBB', label: 'PVBB' }, { code: 'KPL', label: 'KPL' }, { code: 'GBL', label: 'GBL' },
   { code: 'KSCD', label: 'KSCD' }, { code: 'VPBD', label: 'VPBD' }, { code: 'KHD', label: 'KHD' },
   { code: 'PCrt', label: 'PCrt' },
   { code: 'VSCS', label: 'VSCS' }, { code: 'TRFCS', label: 'TRFCS' }, { code: 'HRCS', label: 'HRCS' },
@@ -61,6 +61,7 @@ const RETAIL_COLS = [
   { code: 'PNF', label: 'PNF' }, { code: 'VPB', label: 'VPB' },
   { code: 'TMC', label: 'TMC' }, { code: 'PRMC', label: 'PRMC' }, { code: 'CMC', label: 'CMC' }, { code: 'LMC', label: 'LMC' },
   { code: 'CCB', label: 'CCB' }, { code: 'SFNL', label: 'SFNL' }, { code: 'CCBS', label: 'CCBS' },
+  { code: 'CCKCU', label: 'Carrot Cup' }, { code: 'LCKCU', label: 'Lemon Cup' }, { code: 'KSCKCU', label: 'Strawberry Cup' }, { code: 'TCKCU', label: 'Truffle Cup' },
 ]
 
 const BULK_COLS = [
@@ -162,7 +163,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const numCols = RETAIL_COLS.length + 1 + (includePricing ? 1 : 0)
   const rows = []
   const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push(''); rows.push(titleRow)
-  const catGroups = [[3,'MUFFINS'],[4,'NATURES PL'],[3,'WHOLE CAKES'],[4,'BREAD & LOAVES'],[3,'DOUGHNUTS'],[1,'TARTS'],[3,'CAKE SLICES'],[9,'COOKIES'],[5,'BARS'],[4,'MINI CAKES'],[3,'NEW']]
+  const catGroups = [[3,'MUFFINS'],[4,'NATURES PL'],[3,'WHOLE CAKES'],[4,'BREAD & LOAVES'],[3,'DOUGHNUTS'],[1,'TARTS'],[3,'CAKE SLICES'],[9,'COOKIES'],[5,'BARS'],[4,'MINI CAKES'],[3,'NEW'],[4,'CAKE CUPS']]
   const catRow = ['']
   for (const [count, label] of catGroups) { catRow.push(label); for (let i = 1; i < count; i++) catRow.push('') }
   if (includePricing) catRow.push(''); rows.push(catRow)
@@ -387,7 +388,7 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
   const productList = products.map(p => p.code + ': ' + p.name).join('\n')
   const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
   const neRule = isNaturesEmporium ? '\nSPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):\n- "brownie ganache 90g" or "brownie ganache pouch" = PVBRG (packaged, retail)\n- "brownie ganache" without 90g or pouch = PVBRG-BULK (bulk order)\n' : ''
-  const prompt = 'You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list.\n\nOUR PRODUCT LIST:\n' + productList + '\n\nSEMANTIC MATCHING GUIDE:\n- blueberry muffin / paleo muffin = PBB\n- chocolate muffin / choc muffin = PCC\n- lemon raspberry muffin / lemon muffin = KLR\n- hazelnut donut / hazelnut doughnut = KHD\n- peanut butter donut / PB donut / vegan donut = VPBD\n- cinnamon donut = KSCD\n- brownie / mini brownie / brownie bar (NOT ganache) = PVBR\n- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG\n' + neRule + '- pecan bar = VPCAN\n- notella / nutella bar = PNF\n- pistachio bar = VPB\n- hemp cookies = PVHC\n- hazelnut protein cookie = HPCo\n- ginger cookie / ginger snap = PGCo\n- shortbread = POS\n- keto almond butter cookie = KAB\n- keto walnut cookie = KWAL\n- snickerdoodle = KSCo\n- collagen cookie = KCCo (KCOC)\n- banana bread / banana loaf = PVBB\n- ginger loaf = GBL\n- pumpkin loaf = KPL\n- focaccia = PFB\n- vanilla strawberry slice = VSCS\n- truffle cake slice = TRFCS\n- hazelnut royale slice = HRCS\n- truffle cake whole = WTC (TRFC)\n- pistachio raspberry mini cake = PRMC\n- carrot mini cake = CMC\n- lemon mini cake = LMC\n- truffle mini cake = TMC\n- almond biscotti / keto biscotti = KABIS\n- keto chocolate cupcake = KCC\n- keto vanilla cupcake = KVC\n- klr cupcake = KLRCup\n- keto chocolate cake = KCCKE\n- keto vanilla cake = KVCKE\n- klr cake = KLRCKE\\n\\nBULK DETECTION: If a SKU/code starts with BLK (e.g. BLKKWAL=KWAL bulk, BLKKCCCUP=KCC bulk, BLKKVCUP=KVC bulk, BLKKLRCUP=KLRCup bulk, BLKKAB=KAB bulk) OR description says bulk, set is_bulk=true and quantity_type=units.\\n\\nIMPORTANT: quantities may be cases, packs, or units. Return exactly as given. Set quantity_type to cases, packs, or units.\\n\\nReturn ONLY a JSON array:\\n[\\n  {\"product_name\": \"exact name\", \"quantity\": 12, \"quantity_type\": \"cases\", \"is_bulk\": false, \"product_code\": \"MATCHED_CODE\", \"matched\": true}\\n]\\nReturn ONLY the JSON array, no other text.'
+  const prompt = 'You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list.\n\nOUR PRODUCT LIST:\n' + productList + '\n\nSEMANTIC MATCHING GUIDE:\n- blueberry muffin / paleo muffin = PBB\n- chocolate muffin / choc muffin = PCC\n- lemon raspberry muffin / lemon muffin = KLR\n- hazelnut donut / hazelnut doughnut = KHD\n- peanut butter donut / PB donut / vegan donut = VPBD\n- cinnamon donut = KSCD\n- brownie / mini brownie / brownie bar (NOT ganache) = PVBR\n- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG\n' + neRule + '- pecan bar = VPCAN\n- notella / nutella bar = PNF\n- pistachio bar = VPB\n- hemp cookies = PVHC\n- hazelnut protein cookie = HPCo\n- ginger cookie / ginger snap = PGCo\n- shortbread = POS\n- keto almond butter cookie = KAB\n- keto walnut cookie = KWAL\n- snickerdoodle = KSCo\n- collagen cookie = KCCo (KCOC)\n- banana bread / banana loaf = PVBB\n- ginger loaf = GBL\n- pumpkin loaf = KPL\n- focaccia = PVFB\n- vanilla strawberry slice = VSCS\n- truffle cake slice = TRFCS\n- hazelnut royale slice = HRCS\n- truffle cake whole = WTC (TRFC)\n- pistachio raspberry mini cake = PRMC\n- carrot mini cake = CMC\n- lemon mini cake = LMC\n- truffle mini cake = TMC\n- almond biscotti / keto biscotti = KABIS\n- keto chocolate cupcake = KCC\n- keto vanilla cupcake = KVC\n- klr cupcake = KLRCup\n- keto chocolate cake = KCCKE\n- keto vanilla cake = KVCKE\n- klr cake = KLRCKE\n- carrot cake cup = CCKCU\n- lemon cake cup = LCKCU\n- strawberry cake cup / keto strawberry cake cup = KSCKCU\n- truffle cake cup / chocolate truffle cake cup = TCKCU\n\\n\\nBULK DETECTION: If a SKU/code starts with BLK (e.g. BLKKWAL=KWAL bulk, BLKKCCCUP=KCC bulk, BLKKVCUP=KVC bulk, BLKKLRCUP=KLRCup bulk, BLKKAB=KAB bulk) OR description says bulk, set is_bulk=true and quantity_type=units.\\n\\nIMPORTANT: quantities may be cases, packs, or units. Return exactly as given. Set quantity_type to cases, packs, or units.\\n\\nReturn ONLY a JSON array:\\n[\\n  {\"product_name\": \"exact name\", \"quantity\": 12, \"quantity_type\": \"cases\", \"is_bulk\": false, \"product_code\": \"MATCHED_CODE\", \"matched\": true}\\n]\\nReturn ONLY the JSON array, no other text.'
   const isPDF = fileType === 'application/pdf'
   const messages = isImage
     ? [{ role: 'user', content: [isPDF ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: content } } : { type: 'image', source: { type: 'base64', media_type: fileType, data: content } }, { type: 'text', text: prompt }] }]

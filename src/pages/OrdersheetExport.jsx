@@ -9,16 +9,16 @@ const RETAIL_COLS = [
   { code: 'PCC', label: 'PCC' },
   { code: 'KLR', label: 'KLR' },
   // Natures Private Label
-  { code: 'NACo-S', label: 'NACo Single' },
-  { code: 'NACo-D', label: 'NACo Double' },
+  { code: 'NALCO-S', label: 'NACo Single' },
+  { code: 'NALCO-D', label: 'NACo Double' },
   { code: 'NALCOB', label: 'NALCOB' },
   { code: 'NBFB', label: 'NBFB' },
   // Whole Cakes
   { code: 'TRFC', label: 'WTC' },
   { code: 'KLRCKE', label: 'KLRCKE' },
-  { code: 'KCC', label: 'KCC' },
+  { code: 'KCCKE', label: 'KCC' },
   // Bread & Loaves
-  { code: 'PFB', label: 'PFB' },
+  { code: 'PVFB', label: 'PFB' },
   { code: 'PVBB', label: 'PVBB' },
   { code: 'KPL', label: 'KPL' },
   { code: 'GBL', label: 'GBL' },
@@ -57,12 +57,17 @@ const RETAIL_COLS = [
   { code: 'CCB', label: 'CCB' },
   { code: 'SFNL', label: 'SFNL' },
   { code: 'CCBS', label: 'CCBS' },
+  // Cake Cups
+  { code: 'CCKCU', label: 'Carrot Cup' },
+  { code: 'LCKCU', label: 'Lemon Cup' },
+  { code: 'KSCKCU', label: 'Strawberry Cup' },
+  { code: 'TCKCU', label: 'Truffle Cup' },
 ]
 
 const BULK_COLS = [
-  { code: 'CKTC', label: 'Keto Choc Cup' },
-  { code: 'CKTV', label: 'Keto Van Cup' },
-  { code: 'CKLR', label: 'KLR Cup' },
+  { code: 'KCC', label: 'Keto Choc Cup' },
+  { code: 'KVC', label: 'Keto Van Cup' },
+  { code: 'KLRCup', label: 'KLR Cup' },
   { code: 'CKAC', label: 'Almond Choc Cup' },
   { code: 'CKHH', label: 'Hazelnut Cup' },
   { code: 'PVBB', label: 'Banana Bread' },
@@ -103,7 +108,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const categories = [
     [3, 'MUFFINS'], [4, 'NATURES PL'], [4, ''], [8, 'WHOLE CAKES'],
     [4, 'BREAD & LOAVES'], [3, 'DOUGHNUTS'], [1, 'TARTS'], [3, 'CAKE SLICES'],
-    [9, 'COOKIES'], [5, 'BARS'], [4, 'MINI CAKES'], [3, 'NEW']
+    [9, 'COOKIES'], [5, 'BARS'], [4, 'MINI CAKES'], [3, 'NEW'], [4, 'CAKE CUPS']
   ]
   for (const [count, label] of categories) {
     catRow.push(label)
@@ -145,20 +150,23 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     for (const order of dayOrders) {
       const items = order.order_items || []
       const qtyMap = {}
-      const priceMap = {}
+      // value calc mirrors Orders.jsx's own total_value logic: packs × price_per_pack
+      // for pack items (item.packs is null for bulk items, where quantity is the multiplier).
       for (const item of items) {
         if (item.product_code) {
           qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0)
-          priceMap[item.product_code] = item.unit_price || 0
         }
       }
 
       const storeRow = [order.customer_name]
-      let rowTotal = 0
+      const rowTotal = items.reduce((sum, item) => {
+        const price = parseFloat(item.price_per_pack || 0)
+        const multiplier = item.packs !== null && item.packs !== undefined ? item.packs : (item.quantity || 0)
+        return sum + multiplier * price
+      }, 0)
       for (const col of RETAIL_COLS) {
         const qty = qtyMap[col.code]
         storeRow.push(qty || null)
-        if (qty && priceMap[col.code]) rowTotal += qty * priceMap[col.code]
       }
       if (includePricing) storeRow.push(rowTotal > 0 ? rowTotal : null)
       rows.push(storeRow)

@@ -13,6 +13,7 @@ const navItems = [
   { to: '/time-tracking', icon: '⏱', label: 'Time Tracking', roles: ['admin','kitchen','staff'] },
   { to: '/orders', icon: '🛒', label: 'Orders', roles: ['admin','kitchen'] },
   { to: '/expenses', icon: '💰', label: 'Expenses', roles: ['admin'] },
+  { to: '/costing', icon: '🧮', label: 'Product Costing', roles: ['admin'] },
 ]
 
 export default function Layout() {

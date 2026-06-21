@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import * as XLSX from 'xlsx-js-style'
+import JSZip from 'jszip'
 
 const STATUS_COLORS = { order_sheet: 'green', archived: 'purple' }
 const STATUS_LABELS = { order_sheet: 'Active', archived: 'Archived' }
@@ -46,37 +47,36 @@ function itemToPacks(item) {
 }
 
 const RETAIL_COLS = [
-  { code: 'PBB', label: 'PBB' }, { code: 'PCC', label: 'PCC' }, { code: 'KLR', label: 'KLR' },
-  { code: 'NALCO-S', label: 'NACo Single' }, { code: 'NALCO-D', label: 'NACo Double' },
-  { code: 'NALCOB', label: 'NALCOB' }, { code: 'NBFB', label: 'NBFB' },
-  { code: 'TRFC', label: 'WTC' }, { code: 'KLRCKE', label: 'KLRCKE' }, { code: 'KCCKE', label: 'KCC' },
-  { code: 'PVFB', label: 'PFB' }, { code: 'PVBB', label: 'PVBB' }, { code: 'KPL', label: 'KPL' }, { code: 'GBL', label: 'GBL' },
-  { code: 'KSCD', label: 'KSCD' }, { code: 'VPBD', label: 'VPBD' }, { code: 'KHD', label: 'KHD' },
-  { code: 'PCrt', label: 'PCrt' },
-  { code: 'VSCS', label: 'VSCS' }, { code: 'TRFCS', label: 'TRFCS' }, { code: 'HRCS', label: 'HRCS' },
-  { code: 'POS', label: 'POS' }, { code: 'PGCo', label: 'PGCo' }, { code: 'PVHC', label: 'PVHC' },
-  { code: 'HPCo', label: 'HPCo' }, { code: 'KCOC', label: 'KCCo' }, { code: 'KSCO', label: 'KSCo' },
-  { code: 'KAB', label: 'KAB' }, { code: 'KWAL', label: 'KWAL' }, { code: 'KABIS', label: 'KABIS' },
-  { code: 'PVBRG', label: 'PVBRG' }, { code: 'PVBR', label: 'PVBr' }, { code: 'VPCAN', label: 'VPCAN' },
-  { code: 'PNF', label: 'PNF' }, { code: 'VPB', label: 'VPB' },
-  { code: 'TMC', label: 'TMC' }, { code: 'PRMC', label: 'PRMC' }, { code: 'CMC', label: 'CMC' }, { code: 'LMC', label: 'LMC' },
-  { code: 'CCB', label: 'CCB' }, { code: 'SFNL', label: 'SFNL' }, { code: 'CCBS', label: 'CCBS' },
-  { code: 'CCKCU', label: 'Carrot Cup' }, { code: 'LCKCU', label: 'Lemon Cup' }, { code: 'KSCKCU', label: 'Strawberry Cup' }, { code: 'TCKCU', label: 'Truffle Cup' },
+  { code: 'PBB', name: 'Protein Blueberry Muffins' }, { code: 'PCC', name: 'Protein Choco Muffins' }, { code: 'KLR', name: 'Keto Lemon Raspberry Muffins' },
+  { code: 'NALCO-S', name: 'Natures Almond Cookie Single' }, { code: 'NALCO-D', name: 'Natures Almond Cookie Double' },
+  { code: 'NALCOB', name: "Nature's Almond Coconut Bites" }, { code: 'NBFB', name: "Nature's Breakfast Bites" },
+  { code: 'TRFC', name: 'Truffle Cake Whole' }, { code: 'KLRCKE', name: 'KLR Cake' }, { code: 'KCCKE', name: 'Keto Chocolate Cake' },
+  { code: 'PVFB', name: 'Paleo Vegan Focaccia Bread' }, { code: 'PVBB', name: 'Protein Vegan Banana Bread' }, { code: 'KPL', name: 'Keto Pumpkin Loaf' }, { code: 'GBL', name: 'Paleo Ginger Bread Loaf' },
+  { code: 'KSCD', name: 'Keto Cinnamon Donuts' }, { code: 'VPBD', name: 'Vegan PB Donuts' }, { code: 'KHD', name: 'Keto Hazelnut Donuts' },
+  { code: 'PCrt', name: 'Paleo Carrot Cake' }, { code: 'VSCS', name: 'Vanilla Strawberry Cake Slice' }, { code: 'TRFCS', name: 'Truffle Cake Slices' }, { code: 'HRCS', name: 'Hazelnut Royale Cake Slices' },
+  { code: 'POS', name: 'PO Shortbread' }, { code: 'PGCo', name: 'Ginger Cookies' }, { code: 'PVHC', name: 'Paleo Vegan Hemp Cookies' },
+  { code: 'HPCo', name: 'Hazelnut Protein Cookies' }, { code: 'KCOC', name: 'Keto Collagen Cookies' }, { code: 'KSCO', name: 'Keto Snickerdoodle Cookies' },
+  { code: 'KAB', name: 'Keto Almond Butter Cookies' }, { code: 'KWAL', name: 'Keto Walnut Cookies' }, { code: 'KABIS', name: 'Keto Almond Biscotti' },
+  { code: 'PVBRG', name: 'Vegan Brownie Ganache' }, { code: 'PVBR', name: 'Paleo Vegan Brownie' }, { code: 'VPCAN', name: 'Vegan Pecan Bars' },
+  { code: 'PNF', name: "Paleo No'tella Fudge" }, { code: 'VPB', name: 'Vegan Pistachio Bars' },
+  { code: 'TMC', name: 'Truffle Mini Cake' }, { code: 'PRMC', name: 'Pistachio Raspberry Mini Cake' }, { code: 'CMC', name: 'Carrot Mini Cake' }, { code: 'LMC', name: 'Lemon Mini Cake' },
+  { code: 'CCB', name: 'Chocolate Cinnamon Bark' }, { code: 'SFNL', name: 'Spiced Fruit & Nut Loaf' }, { code: 'CCBS', name: 'Chocolate Coconut Bliss Squares' },
+  { code: 'CCKCU', name: 'Carrot Cake Cup' }, { code: 'LCKCU', name: 'Lemon Cake Cup' }, { code: 'KSCKCU', name: 'Keto Strawberry Cake Cup' }, { code: 'TCKCU', name: 'Chocolate Truffle Cake Cup' },
 ]
 
 const BULK_COLS = [
-  { code: 'KCC', label: 'Keto Choc Cupcake' }, { code: 'KVC', label: 'Keto Van Cupcake' },
-  { code: 'KLRCup', label: 'KLR Cupcake' }, { code: 'CKAC', label: 'Almond Choc Cupcake' },
-  { code: 'CKHH', label: 'Hazelnut Cupcake' },
-  { code: 'PVBB', label: 'Banana Bread' }, { code: 'PVBBSL', label: 'BB Slice Unfrost' },
-  { code: 'PVBBSLF', label: 'BB Slice Frost' },
-  { code: 'PBBBu', label: 'BB Muffin Bulk' }, { code: 'PCCBu', label: 'CC Muffin Bulk' },
-  { code: 'KLRBu', label: 'KLR Muffin Bulk' },
-  { code: 'KABBu', label: 'KAB Bulk' }, { code: 'KWALBu', label: 'KWAL Bulk' },
-  { code: 'HPCoBu', label: 'HPCo Bulk' }, { code: 'PVHCBu', label: 'PVHC Bulk' },
-  { code: 'VPCANBu', label: 'Pecan Bulk' }, { code: 'VPBBu', label: 'Pistachio Bulk' },
-  { code: 'PNFBu', label: "No'tella Bulk" }, { code: 'KABISBu', label: 'Biscotti Bulk' },
-  { code: 'KSCDBu', label: 'Cinnamon Donut Bulk' },
+  { code: 'KCC', name: 'Keto Chocolate Cupcake' }, { code: 'KVC', name: 'Keto Vanilla Cupcake' },
+  { code: 'KLRCup', name: 'KLR Cupcake' }, { code: 'CKAC', name: 'Cupcake Almond Chocolate' },
+  { code: 'CKHH', name: 'Cupcake Hazelnut Haven' },
+  { code: 'PVBB', name: 'Protein Vegan Banana Bread' }, { code: 'PVBBSL', name: 'Banana Bread Slice Unfrosted' },
+  { code: 'PVBBSLF', name: 'Banana Bread Slice Frosted' },
+  { code: 'PBBBu', name: 'Blueberry Muffin Bulk' }, { code: 'PCCBu', name: 'Chocolate Chip Muffin Bulk' },
+  { code: 'KLRBu', name: 'Lemon Raspberry Muffin Bulk' },
+  { code: 'KABBu', name: 'Keto Almond Butter Cookies Bulk' }, { code: 'KWALBu', name: 'Keto Walnut Cookies Bulk' },
+  { code: 'HPCoBu', name: 'Hazelnut Protein Cookies Bulk' }, { code: 'PVHCBu', name: 'Paleo Vegan Hemp Cookies Bulk' },
+  { code: 'VPCANBu', name: 'Vegan Pecan Bars Bulk' }, { code: 'VPBBu', name: 'Vegan Pistachio Bars Bulk' },
+  { code: 'PNFBu', name: "Paleo No'tella Fudge Bulk" }, { code: 'KABISBu', name: 'Almond Biscotti Bulk' },
+  { code: 'KSCDBu', name: 'Cinnamon Donut Bulk' },
 ]
 
 const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
@@ -108,7 +108,7 @@ function cellStyle(bg, fg, bold = false, size = 10, wrap = false, halign = 'cent
   }
 }
 
-function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, headerRowIdx) {
+function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, headerRowIdx, notesColIdx, catColorByCol) {
   const encode = (r, c) => XLSX.utils.encode_cell({ r, c })
   const storeArr = [...storeRowIdxs]
   for (let r = 0; r < totalRows; r++) {
@@ -118,11 +118,15 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       if (r === 0) { ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 14, false, c === 0 ? 'left' : 'center'); continue }
       if (r === headerRowIdx) {
         if (c === 0) ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'left')
+        else if (notesColIdx !== undefined && c === notesColIdx) ws[addr].s = cellStyle('FBC02D', '3E2723', true, 10, true, 'center')
         else if (includePricing && c === numCols - 1) ws[addr].s = cellStyle(S.KK_PEACH, 'FFFFFF', true, 10, true, 'center')
         else ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 10, true, 'center')
         continue
       }
-      if (r === 1 && headerRowIdx !== 1) { ws[addr].s = cellStyle(S.CAT_GREEN, S.KK_CREAM, true, 10, false, 'center'); continue }
+      if (r === 1 && headerRowIdx !== 1) {
+        const bg = (catColorByCol && catColorByCol[c]) || S.CAT_GREEN
+        ws[addr].s = cellStyle(bg, S.KK_CREAM, true, 10, false, 'center'); continue
+      }
       if (grandTotalIdx !== undefined && r === grandTotalIdx) {
         ws[addr].s = c === 0 ? cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left') : cellStyle(S.GRAND_BG, S.GRAND_FG, true, 20, false, 'center')
         continue
@@ -130,21 +134,84 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       if (dayRowIdxs.has(r)) { ws[addr].s = cellStyle(S.DAY_BG, S.DAY_FG, true, 12, false, c === 0 ? 'left' : 'center'); continue }
       if (totalRowIdxs.has(r)) {
         if (c === 0) ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 20, false, 'left')
-        else if (includePricing && c === numCols - 1) ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 20, false, 'center')
+        else if (includePricing && c === numCols - 1 && notesColIdx === undefined) ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 20, false, 'center')
         else ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 20, false, 'center')
         continue
       }
       if (storeRowIdxs.has(r)) {
         const storePos = storeArr.indexOf(r)
         const rowBg = S.STORE_PALETTE[storePos % S.STORE_PALETTE.length]
-        if (c === 0) ws[addr].s = cellStyle(rowBg, '111111', true, 14, false, 'left')
-        else if (includePricing && c === numCols - 1) { const hasVal = ws[addr].v && ws[addr].v !== ''; ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 20, false, 'center') }
+        if (c === 0) ws[addr].s = cellStyle(rowBg, '111111', true, 16, false, 'left')
+        else if (notesColIdx !== undefined && c === notesColIdx) {
+          const hasNote = ws[addr].v && ws[addr].v !== ''
+          ws[addr].s = hasNote
+            ? { font: { name: 'Arial', sz: 11, bold: true, color: { rgb: '3E2723' } }, fill: { fgColor: { rgb: 'FFF9C4' } }, alignment: { horizontal: 'left', vertical: 'center', wrapText: true }, border: { top: { style: 'medium', color: { rgb: 'FBC02D' } }, bottom: { style: 'medium', color: { rgb: 'FBC02D' } }, left: { style: 'medium', color: { rgb: 'FBC02D' } }, right: { style: 'medium', color: { rgb: 'FBC02D' } } } }
+            : cellStyle(rowBg, 'BBBBBB', false, 10, false, 'center')
+        }
+        else if (includePricing && c === numCols - 1 && notesColIdx === undefined) { const hasVal = ws[addr].v && ws[addr].v !== ''; ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 20, false, 'center') }
+        else if (includePricing && notesColIdx !== undefined && c === numCols - 2) { const hasVal = ws[addr].v && ws[addr].v !== ''; ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, hasVal, 20, false, 'center') }
         else if (c > 0 && ws[addr].v) ws[addr].s = cellStyle(rowBg, S.QTY_FG, true, 20, false, 'center')
         else ws[addr].s = cellStyle(rowBg, 'BBBBBB', false, 10, false, 'center')
         continue
       }
       ws[addr].s = { fill: { fgColor: { rgb: 'FFFFFF' } } }
     }
+  }
+}
+
+// ── Freeze panes ──────────────────────────────────────────
+// xlsx-js-style's writer has no native freeze-pane support, so we write the
+// workbook normally, then post-process the raw xlsx (a zip) to inject the
+// <pane>/<selection> XML into each target sheet's <sheetView>.
+async function addFreezePanes(buffer, freezeConfig) {
+  const zip = await JSZip.loadAsync(buffer)
+  const wbXml = await zip.file('xl/workbook.xml').async('string')
+  const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string')
+
+  const sheetNameToRid = {}
+  const sheetRe = /<sheet name="([^"]+)"[^>]*r:id="(rId\d+)"/g
+  let m
+  while ((m = sheetRe.exec(wbXml))) sheetNameToRid[m[1]] = m[2]
+
+  const ridToTarget = {}
+  const relRe = /<Relationship Id="(rId\d+)"[^>]*Target="([^"]+)"/g
+  while ((m = relRe.exec(relsXml))) ridToTarget[m[1]] = m[2]
+
+  for (const [sheetName, freeze] of Object.entries(freezeConfig)) {
+    const rid = sheetNameToRid[sheetName]
+    if (!rid) continue
+    const target = ridToTarget[rid]
+    if (!target) continue
+    const path = 'xl/' + target
+    const file = zip.file(path)
+    if (!file) continue
+    let xml = await file.async('string')
+    const { xSplit, ySplit, topLeftCell } = freeze
+    const paneXml = '<pane xSplit="' + xSplit + '" ySplit="' + ySplit + '" topLeftCell="' + topLeftCell + '" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="' + topLeftCell + '" sqref="' + topLeftCell + '"/>'
+    if (/<sheetView([^>]*)\/>/.test(xml)) {
+      xml = xml.replace(/<sheetView([^>]*)\/>/, '<sheetView$1>' + paneXml + '</sheetView>')
+    } else if (/<sheetView([^>]*)>/.test(xml)) {
+      xml = xml.replace(/<sheetView([^>]*)>/, '<sheetView$1>' + paneXml)
+    }
+    zip.file(path, xml)
+  }
+  return zip.generateAsync({ type: 'blob' })
+}
+
+// Writes the workbook with freeze panes applied, falling back to a normal
+// write (no freeze) if anything in the post-processing step fails.
+async function writeWorkbookWithFreeze(wb, filename, freezeConfig) {
+  try {
+    const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+    const blob = await addFreezePanes(buf, freezeConfig)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (err) {
+    console.error('Freeze-pane post-processing failed, exporting without freeze panes:', err)
+    XLSX.writeFile(wb, filename)
   }
 }
 
@@ -160,23 +227,29 @@ function getItemPacks(item) {
 function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const ws = XLSX.utils.aoa_to_sheet([])
   const title = 'KONSCIOUS KITCHEN — ORDER SHEET' + (weekLabel ? ' — ' + weekLabel : '')
-  const numCols = RETAIL_COLS.length + 1 + (includePricing ? 1 : 0)
+  const numCols = RETAIL_COLS.length + 1 + (includePricing ? 1 : 0) + 1 // +1 store, +1 notes (always)
+  const notesColIdx = numCols - 1
   const rows = []
   const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push(''); rows.push(titleRow)
-  const catGroups = [[3,'MUFFINS'],[4,'NATURES PL'],[3,'WHOLE CAKES'],[4,'BREAD & LOAVES'],[3,'DOUGHNUTS'],[1,'TARTS'],[3,'CAKE SLICES'],[9,'COOKIES'],[5,'BARS'],[4,'MINI CAKES'],[3,'NEW'],[4,'CAKE CUPS']]
+  const catGroups = [[3,'MUFFINS'],[4,'NATURES PL'],[3,'WHOLE CAKES'],[4,'BREAD & LOAVES'],[3,'DOUGHNUTS'],[4,'CAKE SLICES'],[4,'PALEO COOKIES'],[5,'KETO COOKIES'],[5,'BARS'],[4,'MINI CAKES'],[3,'NEW'],[4,'CAKE CUPS']]
   const catRow = ['']
   for (const [count, label] of catGroups) { catRow.push(label); for (let i = 1; i < count; i++) catRow.push('') }
-  if (includePricing) catRow.push(''); rows.push(catRow)
+  if (includePricing) catRow.push('')
+  catRow.push(''); rows.push(catRow)
   const headerRow = ['Store']
-  for (const col of RETAIL_COLS) headerRow.push(col.label + '\n(' + col.code + ')\nPACKS')
-  if (includePricing) headerRow.push('ORDER VALUE ($)'); rows.push(headerRow)
+  for (const col of RETAIL_COLS) headerRow.push(col.name + '\n(' + col.code + ')')
+  if (includePricing) headerRow.push('ORDER VALUE ($)')
+  headerRow.push('NOTES'); rows.push(headerRow)
   const byDay = {}
   for (const o of orders) { const day = o.delivery_day || 'Unscheduled'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
   let catColIdx = 1
   for (const [count] of catGroups) { if (count > 1) merges.push({ s: { r: 1, c: catColIdx }, e: { r: 1, c: catColIdx + count - 1 } }); catColIdx += count }
+  const CAT_COLORS = ['8D6E63','558B2F','AD1457','795548','EF6C00','C2185B','6D4C41','00695C','F9A825','8E24AA','00897B','D84315']
+  const catColorByCol = {}
+  let ccIdx = 1
+  catGroups.forEach(([count], gi) => { for (let k = 0; k < count; k++) catColorByCol[ccIdx + k] = CAT_COLORS[gi % CAT_COLORS.length]; ccIdx += count })
   const dayRowIdxs = new Set(), totalRowIdxs = new Set(), storeRowIdxs = new Set()
-  const noteByRow = {}
   const ALL_DAY_GROUPS = [...DELIVERY_DAYS, 'Unscheduled']
   for (const day of ALL_DAY_GROUPS) {
     const dayOrders = byDay[day] || []; if (!dayOrders.length) continue
@@ -200,7 +273,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
         if (packs && priceMap[col.code]) rowTotal += packs * priceMap[col.code]
       }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
-      if (order.notes) noteByRow[rows.length] = order.notes
+      storeRow.push(order.notes || null)
       storeRowIdxs.add(rows.length); rows.push(storeRow)
     }
     const colTotals = new Array(RETAIL_COLS.length).fill(0); let grandTotal = 0
@@ -220,6 +293,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
     }
     const totalRow = ['TOTAL', ...colTotals.map(v => v || null)]
     if (includePricing) totalRow.push(grandTotal > 0 ? Math.round(grandTotal * 100) / 100 : null)
+    totalRow.push('')
     totalRowIdxs.add(rows.length); rows.push(totalRow); rows.push([])
   }
   const grandColTotals = new Array(RETAIL_COLS.length).fill(0); let grandOrderTotal = 0
@@ -239,32 +313,29 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   }
   const grandTotalRow = ['GRAND TOTAL', ...grandColTotals.map(v => v || null)]
   if (includePricing) grandTotalRow.push(grandOrderTotal > 0 ? Math.round(grandOrderTotal * 100) / 100 : null)
+  grandTotalRow.push('')
   const grandTotalIdx = rows.length; rows.push(grandTotalRow)
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' }); ws['!merges'] = merges
-  const colWidths = [{ wch: 52 }]; for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 9 }); if (includePricing) colWidths.push({ wch: 14 })
-  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 52 }, { hpt: 90 }]
-  for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 45 }
-  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 2)
-  // Order notes as native Excel comment bubbles on the store name cell
-  for (const [rowIdxStr, noteText] of Object.entries(noteByRow)) {
-    const addr = XLSX.utils.encode_cell({ r: parseInt(rowIdxStr), c: 0 })
-    if (!ws[addr]) ws[addr] = { v: '', t: 's' }
-    ws[addr].c = [{ a: 'KK ERP', t: noteText }]
-  }
+  const colWidths = [{ wch: 52 }]; for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 12 }); if (includePricing) colWidths.push({ wch: 14 })
+  colWidths.push({ wch: 32 })
+  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 52 }, { hpt: 120 }]
+  for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 50 }
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 2, notesColIdx, catColorByCol)
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
 }
 
 function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const ws = XLSX.utils.aoa_to_sheet([])
   const title = 'KONSCIOUS KITCHEN — BULK ORDERS' + (weekLabel ? ' — ' + weekLabel : '')
-  const numCols = BULK_COLS.length + 1 + (includePricing ? 1 : 0)
+  const numCols = BULK_COLS.length + 1 + (includePricing ? 1 : 0) + 1 // +1 store, +1 notes (always)
+  const notesColIdx = numCols - 1
   const rows = []; const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push(''); rows.push(titleRow)
-  const headerRow = ['Store']; for (const col of BULK_COLS) headerRow.push(col.label + '\n(' + col.code + ')\nUNITS')
-  if (includePricing) headerRow.push('ORDER VALUE ($)'); rows.push(headerRow)
+  const headerRow = ['Store']; for (const col of BULK_COLS) headerRow.push(col.name + '\n(' + col.code + ')\nUNITS')
+  if (includePricing) headerRow.push('ORDER VALUE ($)')
+  headerRow.push('NOTES'); rows.push(headerRow)
   const byDay = {}; for (const o of orders) { const day = o.delivery_day || 'Unscheduled'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
   const dayRowIdxs = new Set(), totalRowIdxs = new Set(), storeRowIdxs = new Set()
-  const noteByRowBulk = {}
   const ALL_DAY_GROUPS_BULK = [...DELIVERY_DAYS, 'Unscheduled']
   for (const day of ALL_DAY_GROUPS_BULK) {
     const dayOrders = (byDay[day] || []).filter(o => (o.order_items || []).some(item => BULK_CODES.has(item.product_code))); if (!dayOrders.length) continue
@@ -278,32 +349,31 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
       const storeRow = [storeLabel]; let rowTotal = 0
       for (const col of BULK_COLS) { const qty = qtyMap[col.code] || null; storeRow.push(qty); if (qty && priceMap[col.code]) rowTotal += qty * priceMap[col.code] }
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
-      if (order.notes) noteByRowBulk[rows.length] = order.notes
+      storeRow.push(order.notes || null)
       storeRowIdxs.add(rows.length); rows.push(storeRow)
     }
     const bulkTotals = new Array(BULK_COLS.length).fill(0); let dayBulkTotal = 0
     for (const order of dayOrders) { const qtyMap = {}, priceMap = {}; for (const item of (order.order_items || [])) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); priceMap[item.product_code] = item.price_per_pack || 0 } }; BULK_COLS.forEach((col, ci) => { const qty = qtyMap[col.code] || 0; bulkTotals[ci] += qty; if (qty && priceMap[col.code]) dayBulkTotal += qty * priceMap[col.code] }) }
     const totalRow = ['TOTAL', ...bulkTotals.map(v => v || null)]
     if (includePricing) totalRow.push(dayBulkTotal > 0 ? Math.round(dayBulkTotal * 100) / 100 : null)
+    totalRow.push('')
     totalRowIdxs.add(rows.length); rows.push(totalRow); rows.push([])
   }
   const grandBulkTotals = new Array(BULK_COLS.length).fill(0); let grandBulkValue = 0
   for (const order of orders) { for (const item of (order.order_items || [])) { if (BULK_CODES.has(item.product_code)) { grandBulkTotals[BULK_COLS.findIndex(c => c.code === item.product_code)] += item.quantity || 0; grandBulkValue += (item.quantity || 0) * (item.price_per_pack || 0) } } }
   const grandTotalRow = ['GRAND TOTAL', ...grandBulkTotals.map(v => v || null)]
   if (includePricing) grandTotalRow.push(grandBulkValue > 0 ? Math.round(grandBulkValue * 100) / 100 : null)
+  grandTotalRow.push('')
   const grandTotalIdx = rows.length; rows.push(grandTotalRow)
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' }); ws['!merges'] = merges
-  const colWidths = [{ wch: 52 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 14 }); if (includePricing) colWidths.push({ wch: 14 })
-  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 90 }]
-  for (let i = 2; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 45 }
-  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 1)
-  for (const [rowIdxStr, noteText] of Object.entries(noteByRowBulk)) {
-    const addr = XLSX.utils.encode_cell({ r: parseInt(rowIdxStr), c: 0 })
-    if (!ws[addr]) ws[addr] = { v: '', t: 's' }
-    ws[addr].c = [{ a: 'KK ERP', t: noteText }]
-  }
+  const colWidths = [{ wch: 52 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 16 }); if (includePricing) colWidths.push({ wch: 14 })
+  colWidths.push({ wch: 32 })
+  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 120 }]
+  for (let i = 2; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 50 }
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 1, notesColIdx)
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
 }
+
 
 function getWeekBounds(offset = 0) {
   const now = new Date(); const day = now.getDay(); const monday = new Date(now)
@@ -748,7 +818,10 @@ export default function Orders() {
       buildRetailSheet(wb, sheetOrders, includePricing, weekLabel)
       buildBulkSheet(wb, sheetOrders, weekLabel, includePricing)
       const suffix = includePricing ? 'FULL' : 'TEAM'
-      XLSX.writeFile(wb, 'KK_Order_Sheet_' + weekLabel.replace(/[^a-zA-Z0-9]/g, '_') + '_' + suffix + '.xlsx')
+      await writeWorkbookWithFreeze(wb, 'KK_Order_Sheet_' + weekLabel.replace(/[^a-zA-Z0-9]/g, '_') + '_' + suffix + '.xlsx', {
+        'Retail Packs': { xSplit: 1, ySplit: 3, topLeftCell: 'B4' },
+        'Bulk Orders': { xSplit: 1, ySplit: 2, topLeftCell: 'B3' },
+      })
     } catch(err) { alert('Export failed: ' + err.message) }
     setExportLoading(false)
   }

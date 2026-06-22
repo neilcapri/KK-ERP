@@ -476,11 +476,78 @@ function printDispatchSlip(ordersInput) {
   const w = window.open('', '_blank'); w.document.write(html); w.document.close(); w.print()
 }
 
-async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '') {
+async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '', orderMode = 'cases') {
   const productList = products.map(p => p.code + ': ' + p.name).join('\n')
   const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
   const neRule = isNaturesEmporium ? '\nSPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):\n- "brownie ganache 90g" or "brownie ganache pouch" = PVBRG (packaged, retail)\n- "brownie ganache" without 90g or pouch = PVBRG-BULK (bulk order)\n' : ''
-  const prompt = 'You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order, then match each item to our product list.\n\nOUR PRODUCT LIST:\n' + productList + '\n\nSEMANTIC MATCHING GUIDE:\n- blueberry muffin / paleo muffin = PBB\n- chocolate muffin / choc muffin = PCC\n- lemon raspberry muffin / lemon muffin = KLR\n- hazelnut donut / hazelnut doughnut = KHD\n- peanut butter donut / PB donut / vegan donut = VPBD\n- cinnamon donut = KSCD\n- brownie / mini brownie / brownie bar (NOT ganache) = PVBR\n- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG\n' + neRule + '- pecan bar = VPCAN\n- notella / nutella bar = PNF\n- pistachio bar = VPB\n- hemp cookies = PVHC\n- hazelnut protein cookie = HPCo\n- ginger cookie / ginger snap = PGCo\n- shortbread = POS\n- keto almond butter cookie = KAB\n- keto walnut cookie = KWAL\n- snickerdoodle = KSCo\n- collagen cookie = KCCo (KCOC)\n- banana bread / banana loaf = PVBB\n- ginger loaf = GBL\n- pumpkin loaf = KPL\n- focaccia = PVFB\n- vanilla strawberry slice = VSCS\n- truffle cake slice = TRFCS\n- hazelnut royale slice = HRCS\n- truffle cake whole = WTC (TRFC)\n- pistachio raspberry mini cake = PRMC\n- carrot mini cake = CMC\n- lemon mini cake = LMC\n- truffle mini cake = TMC\n- almond biscotti / keto biscotti = KABIS\n- keto chocolate cupcake = KCC\n- keto vanilla cupcake = KVC\n- klr cupcake = KLRCup\n- keto chocolate cake = KCCKE\n- keto vanilla cake = KVCKE\n- klr cake = KLRCKE\n- carrot cake cup = CCKCU\n- lemon cake cup = LCKCU\n- strawberry cake cup / keto strawberry cake cup = KSCKCU\n- truffle cake cup / chocolate truffle cake cup = TCKCU\n\\n\\nBULK DETECTION: If a SKU/code starts with BLK (e.g. BLKKWAL=KWAL bulk, BLKKCCCUP=KCC bulk, BLKKVCUP=KVC bulk, BLKKLRCUP=KLRCup bulk, BLKKAB=KAB bulk) OR description says bulk, set is_bulk=true and quantity_type=units.\\n\\nIMPORTANT: quantities may be cases, packs, or units. Return exactly as given. Set quantity_type to cases, packs, or units.\\n\\nReturn ONLY a JSON array:\\n[\\n  {\"product_name\": \"exact name\", \"quantity\": 12, \"quantity_type\": \"cases\", \"is_bulk\": false, \"product_code\": \"MATCHED_CODE\", \"matched\": true}\\n]\\nReturn ONLY the JSON array, no other text.'
+  const orderModeInstruction = orderMode === 'packs'
+    ? 'ORDER MODE: PACKS — every quantity in this order is in PACKS. Set quantity_type="packs" for ALL items.'
+    : orderMode === 'bulk'
+    ? 'ORDER MODE: BULK/UNITS — all quantities are individual units. Set quantity_type="units" and is_bulk=true for ALL items.'
+    : orderMode === 'cases'
+    ? 'ORDER MODE: CASES — all quantities are full cases. Set quantity_type="cases" for ALL items.'
+    : 'ORDER MODE: MIXED — determine quantity_type (cases/packs/units) per item from context.'
+  const prompt = 'You are an order reader for Konscious Kitchen, a premium bakery. Extract all products and quantities from this customer order.\n\n'
+    + orderModeInstruction + '\n\n'
+    + 'INVOICE FORMAT RULES (critical):\n'
+    + '- Lines often follow: PRODUCT NAME  QUANTITY  UNIT_PRICE  EXTENDED_PRICE\n'
+    + '- The QUANTITY is the FIRST standalone number after the product name, appearing BEFORE any dollar sign\n'
+    + '- Dollar amounts like $8.40 or $84.00 are PRICES — NEVER use them as quantities\n'
+    + '- Notations like "4PK", "5 PK", "350G", "90G" in the product name are PACK SIZE DESCRIPTIONS — ignore them for quantity\n'
+    + '- If a product spans multiple lines (e.g. "KONKI KETO COOKIE ALMOND BUTTE\\n5 PK\\n4 $8.40"), the quantity is the number on the LAST line before the first dollar sign (4 in this example)\n'
+    + '- A line that is only a number followed by a dollar total (e.g. "38 $308.68") is a GRAND TOTAL — skip it\n'
+    + '- BOTH CASES AND PACKS MENTIONED: If a customer specifies both cases and packs for the same item (e.g. "2 cases 12 packs" or "blueberry muffins 2 case 12 packs"), ALWAYS return the PACKS number and set quantity_type="packs". The packs figure is the authoritative quantity — ignore the cases figure entirely.\n\n'
+    + 'OUR PRODUCT LIST:\n' + productList + '\n\n'
+    + 'SEMANTIC MATCHING GUIDE:\n'
+    + '- blueberry muffin / paleo muffin = PBB\n'
+    + '- chocolate muffin / choc muffin = PCC\n'
+    + '- lemon raspberry muffin / lemon muffin = KLR\n'
+    + '- hazelnut donut / hazelnut doughnut = KHD\n'
+    + '- peanut butter donut / PB donut / vegan donut = VPBD\n'
+    + '- cinnamon donut = KSCD\n'
+    + '- brownie / mini brownie / brownie bar (NOT ganache) = PVBR\n'
+    + '- brownie ganache / ganache pouch / brownie ganache 90g = PVBRG\n'
+    + neRule
+    + '- pecan bar = VPCAN\n'
+    + '- notella / nutella bar = PNF\n'
+    + '- pistachio bar = VPB\n'
+    + '- hemp cookies = PVHC\n'
+    + '- hazelnut protein cookie = HPCo\n'
+    + '- ginger cookie / ginger snap = PGCo\n'
+    + '- shortbread = POS\n'
+    + '- keto almond butter cookie = KAB\n'
+    + '- keto walnut cookie = KWAL\n'
+    + '- snickerdoodle = KSCo\n'
+    + '- collagen cookie = KCCo (KCOC)\n'
+    + '- banana bread / banana loaf = PVBB\n'
+    + '- ginger loaf = GBL\n'
+    + '- pumpkin loaf = KPL\n'
+    + '- focaccia = PVFB\n'
+    + '- vanilla strawberry slice = VSCS\n'
+    + '- truffle cake slice = TRFCS\n'
+    + '- hazelnut royale slice = HRCS\n'
+    + '- truffle cake whole = WTC (TRFC)\n'
+    + '- pistachio raspberry mini cake = PRMC\n'
+    + '- carrot mini cake = CMC\n'
+    + '- lemon mini cake = LMC\n'
+    + '- truffle mini cake = TMC\n'
+    + '- almond biscotti / keto biscotti = KABIS\n'
+    + '- keto chocolate cupcake = KCC\n'
+    + '- keto vanilla cupcake = KVC\n'
+    + '- klr cupcake = KLRCup\n'
+    + '- keto chocolate cake = KCCKE\n'
+    + '- keto vanilla cake = KVCKE\n'
+    + '- klr cake = KLRCKE\n'
+    + '- carrot cake cup = CCKCU\n'
+    + '- lemon cake cup = LCKCU\n'
+    + '- strawberry cake cup / keto strawberry cake cup = KSCKCU\n'
+    + '- truffle cake cup / chocolate truffle cake cup = TCKCU\n\n'
+    + 'BULK DETECTION: If a SKU/code starts with BLK OR description says bulk, set is_bulk=true.\n\n'
+    + 'Return ONLY a JSON array:\n'
+    + '[\n'
+    + '  {"product_name": "exact name", "quantity": 12, "quantity_type": "packs", "is_bulk": false, "product_code": "MATCHED_CODE", "matched": true}\n'
+    + ']\n'
+    + 'Return ONLY the JSON array, no other text.'
   const isPDF = fileType === 'application/pdf'
   const messages = isImage
     ? [{ role: 'user', content: [isPDF ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: content } } : { type: 'image', source: { type: 'base64', media_type: fileType, data: content } }, { type: 'text', text: prompt }] }]
@@ -495,6 +562,7 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
   if (!arrayMatch) throw new Error('AI did not return a valid order list. Try again or use paste mode.')
   return JSON.parse(arrayMatch[0])
 }
+
 
 function CustomerSelect({ customers, value, onChange, onAddNew }) {
   const [search, setSearch] = useState(value || '')
@@ -641,7 +709,7 @@ export default function Orders() {
     setAiLoading(true); setOrderItems([]); setUnmatchedItems([])
     try {
       const base64 = await new Promise((res, rej) => { const reader = new FileReader(); reader.onload = () => res(reader.result.split(',')[1]); reader.onerror = rej; reader.readAsDataURL(file) })
-      processAIItems(await readOrderWithAI(base64, products, form.customer_name, true, file.type))
+      processAIItems(await readOrderWithAI(base64, products, form.customer_name, true, file.type, form.order_input_mode || 'cases'))
     } catch(err) { alert('Error: ' + err.message) }
     setAiLoading(false); if (fileInputRef.current) fileInputRef.current.value = ''
   }
@@ -649,7 +717,7 @@ export default function Orders() {
   async function handlePasteRead() {
     if (!pasteText.trim()) { alert('Please paste order text first'); return }
     setAiLoading(true); setOrderItems([]); setUnmatchedItems([])
-    try { processAIItems(await readOrderWithAI(pasteText, products, form.customer_name, false)) }
+    try { processAIItems(await readOrderWithAI(pasteText, products, form.customer_name, false, '', form.order_input_mode || 'cases')) }
     catch(err) { alert('Error: ' + err.message) }
     setAiLoading(false)
   }

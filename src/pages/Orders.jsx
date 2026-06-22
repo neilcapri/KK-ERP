@@ -387,8 +387,9 @@ function getWeekLabel(offset = 0) {
   return fmt(monday) + '\u2013' + fmt(sunday) + ', ' + monday.getFullYear()
 }
 function isWeekOrder(order, offset = 0) {
+  if (order.status === 'archived') return false
+  if (!order.dispatch_date) return false // undated orders don't auto-appear — must set a dispatch date
   const { monday, sunday } = getWeekBounds(offset)
-  if (!order.dispatch_date) return offset === 0
   const d = new Date(order.dispatch_date + 'T00:00:00'); return d >= monday && d <= sunday
 }
 

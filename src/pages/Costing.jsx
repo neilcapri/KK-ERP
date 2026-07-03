@@ -55,16 +55,11 @@ export default function Costing() {
       const price = rm.price
       let cost = 0
       if (item.unit === 'ea') {
-        // price is per unit — multiply directly
         cost = price * item.qty_per_unit
       } else if (rm.unit === 'batch') {
-        // batch = 6000g — divide qty by 6000
         cost = (item.qty_per_unit / 6000) * price
-      } else if (rm.unit === 'g' || rm.unit === 'gms') {
-        // price is per gram — multiply directly (no division needed)
-        cost = item.qty_per_unit * price
       } else {
-        // price is per kg or per L — divide qty (in gms/ml) by 1000
+        // price_per_unit is always stored as per-kg or per-L
         cost = (item.qty_per_unit / 1000) * price
       }
       return sum + cost

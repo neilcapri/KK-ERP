@@ -2,7 +2,10 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const MARGIN_THRESHOLD = 30 // %
+const BULK_CODES = new Set([
+  'PBBBu','PCCBu','KLRBu','KABBu','KWALBu','HPCoBu','PVHCBu',
+  'VPCANBu','VPBBu','PNFBu','KABISBu','KSCDBu',
+])
 const LABOUR_PCT_OF_PRICE = 0.22
 
 function fmt(n) {
@@ -79,7 +82,8 @@ export default function Costing() {
   }
 
   // Split products into FG and WIP
-  const fgProducts = useMemo(() => products.filter(p => p.category !== 'WIP'), [products])
+  const fgProducts = useMemo(() => products.filter(p => p.category !== 'WIP' && !BULK_CODES.has(p.code)), [products])
+  const bulkProducts = useMemo(() => products.filter(p => BULK_CODES.has(p.code)), [products])
   const wipProducts = useMemo(() => products.filter(p => p.category === 'WIP'), [products])
 
   const fgCategories = useMemo(() => {
@@ -98,6 +102,14 @@ export default function Costing() {
       return true
     })
   }, [fgProducts, search, catFilter, flagOnly, bomByProduct, rmPriceMap])
+
+  const filteredBulk = useMemo(() => {
+    if (!search) return bulkProducts
+    return bulkProducts.filter(p =>
+      p.name?.toLowerCase().includes(search.toLowerCase()) ||
+      p.code?.toLowerCase().includes(search.toLowerCase())
+    )
+  }, [bulkProducts, search])
 
   const filteredWIP = useMemo(() => {
     if (!search) return wipProducts
@@ -154,7 +166,7 @@ export default function Costing() {
 
       {/* Sub-tabs */}
       <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 20, maxWidth: 320 }}>
-        {[{ key: 'fg', label: `📦 Finished Goods (${fgProducts.length})` }, { key: 'wip', label: `🏭 WIP (${wipProducts.length})` }].map(t => (
+        {[{ key: 'fg', label: `📦 Finished Goods (${fgProducts.length})` }, { key: 'bulk', label: `🧺 Bulk (${bulkProducts.length})` }, { key: 'wip', label: `🏭 WIP (${wipProducts.length})` }].map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); setSearch(''); setCatFilter('all'); setFlagOnly(false) }}
             style={{ flex: 1, padding: '10px 14px', border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: 'var(--display)', letterSpacing: 0.5, textTransform: 'uppercase', background: tab === t.key ? 'var(--kk-green)' : 'var(--surface)', color: tab === t.key ? 'var(--kk-cream)' : 'var(--ink3)', fontWeight: tab === t.key ? 700 : 400, borderRight: '1px solid var(--border)' }}>
             {t.label}
@@ -219,6 +231,56 @@ export default function Costing() {
                           ? <span style={{ color: 'var(--ink3)', fontSize: 11 }}>No price set</span>
                           : <span style={{ fontFamily: 'var(--display)', fontSize: 13, color: r.marginPct >= 50 ? 'var(--kk-green)' : r.marginPct >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)' }}>
                               {flagged && '🔴 '}{r.marginPct.toFixed(1)}%
+                            </span>
+                        }
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </>)}
+
+      {/* ── BULK TAB ── */}
+      {tab === 'bulk' && (<>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+          <input placeholder="Search bulk..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...sel, width: 200 }} />
+        </div>
+        <div className="card">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Code</th><th>Product</th><th>RM Cost</th>
+                  <th>Labour /u ({(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}%)</th>
+                  <th>Total Cost</th><th>List Price /u</th><th>Margin %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBulk.map(p => {
+                  const rmCost = rmCostFor(p.code)
+                  const unitsPerPack = p.units_per_pack || 1
+                  const listPricePerUnit = (p.price_per_pack || 0) / unitsPerPack
+                  const labourCost = listPricePerUnit > 0 ? listPricePerUnit * LABOUR_PCT_OF_PRICE : null
+                  const totalCost = rmCost + (labourCost || 0) // no packaging for bulk
+                  const marginDollar = listPricePerUnit > 0 ? listPricePerUnit - totalCost : null
+                  const marginPct = listPricePerUnit > 0 ? (marginDollar / listPricePerUnit) * 100 : null
+                  const flagged = marginPct !== null && marginPct < MARGIN_THRESHOLD
+                  return (
+                    <tr key={p.code} style={flagged ? { background: 'rgba(200,60,60,0.06)' } : {}}>
+                      <td><span className="code-tag" style={{ cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.code}</span></td>
+                      <td style={{ fontWeight: 500, cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.name}</td>
+                      <td style={{ color: 'var(--ink2)' }}>{fmt(rmCost)}</td>
+                      <td style={{ color: 'var(--ink2)' }}>{labourCost === null ? '—' : fmt(labourCost)}</td>
+                      <td style={{ fontFamily: 'var(--display)', fontSize: 13 }}>{fmt(totalCost)}</td>
+                      <td>{isAdmin ? <input type="number" step="0.01" style={editInput} defaultValue={listPricePerUnit ? listPricePerUnit.toFixed(2) : ''} onBlur={e => saveListPricePerUnit(p, e.target.value)} /> : fmt(listPricePerUnit)}</td>
+                      <td>
+                        {marginPct === null
+                          ? <span style={{ color: 'var(--ink3)', fontSize: 11 }}>No price set</span>
+                          : <span style={{ fontFamily: 'var(--display)', fontSize: 13, color: marginPct >= 50 ? 'var(--kk-green)' : marginPct >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)' }}>
+                              {flagged && '🔴 '}{marginPct.toFixed(1)}%
                             </span>
                         }
                       </td>

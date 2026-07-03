@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
+const MARGIN_THRESHOLD = 30 // %
 const BULK_CODES = new Set([
   'PBBBu','PCCBu','KLRBu','KABBu','KWALBu','HPCoBu','PVHCBu',
   'VPCANBu','VPBBu','PNFBu','KABISBu','KSCDBu',

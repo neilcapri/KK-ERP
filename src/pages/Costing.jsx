@@ -52,19 +52,33 @@ export default function Costing() {
     return map
   }, [bom])
 
-  function rmCostFor(code) {
+  function rmCostFor(code, depth = 0) {
+    if (depth > 5) return 0
     const items = bomByProduct[code] || []
     return items.reduce((sum, item) => {
-      const rm = rmPriceMap[item.rm_name] || { price: 0, unit: 'g' }
-      const price = rm.price
+      const isWIP = products.some(p => p.code === item.rm_name && p.category === 'WIP')
       let cost = 0
-      if (item.unit === 'ea') {
-        cost = price * item.qty_per_unit
-      } else if (rm.unit === 'batch') {
-        cost = (item.qty_per_unit / 6000) * price
+      if (isWIP) {
+        // Get the WIP's total BOM cost
+        const wipTotalCost = rmCostFor(item.rm_name, depth + 1)
+        // Sum all qty_per_unit in the WIP's BOM to get total yield in gms
+        const wipBomItems = bomByProduct[item.rm_name] || []
+        const wipYieldGms = wipBomItems.reduce((s, i) => s + (parseFloat(i.qty_per_unit) || 0), 0)
+        if (wipYieldGms > 0) {
+          // Cost per gram of WIP × qty used
+          const costPerGm = wipTotalCost / wipYieldGms
+          cost = costPerGm * item.qty_per_unit
+        }
       } else {
-        // price_per_unit is always stored as per-kg or per-L
-        cost = (item.qty_per_unit / 1000) * price
+        const rm = rmPriceMap[item.rm_name] || { price: 0, unit: 'kg' }
+        const price = rm.price
+        if (item.unit === 'ea') {
+          cost = price * item.qty_per_unit
+        } else if (rm.unit === 'batch') {
+          cost = (item.qty_per_unit / 6000) * price
+        } else {
+          cost = (item.qty_per_unit / 1000) * price
+        }
       }
       return sum + cost
     }, 0)
@@ -136,8 +150,12 @@ export default function Costing() {
 
   async function saveWIPPrice(code, value) {
     const num = value === '' ? null : parseFloat(value)
+    // Save to products table
     await supabase.from('products').update({ price_per_pack: num }).eq('code', code)
+    // Sync to raw_materials so BOM costing picks it up for finished goods that use this WIP
+    await supabase.from('raw_materials').update({ price_per_unit: num || 0 }).eq('name', code)
     setProducts(prev => prev.map(p => p.code === code ? { ...p, price_per_pack: num } : p))
+    setRmPriceMap(prev => ({ ...prev, [code]: { ...(prev[code] || {}), price: num || 0 } }))
   }
 
   const sel = { padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, background: 'var(--surface)', color: 'var(--ink)' }

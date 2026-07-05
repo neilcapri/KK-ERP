@@ -63,7 +63,7 @@ const RETAIL_COLS = [
   // COOKIES - PALEO (4)
   { code: 'POS', name: 'PO Shortbread Cookies' }, { code: 'PGCo', name: 'Ginger Cookies' }, { code: 'PVHC', name: 'Hemp Vegan Cookies' }, { code: 'HPCo', name: 'Hazelnut Protein Cookies' },
   // COOKIES - KETO (5)
-  { code: 'KCOC', name: 'Keto Collagen Cookie Pouch' }, { code: 'KSCO', name: 'Keto Snickerdoodle' }, { code: 'KAB', name: 'Keto Almond Butter Cookies' }, { code: 'KWAL', name: 'Keto Walnut Cookies' }, { code: 'KABIS', name: 'Keto Almond Biscotti' },
+  { code: 'KCOC', name: 'Keto Collagen Cookie Pouch' }, { code: 'KSCo', name: 'Keto Snickerdoodle Cookies' }, { code: 'KAB', name: 'Keto Almond Butter Cookies' }, { code: 'KWAL', name: 'Keto Walnut Cookies' }, { code: 'KABIS', name: 'Keto Almond Biscotti' },
   // BROWNIE & BARS (5)
   { code: 'PVBRG', name: 'Brownie Ganache Pouch' }, { code: 'PVBR', name: 'Paleo Vegan Brownie' }, { code: 'VPCAN', name: 'Pecan Bars' }, { code: 'PNF', name: "No'tella Bars" }, { code: 'VPB', name: 'Pistachio Bars' },
   // MINI CAKES (4)

@@ -383,14 +383,23 @@ export default function Costing() {
                 {bomItems.length === 0
                   ? <div style={{ fontSize: 12, color: 'var(--ink3)' }}>No BOM defined</div>
                   : bomItems.map((b, i) => {
-                      const rm = rmPriceMap[b.rm_name] || { price: 0, unit: 'g' }
+                      const isWIPIngredient = products.some(prod => prod.code === b.rm_name && prod.category === 'WIP')
                       let cost = 0
-                      if (b.unit === 'ea') cost = rm.price * b.qty_per_unit
-                      else if (rm.unit === 'batch') cost = (b.qty_per_unit / 6000) * rm.price
-                      else cost = (b.qty_per_unit / 1000) * rm.price
+                      if (isWIPIngredient) {
+                        const wipTotal = rmCostFor(b.rm_name, 1)
+                        const wipBom = bomByProduct[b.rm_name] || []
+                        const wipYield = wipBom.reduce((s, i) => s + (parseFloat(i.qty_per_unit) || 0), 0)
+                        if (wipYield > 0) cost = (wipTotal / wipYield) * b.qty_per_unit
+                      } else {
+                        const rm = rmPriceMap[b.rm_name] || { price: 0, unit: 'kg' }
+                        if (b.unit === 'ea') cost = rm.price * b.qty_per_unit
+                        else if (rm.unit === 'batch') cost = (b.qty_per_unit / 6000) * rm.price
+                        else cost = (b.qty_per_unit / 1000) * rm.price
+                      }
+                      const label = isWIPIngredient ? `${b.rm_name} (${b.qty_per_unit}${b.unit}) [WIP]` : `${b.rm_name} (${b.qty_per_unit}${b.unit})`
                       return (
                         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
-                          <span>{b.rm_name} ({b.qty_per_unit}{b.unit})</span>
+                          <span style={{ color: isWIPIngredient ? 'var(--kk-peach)' : 'inherit' }}>{label}</span>
                           <span style={{ color: 'var(--ink2)' }}>{fmt(cost)}</span>
                         </div>
                       )

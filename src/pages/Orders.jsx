@@ -47,21 +47,31 @@ function itemToPacks(item) {
 }
 
 const RETAIL_COLS = [
+  // MUFFINS (3)
   { code: 'PBB', name: 'Protein Blueberry Muffins' }, { code: 'PCC', name: 'Protein Choco Muffins' }, { code: 'KLR', name: 'Keto Lemon Raspberry Muffins' },
+  // NATURES PRIVATE LABEL (4)
   { code: 'NALCO-S', name: 'Natures Almond Cookie Single' }, { code: 'NALCO-D', name: 'Natures Almond Cookie Double' },
   { code: 'NALCOB', name: "Nature's Almond Coconut Bites" }, { code: 'NBFB', name: "Nature's Breakfast Bites" },
-  { code: 'TRFC', name: 'Truffle Cake Whole' }, { code: 'KLRCKE', name: 'KLR Cake' }, { code: 'KCCKE', name: 'Keto Chocolate Cake' },
-  { code: 'PVFB', name: 'Paleo Vegan Focaccia Bread' }, { code: 'PVBB', name: 'Protein Vegan Banana Bread' }, { code: 'KPL', name: 'Keto Pumpkin Loaf' }, { code: 'GBL', name: 'Paleo Ginger Bread Loaf' },
+  // WHOLE CAKES (3)
+  { code: 'TRFC', name: 'Truffle Cake - 6 Inch' }, { code: 'KLRCKE', name: 'KLR Cake - 6 Inch' }, { code: 'KCCKE', name: 'KCC Cake - 6 Inch' },
+  // BREAD & LOAVES (4)
+  { code: 'PVFB', name: 'Focaccia' }, { code: 'PVBB', name: 'Banana Bread' }, { code: 'KPL', name: 'Pumpkin Loaf' }, { code: 'GBL', name: 'Ginger Loaf' },
+  // DOUGHNUTS (3)
   { code: 'KSCD', name: 'Keto Cinnamon Donuts' }, { code: 'VPBD', name: 'Vegan PB Donuts' }, { code: 'KHD', name: 'Keto Hazelnut Donuts' },
-  { code: 'PCrt', name: 'Paleo Carrot Cake' }, { code: 'VSCS', name: 'Vanilla Strawberry Cake Slice' }, { code: 'TRFCS', name: 'Truffle Cake Slices' }, { code: 'HRCS', name: 'Hazelnut Royale Cake Slices' },
-  { code: 'POS', name: 'PO Shortbread' }, { code: 'PGCo', name: 'Ginger Cookies' }, { code: 'PVHC', name: 'Paleo Vegan Hemp Cookies' },
-  { code: 'HPCo', name: 'Hazelnut Protein Cookies' }, { code: 'KCOC', name: 'Keto Collagen Cookies' }, { code: 'KSCO', name: 'Keto Snickerdoodle Cookies' },
-  { code: 'KAB', name: 'Keto Almond Butter Cookies' }, { code: 'KWAL', name: 'Keto Walnut Cookies' }, { code: 'KABIS', name: 'Keto Almond Biscotti' },
-  { code: 'PVBRG', name: 'Vegan Brownie Ganache' }, { code: 'PVBR', name: 'Paleo Vegan Brownie' }, { code: 'VPCAN', name: 'Vegan Pecan Bars' },
-  { code: 'PNF', name: "Paleo No'tella Fudge" }, { code: 'VPB', name: 'Vegan Pistachio Bars' },
+  // CAKE SLICES (4)
+  { code: 'PCrt', name: 'Carrot Cake' }, { code: 'VSCS', name: 'Vanilla Strawberry Cake Slice' }, { code: 'TRFCS', name: 'Truffle Cake Slice' }, { code: 'HRCS', name: 'Hazelnut Royale Cake Slice' },
+  // COOKIES - PALEO (4)
+  { code: 'POS', name: 'PO Shortbread Cookies' }, { code: 'PGCo', name: 'Ginger Cookies' }, { code: 'PVHC', name: 'Hemp Vegan Cookies' }, { code: 'HPCo', name: 'Hazelnut Protein Cookies' },
+  // COOKIES - KETO (5)
+  { code: 'KCOC', name: 'Keto Collagen Cookie Pouch' }, { code: 'KSCO', name: 'Keto Snickerdoodle' }, { code: 'KAB', name: 'Keto Almond Butter Cookies' }, { code: 'KWAL', name: 'Keto Walnut Cookies' }, { code: 'KABIS', name: 'Keto Almond Biscotti' },
+  // BROWNIE & BARS (5)
+  { code: 'PVBRG', name: 'Brownie Ganache Pouch' }, { code: 'PVBR', name: 'Paleo Vegan Brownie' }, { code: 'VPCAN', name: 'Pecan Bars' }, { code: 'PNF', name: "No'tella Bars" }, { code: 'VPB', name: 'Pistachio Bars' },
+  // MINI CAKES (4)
   { code: 'TMC', name: 'Truffle Mini Cake' }, { code: 'PRMC', name: 'Pistachio Raspberry Mini Cake' }, { code: 'CMC', name: 'Carrot Mini Cake' }, { code: 'LMC', name: 'Lemon Mini Cake' },
-  { code: 'CCB', name: 'Chocolate Cinnamon Bark' }, { code: 'SFNL', name: 'Spiced Fruit & Nut Loaf' }, { code: 'CCBS', name: 'Chocolate Coconut Bliss Squares' },
-  { code: 'CCKCU', name: 'Carrot Cake Cup' }, { code: 'LCKCU', name: 'Lemon Cake Cup' }, { code: 'KSCKCU', name: 'Keto Strawberry Cake Cup' }, { code: 'TCKCU', name: 'Chocolate Truffle Cake Cup' },
+  // CAKE CUPS (4)
+  { code: 'TCKCU', name: 'Truffle Cake Cup' }, { code: 'KSCKCU', name: 'Keto Strawberry Cheesecake' }, { code: 'LCKCU', name: 'Lemon Cake Cup' }, { code: 'CCKCU', name: 'Carrot Cake Cup' },
+  // HOLIDAY EDITION (5)
+  { code: 'CCB', name: 'Chocolate Cinnamon Bark' }, { code: 'WSBIS', name: 'Peppermint Brownies - 2 pack' }, { code: 'COBIS', name: 'Choc Orange Biscotti' }, { code: 'SFNL', name: 'Spiced Fruit & Nut Loaf' }, { code: 'CCBS', name: 'Chocolate Coconut Bliss Squares' },
 ]
 
 const BULK_COLS = [
@@ -117,21 +127,21 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       if (!ws[addr]) ws[addr] = { v: '', t: 's' }
       if (r === 0) { ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 14, false, c === 0 ? 'left' : 'center'); continue }
       if (r === headerRowIdx) {
-        if (c === 0) ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 30, true, 'left')
+        if (c === 0) ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 36, true, 'left')
         else if (notesColIdx !== undefined && c === notesColIdx) ws[addr].s = cellStyle('FBC02D', '3E2723', true, 10, true, 'center')
         else if (includePricing && c === numCols - 1) ws[addr].s = cellStyle(S.KK_PEACH, 'FFFFFF', true, 10, true, 'center')
-        else ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 16, true, 'center')
+        else ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 28, true, 'center')
         continue
       }
       if (r === 1 && headerRowIdx !== 1) {
         const bg = (catColorByCol && catColorByCol[c]) || S.CAT_GREEN
-        ws[addr].s = cellStyle(bg, S.KK_CREAM, true, 25, false, 'center'); continue
+        ws[addr].s = cellStyle(bg, 'FFFFFF', true, 30, false, 'center'); continue
       }
       if (grandTotalIdx !== undefined && r === grandTotalIdx) {
         ws[addr].s = c === 0 ? cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left') : cellStyle(S.GRAND_BG, S.GRAND_FG, true, 20, false, 'center')
         continue
       }
-      if (dayRowIdxs.has(r)) { ws[addr].s = cellStyle(S.DAY_BG, S.DAY_FG, true, 20, false, c === 0 ? 'left' : 'center'); continue }
+      if (dayRowIdxs.has(r)) { ws[addr].s = cellStyle(S.DAY_BG, S.DAY_FG, true, 36, false, c === 0 ? 'left' : 'center'); continue }
       if (totalRowIdxs.has(r)) {
         if (c === 0) ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 20, false, 'left')
         else if (includePricing && c === numCols - 1 && notesColIdx === undefined) ws[addr].s = cellStyle(S.VAL_BG, S.TOTAL_FG, true, 20, false, 'center')
@@ -141,7 +151,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
       if (storeRowIdxs.has(r)) {
         const storePos = storeArr.indexOf(r)
         const rowBg = S.STORE_PALETTE[storePos % S.STORE_PALETTE.length]
-        if (c === 0) ws[addr].s = cellStyle(rowBg, '111111', true, 20, false, 'left')
+        if (c === 0) ws[addr].s = cellStyle(rowBg, '111111', true, 36, false, 'left')
         else if (notesColIdx !== undefined && c === notesColIdx) {
           const hasNote = ws[addr].v && ws[addr].v !== ''
           ws[addr].s = hasNote
@@ -231,7 +241,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const notesColIdx = numCols - 1
   const rows = []
   const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push(''); rows.push(titleRow)
-  const catGroups = [[3,'MUFFINS'],[4,'NATURES PL'],[3,'WHOLE CAKES'],[4,'BREAD & LOAVES'],[3,'DOUGHNUTS'],[4,'CAKE SLICES'],[4,'PALEO COOKIES'],[5,'KETO COOKIES'],[5,'BARS'],[4,'MINI CAKES'],[3,'NEW'],[4,'CAKE CUPS']]
+  const catGroups = [[3,'MUFFINS'],[4,'NATURES PRIVATE LABEL'],[3,'WHOLE CAKES'],[4,'BREAD & LOAVES'],[3,'DOUGHNUTS'],[4,'CAKE SLICES'],[4,'COOKIES - PALEO'],[5,'COOKIES - KETO'],[5,'BROWNIE & BARS'],[4,'MINI CAKES'],[4,'CAKE CUPS'],[5,'HOLIDAY EDITION']]
   const catRow = ['']
   for (const [count, label] of catGroups) { catRow.push(label); for (let i = 1; i < count; i++) catRow.push('') }
   if (includePricing) catRow.push('')
@@ -245,7 +255,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
   let catColIdx = 1
   for (const [count] of catGroups) { if (count > 1) merges.push({ s: { r: 1, c: catColIdx }, e: { r: 1, c: catColIdx + count - 1 } }); catColIdx += count }
-  const CAT_COLORS = ['8D6E63','558B2F','AD1457','795548','EF6C00','C2185B','6D4C41','00695C','A0522D','8E24AA','00897B','D84315']
+  const CAT_COLORS = ['4472C4','92D050','FF0000','FF9300','7030A0','DB99F0','375623','70AD47','A0522D','FF6600','4472C4','C00000']
   const catColorByCol = {}
   let ccIdx = 1
   catGroups.forEach(([count], gi) => { for (let k = 0; k < count; k++) catColorByCol[ccIdx + k] = CAT_COLORS[gi % CAT_COLORS.length]; ccIdx += count })
@@ -316,10 +326,13 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   grandTotalRow.push('')
   const grandTotalIdx = rows.length; rows.push(grandTotalRow)
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' }); ws['!merges'] = merges
-  const colWidths = [{ wch: 52 }]; for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: 12 }); if (includePricing) colWidths.push({ wch: 14 })
+  const colWidths = [{ wch: 42 }]
+  const perColWidths = [29,28,27,24,29,13,13,33,28,27,24,25,28,25,25,29,13,28,25,32,28,32,33,32,33,38,25,26,27,22,25,22,27,28,13,13,13,13,34,28,13,28,13,28,13,13,13,13]
+  for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: perColWidths[i] || 13 })
+  if (includePricing) colWidths.push({ wch: 14 })
   colWidths.push({ wch: 32 })
-  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 52 }, { hpt: 120 }]
-  for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 50 }
+  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 32 }, { hpt: 70 }, { hpt: 337 }]
+  for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 61 }
   applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 2, notesColIdx, catColorByCol)
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
 }

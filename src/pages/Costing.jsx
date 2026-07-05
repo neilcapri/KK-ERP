@@ -56,14 +56,17 @@ export default function Costing() {
     if (depth > 5) return 0
     const items = bomByProduct[code] || []
     return items.reduce((sum, item) => {
-      const isWIP = products.some(p => p.code === item.rm_name && p.category === 'WIP')
+      const isWIP = products.some(p => p.code.toLowerCase() === item.rm_name.toLowerCase() && p.category === 'WIP')
       let cost = 0
       if (isWIP) {
         // Get the WIP's total BOM cost
-        const wipTotalCost = rmCostFor(item.rm_name, depth + 1)
+        const wipActualCode = products.find(p => p.code.toLowerCase() === item.rm_name.toLowerCase() && p.category === 'WIP')?.code || item.rm_name
+        const wipTotalCost = rmCostFor(wipActualCode, depth + 1)
         // Sum all qty_per_unit in the WIP's BOM to get total yield in gms
-        const wipBomItems = bomByProduct[item.rm_name] || []
-        const wipYieldGms = wipBomItems.reduce((s, i) => s + (parseFloat(i.qty_per_unit) || 0), 0)
+        const wipKey = Object.keys(bomByProduct).find(k => k.toLowerCase() === item.rm_name.toLowerCase()) || item.rm_name
+        const wipBomItems = bomByProduct[wipKey] || []
+        // Only sum solid/weight ingredients for yield — exclude liquids (ml) which don't add to batch weight
+        const wipYieldGms = wipBomItems.reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
         if (wipYieldGms > 0) {
           // Cost per gram of WIP × qty used
           const costPerGm = wipTotalCost / wipYieldGms
@@ -383,12 +386,12 @@ export default function Costing() {
                 {bomItems.length === 0
                   ? <div style={{ fontSize: 12, color: 'var(--ink3)' }}>No BOM defined</div>
                   : bomItems.map((b, i) => {
-                      const isWIPIngredient = products.some(prod => prod.code === b.rm_name && prod.category === 'WIP')
+                      const isWIPIngredient = products.some(prod => prod.code.toLowerCase() === b.rm_name.toLowerCase() && prod.category === 'WIP')
                       let cost = 0
                       if (isWIPIngredient) {
                         const wipTotal = rmCostFor(b.rm_name, 1)
                         const wipBom = bomByProduct[b.rm_name] || []
-                        const wipYield = wipBom.reduce((s, i) => s + (parseFloat(i.qty_per_unit) || 0), 0)
+                        const wipYield = wipBom.reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
                         if (wipYield > 0) cost = (wipTotal / wipYield) * b.qty_per_unit
                       } else {
                         const rm = rmPriceMap[b.rm_name] || { price: 0, unit: 'kg' }

@@ -53,22 +53,20 @@ export default function Costing() {
   }, [bom])
 
   function rmCostFor(code, depth = 0) {
+    try {
     if (depth > 5) return 0
     const items = bomByProduct[code] || []
     return items.reduce((sum, item) => {
+      try {
       const isWIP = products.some(p => p.code.toLowerCase() === item.rm_name.toLowerCase() && p.category === 'WIP')
       let cost = 0
       if (isWIP) {
-        // Get the WIP's total BOM cost
         const wipActualCode = products.find(p => p.code.toLowerCase() === item.rm_name.toLowerCase() && p.category === 'WIP')?.code || item.rm_name
         const wipTotalCost = rmCostFor(wipActualCode, depth + 1)
-        // Sum all qty_per_unit in the WIP's BOM to get total yield in gms
         const wipKey = Object.keys(bomByProduct).find(k => k.toLowerCase() === item.rm_name.toLowerCase()) || item.rm_name
         const wipBomItems = bomByProduct[wipKey] || []
-        // Only sum solid/weight ingredients for yield — exclude liquids (ml) which don't add to batch weight
         const wipYieldGms = wipBomItems.reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
         if (wipYieldGms > 0) {
-          // Cost per gram of WIP × qty used
           const costPerGm = wipTotalCost / wipYieldGms
           cost = costPerGm * item.qty_per_unit
         }
@@ -84,7 +82,9 @@ export default function Costing() {
         }
       }
       return sum + cost
+      } catch(e) { return sum }
     }, 0)
+    } catch(e) { return 0 }
   }
 
   function rowFor(p) {

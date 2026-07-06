@@ -66,7 +66,10 @@ export default function Costing() {
         const wipKey = Object.keys(bomByProduct).find(k => k.toLowerCase() === item.rm_name.toLowerCase()) || item.rm_name
         const wipBomItems = bomByProduct[wipKey] || []
         const wipYieldGms = wipBomItems.reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
-        if (wipYieldGms > 0) {
+        if (item.unit === 'ea') {
+          // fraction of one full batch (e.g. 0.0833 = 1/12 of a tray)
+          cost = wipTotalCost * item.qty_per_unit
+        } else if (wipYieldGms > 0) {
           const costPerGm = wipTotalCost / wipYieldGms
           cost = costPerGm * item.qty_per_unit
         }
@@ -100,7 +103,7 @@ export default function Costing() {
   }
 
   // Split products into FG and WIP
-  const fgProducts = useMemo(() => products.filter(p => p.category !== 'WIP' && !BULK_CODES.has(p.code)), [products])
+  const fgProducts = useMemo(() => products.filter(p => p.category !== 'WIP' && !BULK_CODES.has(p.code) && p.code !== 'CSCC'), [products])
   const bulkProducts = useMemo(() => products.filter(p => BULK_CODES.has(p.code)), [products])
   const wipProducts = useMemo(() => products.filter(p => p.category === 'WIP'), [products])
 

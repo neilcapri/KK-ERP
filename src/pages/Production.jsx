@@ -278,14 +278,30 @@ export default function Production() {
     const newUnits = (prod?.units || 0) + output
     await supabase.from('products').update({ units: newUnits }).eq('code', code)
     addLog('✓ FG stock updated: ' + prod?.units + ' → ' + newUnits, 'ok')
-    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', code)
+    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (bom?.length) {
+      // Fetch all WIP product codes for lookup
+      const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
+      const wipMap = {}
+      ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
       let rmCount = 0, wipCount = 0
       for (const item of bom) {
-        if (item.component_type === 'wip') {
-          const deductQty = item.qty_per_unit * output
-          const { data: wip } = await supabase.from('products').select('units').eq('code', item.wip_code).single()
-          if (wip) { await supabase.from('products').update({ units: Math.max(0, wip.units - deductQty) }).eq('code', item.wip_code); wipCount++ }
+        if (!item.rm_name) continue
+        // Detect WIP by component_type OR by rm_name matching a WIP product code
+        const wipProduct = wipMap[item.rm_name.toLowerCase()]
+        const wipCode = item.component_type === 'wip' ? item.wip_code : (wipProduct ? wipProduct.code : null)
+        if (wipCode) {
+          const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
+          if (wip) {
+            let deductQty = 0
+            if (item.unit === 'ea') {
+              deductQty = item.qty_per_unit * output
+            } else {
+              deductQty = item.qty_per_unit * output // gms of WIP used
+            }
+            await supabase.from('products').update({ units: Math.max(0, (wip.units || 0) - deductQty) }).eq('code', wipCode)
+            wipCount++
+          }
         } else {
           const deductKg = (item.qty_per_unit * output) / 1000
           const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
@@ -308,13 +324,21 @@ export default function Production() {
     try {
       const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
       if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - h.output_units) }).eq('code', h.product_code)
-      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', h.product_code)
+      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', h.product_code)
       if (bom?.length) {
+        const { data: wipProds } = await supabase.from('products').select('code,units').eq('category', 'WIP')
+        const wipMap = {}
+        ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
         for (const item of bom) {
-          if (item.component_type === 'wip') {
-            const restoreQty = item.qty_per_unit * h.output_units
-            const { data: wip } = await supabase.from('products').select('units').eq('code', item.wip_code).single()
-            if (wip) await supabase.from('products').update({ units: wip.units + restoreQty }).eq('code', item.wip_code)
+          if (!item.rm_name) continue
+          const wipProduct = wipMap[item.rm_name.toLowerCase()]
+          const wipCode = item.component_type === 'wip' ? item.wip_code : (wipProduct ? wipProduct.code : null)
+          if (wipCode) {
+            const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
+            if (wip) {
+              const restoreQty = item.qty_per_unit * h.output_units
+              await supabase.from('products').update({ units: (wip.units || 0) + restoreQty }).eq('code', wipCode)
+            }
           } else {
             const restoreKg = (item.qty_per_unit * h.output_units) / 1000
             const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()

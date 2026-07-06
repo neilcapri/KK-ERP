@@ -321,7 +321,7 @@ export default function Costing() {
       {/* ── WIP TAB ── */}
       {tab === 'wip' && (<>
         <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: 'var(--ink3)' }}>
-          🏭 WIP intermediates — RM cost calculated from BOM · List price to be set later
+          🏭 WIP intermediates — RM cost calculated from BOM ingredients · Cost/gm or Cost/ea used in finished goods costing
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
@@ -336,27 +336,27 @@ export default function Costing() {
                   <th>Code</th>
                   <th>Product</th>
                   <th>Unit</th>
-                  <th>RM Cost /u</th>
-                  <th>List Price /u</th>
+                  <th>Batch RM Cost</th>
+                  <th>Batch Yield</th>
+                  <th>Cost /gm or /ea</th>
                   <th>BOM Items</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredWIP.map(p => {
-                  const rmCost = rmCostFor(p.code)
+                  const batchCost = rmCostFor(p.code)
                   const bomItems = bomByProduct[p.code] || []
-                  const listPrice = p.price_per_pack || null
+                  const yieldGms = bomItems.reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
+                  const costPerUnit = yieldGms > 0 ? batchCost / yieldGms : null
                   return (
                     <tr key={p.code}>
                       <td><span className="code-tag" style={{ cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.code}</span></td>
                       <td style={{ fontWeight: 500, cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.name}</td>
                       <td><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: p.wip_unit === 'ea' ? 'var(--green-l)' : 'var(--blue-l)', color: p.wip_unit === 'ea' ? 'var(--kk-green)' : 'var(--blue)' }}>{p.wip_unit || '—'}</span></td>
-                      <td style={{ color: 'var(--ink2)' }}>{rmCost > 0 ? fmt(rmCost) : <span style={{ color: 'var(--ink3)', fontSize: 11 }}>No BOM</span>}</td>
-                      <td>
-                        {isAdmin
-                          ? <input type="number" step="0.01" style={editInput} defaultValue={listPrice || ''} placeholder="Set price" onBlur={e => saveWIPPrice(p.code, e.target.value)} />
-                          : listPrice ? fmt(listPrice) : <span style={{ color: 'var(--ink3)', fontSize: 11 }}>Not set</span>
-                        }
+                      <td style={{ color: 'var(--ink2)' }}>{batchCost > 0 ? fmt(batchCost) : <span style={{ color: 'var(--ink3)', fontSize: 11 }}>No BOM</span>}</td>
+                      <td style={{ color: 'var(--ink3)', fontSize: 11 }}>{yieldGms > 0 ? yieldGms.toFixed(0) + ' gms' : '—'}</td>
+                      <td style={{ fontFamily: 'var(--display)', fontSize: 13, color: 'var(--kk-green)' }}>
+                        {costPerUnit !== null ? '$' + costPerUnit.toFixed(4) + '/gm' : '—'}
                       </td>
                       <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{bomItems.length > 0 ? `${bomItems.length} ingredients` : <span style={{ color: 'var(--red)' }}>No BOM</span>}</td>
                     </tr>
@@ -392,10 +392,15 @@ export default function Costing() {
                       const isWIPIngredient = products.some(prod => prod.code.toLowerCase() === b.rm_name.toLowerCase() && prod.category === 'WIP')
                       let cost = 0
                       if (isWIPIngredient) {
-                        const wipTotal = rmCostFor(b.rm_name, 1)
-                        const wipBom = bomByProduct[b.rm_name] || []
-                        const wipYield = wipBom.reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
-                        if (wipYield > 0) cost = (wipTotal / wipYield) * b.qty_per_unit
+                        const wipActual = products.find(prod => prod.code.toLowerCase() === b.rm_name.toLowerCase() && prod.category === 'WIP')?.code || b.rm_name
+                        const wipTotal = rmCostFor(wipActual, 1)
+                        if (b.unit === 'ea') {
+                          cost = wipTotal * b.qty_per_unit
+                        } else {
+                          const wipBom = bomByProduct[wipActual] || []
+                          const wipYield = wipBom.reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
+                          if (wipYield > 0) cost = (wipTotal / wipYield) * b.qty_per_unit
+                        }
                       } else {
                         const rm = rmPriceMap[b.rm_name] || { price: 0, unit: 'kg' }
                         if (b.unit === 'ea') cost = rm.price * b.qty_per_unit

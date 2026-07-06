@@ -82,21 +82,103 @@ export default function Production() {
     return Math.round(q)
   }
 
+  // Fetch all WIP product codes once for lookup
+  async function getWIPCodes() {
+    const { data } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
+    return data || []
+  }
+
+  // Recursively flatten a BOM into raw material requirements
+  // Returns { rm_name -> total_grams_needed }
+  async function flattenToRM(productCode, multiplier, wipCodes, visited = new Set()) {
+    if (visited.has(productCode)) return {}
+    visited.add(productCode)
+    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,unit').eq('product_code', productCode)
+    if (!bom?.length) return {}
+    const rmNeeds = {}
+    for (const item of bom) {
+      if (!item.rm_name) continue
+      const wipProduct = wipCodes.find(w => w.code.toLowerCase() === item.rm_name.toLowerCase())
+      if (wipProduct) {
+        // WIP ingredient — recurse into its BOM
+        let wipMultiplier = multiplier
+        if (item.unit === 'ea') {
+          // fraction of a full batch
+          wipMultiplier = multiplier * item.qty_per_unit
+        } else {
+          // gms of WIP — need to know WIP batch yield to scale
+          const { data: wipBom } = await supabase.from('bom').select('qty_per_unit,unit').eq('product_code', wipProduct.code)
+          const wipYield = (wipBom || []).reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
+          wipMultiplier = wipYield > 0 ? multiplier * (item.qty_per_unit / wipYield) : multiplier
+        }
+        const subNeeds = await flattenToRM(wipProduct.code, wipMultiplier, wipCodes, visited)
+        for (const [name, qty] of Object.entries(subNeeds)) {
+          rmNeeds[name] = (rmNeeds[name] || 0) + qty
+        }
+      } else {
+        // Raw material
+        const qtyGms = item.unit === 'ea' ? item.qty_per_unit * multiplier * 1000 : item.qty_per_unit * multiplier
+        rmNeeds[item.rm_name] = (rmNeeds[item.rm_name] || 0) + qtyGms
+      }
+    }
+    return rmNeeds
+  }
+
   async function checkRM(code, outputUnits) {
+    const wipCodes = await getWIPCodes()
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (!bom?.length) return []
     const warns = []
+
+    // ── Level 1: WIP stock check ──────────────────────────────
     for (const item of bom) {
-      if (item.component_type === 'wip') {
-        const needed = item.qty_per_unit * outputUnits
-        const { data: wip } = await supabase.from('products').select('units,name').eq('code', item.wip_code).single()
-        if (wip && wip.units < needed) warns.push({ rm: (wip.name || item.wip_code) + ' (WIP)', needed: needed.toFixed(1) + (item.unit==='ea'?' ea':'g'), have: wip.units.toFixed(1) + (item.unit==='ea'?' ea':'g'), isWip: true })
-      } else {
-        const neededKg = (item.qty_per_unit * outputUnits) / 1000
-        const { data: rm } = await supabase.from('raw_materials').select('stock,unit').eq('name', item.rm_name).single()
-        if (rm && rm.stock < neededKg) warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3) + 'kg', have: rm.stock.toFixed(3) + 'kg' })
+      if (!item.rm_name) continue
+      const wipProduct = wipCodes.find(w => w.code.toLowerCase() === item.rm_name.toLowerCase())
+      if (wipProduct || item.component_type === 'wip') {
+        const wip = wipProduct || wipCodes.find(w => w.code === item.wip_code)
+        if (!wip) continue
+        let needed = 0
+        if (item.unit === 'ea') {
+          needed = item.qty_per_unit * outputUnits
+        } else {
+          // gms of WIP needed
+          needed = item.qty_per_unit * outputUnits
+        }
+        const have = wip.units || 0
+        const unitLabel = item.unit === 'ea' ? ' ea' : 'g'
+        if (have < needed) {
+          warns.push({
+            rm: (wip.name || item.rm_name) + ' [WIP]',
+            needed: needed.toFixed(item.unit === 'ea' ? 2 : 0) + unitLabel,
+            have: have.toFixed(item.unit === 'ea' ? 2 : 0) + unitLabel,
+            isWip: true
+          })
+        }
       }
     }
+
+    // ── Level 2: Flatten to raw materials ─────────────────────
+    const rmNeeds = await flattenToRM(code, outputUnits, wipCodes)
+    const rmNames = Object.keys(rmNeeds)
+    if (rmNames.length > 0) {
+      const { data: stocks } = await supabase.from('raw_materials').select('name,stock,unit').in('name', rmNames)
+      const stockMap = {}
+      ;(stocks || []).forEach(r => { stockMap[r.name] = r })
+      for (const [rmName, neededGms] of Object.entries(rmNeeds)) {
+        const rm = stockMap[rmName]
+        if (!rm) continue
+        const neededKg = neededGms / 1000
+        if (rm.stock < neededKg) {
+          warns.push({
+            rm: rmName + ' [RM]',
+            needed: neededKg.toFixed(3) + 'kg',
+            have: (rm.stock || 0).toFixed(3) + 'kg',
+            isWip: false
+          })
+        }
+      }
+    }
+
     return warns
   }
 

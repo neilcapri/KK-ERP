@@ -62,7 +62,7 @@ export default function Production() {
   async function loadData() {
     setLoading(true)
     const [p, s, h] = await Promise.all([
-      supabase.from('products').select('code,name,category,price_per_pack').order('code'),
+      supabase.from('products').select('code,name,category,price_per_pack,production_value').order('code'),
       supabase.from('production_schedule').select('*').order('scheduled_date').limit(50),
       supabase.from('productions').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(100),
     ])
@@ -789,7 +789,7 @@ function DailyTotal({ rows, products }) {
       let sum = 0
       for (const s of rows) {
         const { data: p } = await supabase.from('products').select('price_per_pack,production_value').eq('code', s.product_code).single()
-        if (p) { const pv = p.production_value != null ? p.production_value : (p.price_per_pack || 0); sum += sellableQty(s.product_code, s.planned_output || 0) * pv }
+        if (p) { const pv = p.production_value != null ? parseFloat(p.production_value) : (parseFloat(p.price_per_pack) || 0); sum += sellableQty(s.product_code, s.planned_output || 0) * pv }
       }
       setTotal(sum)
     }
@@ -811,13 +811,13 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
   // Use production_value for batch tracking if set, otherwise fall back to price_per_pack
   function productionValueFor(prod) {
     if (!prod) return 0
-    return prod.production_value != null ? prod.production_value : (prod.price_per_pack || 0)
+    return prod.production_value != null ? parseFloat(prod.production_value) : (parseFloat(prod.price_per_pack) || 0)
   }
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
-      const { data: p } = await supabase.from('products').select('price_per_pack').eq('code', s.product_code).single()
-      setBatchValue(p?.price_per_pack ? sellableQty(s.product_code, out) * p.price_per_pack : 0)
+      const { data: p } = await supabase.from('products').select('price_per_pack,production_value').eq('code', s.product_code).single()
+      if (p) { const pv = p.production_value != null ? parseFloat(p.production_value) : (parseFloat(p.price_per_pack) || 0); setBatchValue(sellableQty(s.product_code, out) * pv) } else setBatchValue(0)
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', s.product_code)
       if (!bom?.length) { setRMStatus([]); return }
       const rmNames = bom.filter(b => b.component_type !== 'wip').map(b => b.rm_name)

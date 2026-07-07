@@ -599,7 +599,7 @@ export default function Production() {
             ) : Object.entries(historyByDate).map(([date, entries]) => {
               const dayValue = entries.reduce((sum, h) => {
                 const prod = products.find(p => p.code === h.product_code)
-                const ppp = prod?.price_per_pack || 0
+                const ppp = productionValueFor(prod)
                 const packs = sellableQty(h.product_code, h.output_units)
                 return sum + (packs * ppp)
               }, 0)
@@ -635,7 +635,7 @@ export default function Production() {
                       <tbody>
                         {entries.map(h => {
                           const prod = products.find(p => p.code === h.product_code)
-                          const ppp = prod?.price_per_pack || 0
+                          const ppp = productionValueFor(prod)
                           const packs = sellableQty(h.product_code, h.output_units)
                           const batchVal = packs * ppp
                           return (
@@ -788,8 +788,8 @@ function DailyTotal({ rows, products }) {
     async function calc() {
       let sum = 0
       for (const s of rows) {
-        const { data: p } = await supabase.from('products').select('price_per_pack').eq('code', s.product_code).single()
-        if (p?.price_per_pack) sum += sellableQty(s.product_code, s.planned_output || 0) * p.price_per_pack
+        const { data: p } = await supabase.from('products').select('price_per_pack,production_value').eq('code', s.product_code).single()
+        if (p) { const pv = p.production_value != null ? p.production_value : (p.price_per_pack || 0); sum += sellableQty(s.product_code, s.planned_output || 0) * pv }
       }
       setTotal(sum)
     }
@@ -807,6 +807,18 @@ function DailyTotal({ rows, products }) {
 function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, onEdit, calcOutput, onStart }) {
   const [rmStatus, setRMStatus] = useState(null)
   const [batchValue, setBatchValue] = useState(null)
+
+  // Use production_value for batch tracking if set, otherwise fall back to price_per_pack
+  function productionValueFor(prod) {
+    if (!prod) return 0
+    return prod.production_value != null ? prod.production_value : (prod.price_per_pack || 0)
+  }
+
+  // Use production_value for batch tracking if set, otherwise fall back to price_per_pack
+  function productionValueFor(prod) {
+    if (!prod) return 0
+    return prod.production_value != null ? prod.production_value : (prod.price_per_pack || 0)
+  }
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)

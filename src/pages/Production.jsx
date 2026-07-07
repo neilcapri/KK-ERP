@@ -813,12 +813,6 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
     if (!prod) return 0
     return prod.production_value != null ? prod.production_value : (prod.price_per_pack || 0)
   }
-
-  // Use production_value for batch tracking if set, otherwise fall back to price_per_pack
-  function productionValueFor(prod) {
-    if (!prod) return 0
-    return prod.production_value != null ? prod.production_value : (prod.price_per_pack || 0)
-  }
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)

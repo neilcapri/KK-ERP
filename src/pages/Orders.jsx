@@ -531,6 +531,7 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
     + '- keto almond butter cookie = KAB\n'
     + '- keto walnut cookie = KWAL\n'
     + '- snickerdoodle = KSCo\n'
+    + '- KSCO = KSCo (same product, always use KSCo)\n'
     + '- collagen cookie = KCCo (KCOC)\n'
     + '- banana bread / banana loaf = PVBB\n'
     + '- ginger loaf = GBL\n'
@@ -666,6 +667,8 @@ export default function Orders() {
     const unmatched = items.filter(i => !i.matched)
     const orderMode = form.order_input_mode || 'cases'
 
+    // Normalise case variants of known codes
+    items.forEach(i => { if (i.product_code === 'KSCO') i.product_code = 'KSCo' })
     const enriched = matched.map(i => {
       let productCode = i.product_code
       // Detect bulk from AI flag or order mode or BLK prefix in original name

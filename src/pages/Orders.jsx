@@ -78,7 +78,7 @@ const BULK_COLS = [
   { code: 'KCC', name: 'Keto Chocolate Cupcake' }, { code: 'KVC', name: 'Keto Vanilla Cupcake' },
   { code: 'KLRCup', name: 'KLR Cupcake' }, { code: 'CKAC', name: 'Cupcake Almond Chocolate' },
   { code: 'CKHH', name: 'Cupcake Hazelnut Haven' },
-  { code: 'PVBB', name: 'Protein Vegan Banana Bread' }, { code: 'PVBBSL', name: 'Banana Bread Slice Unfrosted' },
+  { code: 'PVBBSL', name: 'Banana Bread Slice Unfrosted' },
   { code: 'PVBBSLF', name: 'Banana Bread Slice Frosted' },
   { code: 'PBBBu', name: 'Blueberry Muffin Bulk' }, { code: 'PCCBu', name: 'Chocolate Chip Muffin Bulk' },
   { code: 'KLRBu', name: 'Lemon Raspberry Muffin Bulk' },

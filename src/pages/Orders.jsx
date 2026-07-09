@@ -296,6 +296,9 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
         storeRow.push(packs || null)
         if (packs && priceMap[col.code]) rowTotal += packs * priceMap[col.code]
       }
+      // Skip stores with no retail quantities (bulk-only customers)
+      const hasRetailItems = storeRow.slice(1).some(v => v !== null && v !== '')
+      if (!hasRetailItems) continue
       if (includePricing) storeRow.push(rowTotal > 0 ? Math.round(rowTotal * 100) / 100 : null)
       storeRow.push(order.notes || null)
       storeRowIdxs.add(rows.length); rows.push(storeRow)

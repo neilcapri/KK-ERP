@@ -141,6 +141,20 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         ws[addr].s = c === 0 ? cellStyle(S.GRAND_BG, S.GRAND_FG, true, 11, false, 'left') : cellStyle(S.GRAND_BG, S.GRAND_FG, true, 20, false, 'center')
         continue
       }
+      if (r === grandTotalIdx + 1) {
+        // Total Units row
+        ws[addr].s = c === 0
+          ? cellStyle('1B5E20', 'FFFFFF', true, 11, false, 'left')
+          : cellStyle('E8F5E9', '1B5E20', true, 14, false, 'center')
+        continue
+      }
+      if (r === grandTotalIdx + 2) {
+        // Trays to Make row
+        ws[addr].s = c === 0
+          ? cellStyle('4A148C', 'FFFFFF', true, 11, false, 'left')
+          : cellStyle('EDE7F6', '4A148C', true, 14, false, 'center')
+        continue
+      }
       if (dayRowIdxs.has(r)) { ws[addr].s = cellStyle(S.DAY_BG, S.DAY_FG, true, 36, false, c === 0 ? 'left' : 'center'); continue }
       if (totalRowIdxs.has(r)) {
         if (c === 0) ws[addr].s = cellStyle(S.TOTAL_BG, S.TOTAL_FG, true, 20, false, 'left')
@@ -325,6 +339,34 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   if (includePricing) grandTotalRow.push(grandOrderTotal > 0 ? Math.round(grandOrderTotal * 100) / 100 : null)
   grandTotalRow.push('')
   const grandTotalIdx = rows.length; rows.push(grandTotalRow)
+
+  // Row: Total Units (packs × units_per_pack)
+  const totalUnitsRow = ['TOTAL UNITS']
+  RETAIL_COLS.forEach(col => {
+    const packs = grandColTotals[RETAIL_COLS.indexOf(col)] || 0
+    const upp = UNITS_PER_PACK_MAP[col.code] || 1
+    totalUnitsRow.push(packs > 0 ? packs * upp : null)
+  })
+  if (includePricing) totalUnitsRow.push(null)
+  totalUnitsRow.push('')
+  rows.push(totalUnitsRow)
+
+  // Row: Trays to Make (total units / tray_yield, rounded up — only for products with tray yield)
+  const traysRow = ['TRAYS TO MAKE']
+  RETAIL_COLS.forEach(col => {
+    const packs = grandColTotals[RETAIL_COLS.indexOf(col)] || 0
+    const upp = UNITS_PER_PACK_MAP[col.code] || 1
+    const totalUnits = packs * upp
+    const trayYield = TRAY_YIELD_MAP[col.code]
+    if (trayYield && totalUnits > 0) {
+      traysRow.push(Math.ceil(totalUnits / trayYield))
+    } else {
+      traysRow.push(null)
+    }
+  })
+  if (includePricing) traysRow.push(null)
+  traysRow.push('')
+  rows.push(traysRow)
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' }); ws['!merges'] = merges
   const colWidths = [{ wch: 42 }]
   const perColWidths = [29,28,27,24,29,13,13,33,28,27,24,25,28,25,25,29,13,28,25,32,28,32,33,32,33,38,25,26,27,22,25,22,27,28,13,13,13,13,34,28,13,28,13,28,13,13,13,13]
@@ -333,6 +375,9 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   colWidths.push({ wch: 32 })
   ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 32 }, { hpt: 70 }, { hpt: 337 }]
   for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 61 }
+  // Slightly smaller for the summary rows at bottom
+  ws['!rows'][grandTotalIdx + 1] = { hpt: 40 }
+  ws['!rows'][grandTotalIdx + 2] = { hpt: 40 }
   applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 2, notesColIdx, catColorByCol)
   XLSX.utils.book_append_sheet(wb, ws, 'Retail Packs')
 }
@@ -414,6 +459,12 @@ const UNITS_PER_PACK_MAP = {
   CMC: 1, LMC: 1, PRMC: 1, TMC: 1,
   KCC: 1, KVC: 1, KLRCup: 1, KCCKE: 1, KVCKE: 1, KLRCKE: 1,
   NALCOB: 1, NBFB: 1,
+}
+
+// Tray yield per product (units per tray) — only products with known tray yields
+const TRAY_YIELD_MAP = {
+  PNF: 40, PVBR: 36, PVBRG: 36,
+  VPB: 64, VPCAN: 36, VSCS: 54,
 }
 
 // ── Dispatch slip — packs only for pack items, units for bulk ──

@@ -1012,7 +1012,7 @@ export default function Orders() {
               <span style={{ fontSize:11, color:'var(--ink3)' }}>{orders.filter(o => o.status !== 'archived' && isWeekOrder(o, exportWeek === 'next' ? 1 : 0)).length} orders</span>
             </div>
             <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>
-              <button className="btn btn-green" onClick={() => exportOrderSheet(true)} disabled={exportLoading}>{exportLoading ? '⏳ Generating...' : '📥 Export Full (with pricing)'}</button>
+              <button className="btn btn-green" onClick={() => exportOrderSheet(true)} disabled={exportLoading} style={{ display: isAdmin ? 'inline-flex' : 'none' }}>{exportLoading ? '⏳ Generating...' : '📥 Export Full (with pricing)'}</button>
               <button className="btn btn-secondary" onClick={() => exportOrderSheet(false)} disabled={exportLoading}>{exportLoading ? '⏳ Generating...' : '📥 Export Team Sheet'}</button>
               <button className="btn btn-red" onClick={resetWeek} disabled={exportLoading} style={{ marginLeft:'auto' }}>🗄 Reset Week</button>
             </div>

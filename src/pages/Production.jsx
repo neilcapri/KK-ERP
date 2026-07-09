@@ -274,10 +274,11 @@ export default function Production() {
     if (!code || !inputQty || !outputUnits) { alert('Please fill in all fields.'); return }
     const output = parseInt(outputUnits)
     addLog('Saving ' + code + ' +' + output + ' units...')
-    const { data: prod } = await supabase.from('products').select('units,name').eq('code', code).single()
+    const { data: prod } = await supabase.from('products').select('units,freezer_units,name').eq('code', code).single()
     const newUnits = (prod?.units || 0) + output
-    await supabase.from('products').update({ units: newUnits }).eq('code', code)
-    addLog('✓ FG stock updated: ' + prod?.units + ' → ' + newUnits, 'ok')
+    const newFreezer = (prod?.freezer_units || 0) + output
+    await supabase.from('products').update({ units: newUnits, freezer_units: newFreezer }).eq('code', code)
+    addLog('✓ FG stock updated: ' + prod?.units + ' → ' + newUnits + ' (freezer +' + output + ')', 'ok')
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (bom?.length) {
       // Fetch all WIP product codes for lookup
@@ -322,8 +323,11 @@ export default function Production() {
     if (!window.confirm('Delete production entry for ' + h.product_code + ' (+' + h.output_units + ' units) on ' + h.date + '?\n\nThis will reverse the stock change.')) return
     setDeletingId(h.id)
     try {
-      const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
-      if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - h.output_units) }).eq('code', h.product_code)
+      const { data: prod } = await supabase.from('products').select('units,freezer_units').eq('code', h.product_code).single()
+      if (prod) await supabase.from('products').update({
+        units: Math.max(0, prod.units - h.output_units),
+        freezer_units: Math.max(0, (prod.freezer_units || 0) - h.output_units),
+      }).eq('code', h.product_code)
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', h.product_code)
       if (bom?.length) {
         const { data: wipProds } = await supabase.from('products').select('code,units').eq('category', 'WIP')

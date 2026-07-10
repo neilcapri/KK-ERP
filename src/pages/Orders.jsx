@@ -1000,10 +1000,41 @@ export default function Orders() {
         </div>
       </div>
       <div className="page-body">
-        <div className="grid2" style={{ marginBottom: 16, maxWidth: 400 }}>
+        <div className="grid2" style={{ marginBottom: 16, maxWidth: isAdmin ? 700 : 400 }}>
           <div className="stat green"><div className="stat-label">Active Orders</div><div className="stat-value">{activeOrders.length}</div></div>
           <div className="stat purple"><div className="stat-label">Archived</div><div className="stat-value">{archivedOrders.length}</div></div>
+          {isAdmin && <div className="stat" style={{ borderTop: '3px solid var(--kk-green)' }}>
+            <div className="stat-label">Week Total Value</div>
+            <div className="stat-value" style={{ color: 'var(--kk-green)' }}>${orders.filter(o => isWeekOrder(o, 0)).reduce((s, o) => s + (o.total_value || 0), 0).toFixed(2)}</div>
+            <div className="stat-sub">{orders.filter(o => isWeekOrder(o, 0)).length} orders · {getWeekLabel(0)}</div>
+          </div>}
         </div>
+        {isAdmin && (() => {
+          const weekOrders = orders.filter(o => isWeekOrder(o, 0))
+          const byDay = {}
+          weekOrders.forEach(o => {
+            const day = o.delivery_day || 'Unscheduled'
+            if (!byDay[day]) byDay[day] = { count: 0, value: 0 }
+            byDay[day].count++
+            byDay[day].value += o.total_value || 0
+          })
+          const days = [...DELIVERY_DAYS, 'Unscheduled'].filter(d => byDay[d])
+          if (!days.length) return null
+          return (
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="card-title">📅 This Week by Day</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {days.map(day => (
+                  <div key={day} style={{ flex: '1 1 120px', minWidth: 100, background: day === 'Unscheduled' ? 'var(--surface2)' : 'var(--green-l)', borderRadius: 8, padding: '10px 14px', border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 11, fontFamily: 'var(--display)', letterSpacing: 1, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 4 }}>{day}</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--kk-green)' }}>${byDay[day].value.toFixed(2)}</div>
+                    <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{byDay[day].count} order{byDay[day].count !== 1 ? 's' : ''}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
         {canEdit && (
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-title">📊 Order Sheet Export</div>

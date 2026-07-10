@@ -274,11 +274,10 @@ export default function Production() {
     if (!code || !inputQty || !outputUnits) { alert('Please fill in all fields.'); return }
     const output = parseInt(outputUnits)
     addLog('Saving ' + code + ' +' + output + ' units...')
-    const { data: prod } = await supabase.from('products').select('units,freezer_units,name').eq('code', code).single()
+    const { data: prod } = await supabase.from('products').select('units,name').eq('code', code).single()
     const newUnits = (prod?.units || 0) + output
-    const newFreezer = (prod?.freezer_units || 0) + output
-    await supabase.from('products').update({ units: newUnits, freezer_units: newFreezer }).eq('code', code)
-    addLog('✓ FG stock updated: ' + prod?.units + ' → ' + newUnits + ' (freezer +' + output + ')', 'ok')
+    await supabase.from('products').update({ units: newUnits }).eq('code', code)
+    addLog('✓ FG stock updated: ' + prod?.units + ' → ' + newUnits, 'ok')
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (bom?.length) {
       // Fetch all WIP product codes for lookup
@@ -323,11 +322,8 @@ export default function Production() {
     if (!window.confirm('Delete production entry for ' + h.product_code + ' (+' + h.output_units + ' units) on ' + h.date + '?\n\nThis will reverse the stock change.')) return
     setDeletingId(h.id)
     try {
-      const { data: prod } = await supabase.from('products').select('units,freezer_units').eq('code', h.product_code).single()
-      if (prod) await supabase.from('products').update({
-        units: Math.max(0, prod.units - h.output_units),
-        freezer_units: Math.max(0, (prod.freezer_units || 0) - h.output_units),
-      }).eq('code', h.product_code)
+      const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
+      if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - h.output_units) }).eq('code', h.product_code)
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', h.product_code)
       if (bom?.length) {
         const { data: wipProds } = await supabase.from('products').select('code,units').eq('category', 'WIP')
@@ -572,12 +568,12 @@ export default function Production() {
                         <div style={{ fontFamily: 'var(--display)', fontSize: 14, letterSpacing: 2, color: 'var(--kk-cream)' }}>
                           {new Date(date + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}
                         </div>
-                        <DailyTotal rows={rows} products={products} />
+                        <DailyTotal rows={rows} products={products} isAdmin={isAdmin} />
                       </div>
                       <div className="table-wrap" style={{ border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
                         <table>
                           <thead>
-                            <tr><th>Product</th><th>Planned Input</th><th>Planned Output</th><th>Batch Value</th><th>RM Check</th><th>Status</th><th></th><th style={{width:100}}></th></tr>
+                            <tr><th>Product</th><th>Planned Input</th><th>Planned Output</th>{isAdmin && <th>Batch Value</th>}<th>RM Check</th><th>Status</th><th></th><th style={{width:100}}></th></tr>
                           </thead>
                           <tbody>
                             {rows.map(s => (
@@ -648,7 +644,7 @@ export default function Production() {
                               <td style={{ padding: '10px 14px', color: 'var(--ink3)' }}>{h.input_qty} {h.input_type}</td>
                               <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--green)' }}>+{h.output_units}</td>
                               <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--kk-brown)' }}>
-                                {batchVal > 0 ? '$' + batchVal.toFixed(0) : <span style={{ color: 'var(--ink3)' }}>—</span>}
+                                {isAdmin && (batchVal > 0 ? '$' + batchVal.toFixed(0) : <span style={{ color: 'var(--ink3)' }}>—</span>)}
                               </td>
                               <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--ink3)' }}>{h.created_by_name}</td>
                               <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--ink3)' }}>{h.notes}</td>
@@ -786,7 +782,7 @@ export default function Production() {
   )
 }
 
-function DailyTotal({ rows, products }) {
+function DailyTotal({ rows, products, isAdmin }) {
   const [total, setTotal] = useState(null)
   useEffect(() => {
     async function calc() {
@@ -803,12 +799,13 @@ function DailyTotal({ rows, products }) {
   return (
     <div style={{ textAlign: 'right' }}>
       <div style={{ fontSize: 10, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)' }}>DAY TOTAL</div>
-      <div style={{ fontFamily: 'var(--display)', fontSize: 20, color: 'var(--kk-peach)', letterSpacing: 1 }}>${total.toFixed(2)}</div>
+      {isAdmin && <div style={{ fontFamily: 'var(--display)', fontSize: 20, color: 'var(--kk-peach)', letterSpacing: 1 }}>${total.toFixed(2)}</div>}
     </div>
   )
 }
 
 function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, onEdit, calcOutput, onStart }) {
+  const { isAdmin } = useAuth()
   const [rmStatus, setRMStatus] = useState(null)
   const [batchValue, setBatchValue] = useState(null)
 
@@ -876,7 +873,7 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
       <td style={{fontSize:12}}>{s.planned_input} {s.input_type}</td>
       <td style={{fontWeight:500,color:'var(--green)'}}>{packsDisplay(s.product_code, s.planned_output)}</td>
       <td style={{fontWeight:600,color:'var(--kk-brown)'}}>
-        {batchValue === null ? '...' : batchValue > 0 ? '$' + batchValue.toFixed(2) : <span style={{color:'var(--ink3)'}}>—</span>}
+        {isAdmin ? (batchValue === null ? '...' : batchValue > 0 ? '$' + batchValue.toFixed(2) : <span style={{color:'var(--ink3)'}}>—</span>) : '—'}
       </td>
       <td>
         {rmStatus === null ? <span style={{fontSize:11,color:'var(--ink3)'}}>...</span>

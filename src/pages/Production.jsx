@@ -416,6 +416,11 @@ export default function Production() {
       <div className="page-header">
         <div><h2>PRODUCTION</h2><p>Log batches & manage schedule</p></div>
         <div style={{ display: 'flex', gap: 10 }}>
+          {isAdmin && <button className="btn btn-red btn-sm" onClick={async () => {
+            if (!window.confirm('Delete ALL entries from the production schedule? This cannot be undone.')) return
+            await supabase.from('production_schedule').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+            setSchedule([])
+          }}>🗑 Clear Schedule</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => setShowScheduleModal(true)}>+ Schedule</button>
           <button className="btn btn-green" onClick={() => setView('log')}>+ Log Batch</button>
         </div>

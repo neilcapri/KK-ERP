@@ -824,54 +824,42 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
       const { data: p } = await supabase.from('products').select('price_per_pack,production_value').eq('code', s.product_code).single()
       if (p) { const pv = p.production_value != null ? parseFloat(p.production_value) : (parseFloat(p.price_per_pack) || 0); setBatchValue(sellableQty(s.product_code, out) * pv) } else setBatchValue(0)
-      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', s.product_code)
+      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', s.product_code)
       if (!bom?.length) { setRMStatus([]); return }
-      const rmNames = bom.filter(b => b.component_type !== 'wip').map(b => b.rm_name)
-      const wipCodes = bom.filter(b => b.component_type === 'wip').map(b => b.wip_code)
-      const [rmsRes, wipsRes] = await Promise.all([
-        rmNames.length ? supabase.from('raw_materials').select('name,stock').in('name', rmNames) : Promise.resolve({ data: [] }),
-        wipCodes.length ? supabase.from('products').select('code,units').in('code', wipCodes) : Promise.resolve({ data: [] }),
-      ])
-      const stockMap = {}
-      ;(rmsRes.data || []).forEach(r => { stockMap[r.name] = r.stock })
-      const wipStockMap = {}
-      ;(wipsRes.data || []).forEach(w => { wipStockMap[w.code] = w.units })
-      const myIndex = allSchedule.findIndex(x => x.id === s.id)
-      const priorBatches = allSchedule.slice(0, myIndex).filter(x => x.status === 'planned' || x.status === 'in_progress')
-      const committedMap = {}
-      const committedWipMap = {}
-      for (const prior of priorBatches) {
-        const { data: priorBom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code').eq('product_code', prior.product_code)
-        const priorOut = prior.planned_output || calcOutput(prior.product_code, prior.input_type, prior.planned_input)
-        ;(priorBom || []).forEach(item => {
-          if (item.component_type === 'wip') {
-            committedWipMap[item.wip_code] = (committedWipMap[item.wip_code] || 0) + item.qty_per_unit * priorOut
-          } else {
-            const needed = (item.qty_per_unit * priorOut) / 1000
-            committedMap[item.rm_name] = (committedMap[item.rm_name] || 0) + needed
-          }
-        })
-      }
+      // Fetch WIP products to detect new-style WIP ingredients (rm_name = WIP product code)
+      const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
+      const wipMap = {}
+      ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
       const warns = []
+      // Level 1: WIP stock check
       for (const item of bom) {
-        if (item.component_type === 'wip') {
-          const needed = item.qty_per_unit * out
-          const currentStock = wipStockMap[item.wip_code] || 0
-          const committed = committedWipMap[item.wip_code] || 0
-          const remaining = currentStock - committed
-          if (remaining < needed) warns.push({ rm: item.wip_code + ' (WIP)', needed: needed.toFixed(1), remaining: remaining.toFixed(1), shortBy: (needed - remaining).toFixed(1) })
-        } else {
+        if (!item.rm_name) continue
+        const wipProduct = wipMap[item.rm_name.toLowerCase()]
+        const wipCode = item.component_type === 'wip' ? item.wip_code : (wipProduct ? wipProduct.code : null)
+        if (wipCode) {
+          const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
+          if (wip) {
+            const needed = item.unit === 'ea' ? item.qty_per_unit * out : item.qty_per_unit * out
+            if ((wip.units || 0) < needed) warns.push({ rm: (wip.name || wipCode) + ' [WIP]', needed: needed.toFixed(item.unit === 'ea' ? 2 : 0) + (item.unit === 'ea' ? ' ea' : 'g'), have: (wip.units || 0).toFixed(item.unit === 'ea' ? 2 : 0) + (item.unit === 'ea' ? ' ea' : 'g'), isWip: true })
+          }
+        }
+      }
+      // Level 2: Raw material stock check (direct ingredients only, no flatten)
+      const rmItems = bom.filter(b => b.rm_name && !wipMap[b.rm_name.toLowerCase()] && b.component_type !== 'wip')
+      if (rmItems.length) {
+        const { data: stocks } = await supabase.from('raw_materials').select('name,stock').in('name', rmItems.map(b => b.rm_name).filter(Boolean))
+        const stockMap = {}
+        ;(stocks || []).forEach(r => { stockMap[r.name] = r.stock })
+        for (const item of rmItems) {
           const neededKg = (item.qty_per_unit * out) / 1000
-          const currentStock = stockMap[item.rm_name] || 0
-          const committed = committedMap[item.rm_name] || 0
-          const remaining = currentStock - committed
-          if (remaining < neededKg) warns.push({ rm: item.rm_name, needed: neededKg.toFixed(3), remaining: remaining.toFixed(3), shortBy: (neededKg - remaining).toFixed(3) })
+          const have = stockMap[item.rm_name] || 0
+          if (have < neededKg) warns.push({ rm: item.rm_name + ' [RM]', needed: neededKg.toFixed(3) + 'kg', have: have.toFixed(3) + 'kg', isWip: false })
         }
       }
       setRMStatus(warns)
     }
     check()
-  }, [s.id, allSchedule.map(x => x.id).join(',')])
+  }, [s.id])
   return (
     <tr>
       <td><span className="code-tag">{s.product_code}</span> <span style={{fontSize:11,color:'var(--ink2)'}}>{s.product_name}</span></td>

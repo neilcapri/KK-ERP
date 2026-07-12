@@ -75,18 +75,27 @@ const RETAIL_COLS = [
 ]
 
 const BULK_COLS = [
+  // CUPCAKES
   { code: 'KCC', name: 'Keto Chocolate Cupcake' }, { code: 'KVC', name: 'Keto Vanilla Cupcake' },
-  { code: 'KLRCup', name: 'KLR Cupcake' }, { code: 'CKAC', name: 'Cupcake Almond Chocolate' },
-  { code: 'CKHH', name: 'Cupcake Hazelnut Haven' },
-  { code: 'PVBBSL', name: 'Banana Bread Slice Unfrosted' },
-  { code: 'PVBBSLF', name: 'Banana Bread Slice Frosted' },
-  { code: 'PBBBu', name: 'Blueberry Muffin Bulk' }, { code: 'PCCBu', name: 'Chocolate Chip Muffin Bulk' },
-  { code: 'KLRBu', name: 'Lemon Raspberry Muffin Bulk' },
-  { code: 'KABBu', name: 'Keto Almond Butter Cookies Bulk' }, { code: 'KWALBu', name: 'Keto Walnut Cookies Bulk' },
-  { code: 'HPCoBu', name: 'Hazelnut Protein Cookies Bulk' }, { code: 'PVHCBu', name: 'Paleo Vegan Hemp Cookies Bulk' },
-  { code: 'VPCANBu', name: 'Vegan Pecan Bars Bulk' }, { code: 'VPBBu', name: 'Vegan Pistachio Bars Bulk' },
-  { code: 'PNFBu', name: "Paleo No'tella Fudge Bulk" }, { code: 'KABISBu', name: 'Almond Biscotti Bulk' },
-  { code: 'KSCDBu', name: 'Cinnamon Donut Bulk' },
+  { code: 'KLRCup', name: 'KLR Cupcake' }, { code: 'CKAC', name: 'Keto Almond Chocolate Cupcake' },
+  { code: 'CKHH', name: 'Hazelnut Haven Cupcake' },
+  // COOKIES
+  { code: 'KABBu', name: 'Almond Butter Cookies' }, { code: 'KWALBu', name: 'Keto Walnut Cookies' },
+  { code: 'HPCoBu', name: 'Hazelnut Protein Cookies' }, { code: 'PVHCBu', name: 'Vegan Hemp Cookies' },
+  { code: 'KABISBu', name: 'Keto Almond Biscotti' },
+  // BARS
+  { code: 'VPCANBu', name: 'Pecan Bars' }, { code: 'VPBBu', name: 'Pistachio Bars' },
+  { code: 'PNFBu', name: "No'tella Bars" }, { code: 'PVBRG', name: 'Brownie Ganache' },
+  // MUFFINS
+  { code: 'PBBBu', name: 'Protein Blueberry Muffins' }, { code: 'PCCBu', name: 'Protein Choco Muffins' },
+  { code: 'KLRBu', name: 'Keto Lemon Rasp Muffins' },
+  // DONUTS
+  { code: 'KSCDBu', name: 'Sweet Cinnamon Donuts' }, { code: 'KHD', name: 'Keto Choc Hazelnut Donuts' },
+  { code: 'VPBD', name: 'Chocolate PB Donuts' },
+  // GO BANANAS
+  { code: 'PVBB', name: 'Banana Bread Whole — METAL PANS' },
+  { code: 'PVBBSLF', name: 'Banana Bread Slices WITH FROSTING' },
+  { code: 'PVBBSL', name: 'Banana Bread Slices — NO FROSTING' },
 ]
 
 const BULK_CODES = new Set(BULK_COLS.map(c => c.code))
@@ -110,10 +119,10 @@ function cellStyle(bg, fg, bold = false, size = 10, wrap = false, halign = 'cent
     fill: { fgColor: { rgb: bg || 'FFFFFF' } },
     alignment: { horizontal: halign, vertical: 'center', wrapText: wrap },
     border: {
-      top: { style: 'thin', color: { rgb: 'CCCCCC' } },
-      bottom: { style: 'thin', color: { rgb: 'CCCCCC' } },
-      left: { style: 'thin', color: { rgb: 'CCCCCC' } },
-      right: { style: 'thin', color: { rgb: 'CCCCCC' } },
+      top: { style: 'thin', color: { rgb: '000000' } },
+      bottom: { style: 'thin', color: { rgb: '000000' } },
+      left: { style: 'thin', color: { rgb: '000000' } },
+      right: { style: 'thin', color: { rgb: '000000' } },
     }
   }
 }
@@ -391,11 +400,20 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const numCols = BULK_COLS.length + 1 + (includePricing ? 1 : 0) + 1 // +1 store, +1 notes (always)
   const notesColIdx = numCols - 1
   const rows = []; const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push(''); rows.push(titleRow)
+  // bulkCatGroups defined inline above the headerRow
+  // Category groups for bulk sheet
+  const bulkCatGroups = [[5,'CUPCAKES'],[5,'COOKIES'],[4,'BARS'],[3,'MUFFINS'],[3,'DONUTS'],[3,'GO BANANAS']]
+  const bulkCatRow = ['']
+  for (const [count, label] of bulkCatGroups) { bulkCatRow.push(label); for (let i = 1; i < count; i++) bulkCatRow.push('') }
+  if (includePricing) bulkCatRow.push(''); bulkCatRow.push(''); rows.push(bulkCatRow)
   const headerRow = ['Store']; for (const col of BULK_COLS) headerRow.push(col.name + '\n(' + col.code + ')\nUNITS')
   if (includePricing) headerRow.push('ORDER VALUE ($)')
   headerRow.push('NOTES'); rows.push(headerRow)
   const byDay = {}; for (const o of orders) { const day = o.delivery_day || 'Unscheduled'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
+  // Merges: title row + category row spans
   const merges = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } }]
+  let bulkCatColIdx = 1
+  for (const [count] of bulkCatGroups) { if (count > 1) merges.push({ s: { r: 1, c: bulkCatColIdx }, e: { r: 1, c: bulkCatColIdx + count - 1 } }); bulkCatColIdx += count }
   const dayRowIdxs = new Set(), totalRowIdxs = new Set(), storeRowIdxs = new Set()
   const ALL_DAY_GROUPS_BULK = [...DELIVERY_DAYS, 'Unscheduled']
   for (const day of ALL_DAY_GROUPS_BULK) {
@@ -431,7 +449,14 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   colWidths.push({ wch: 32 })
   ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 120 }]
   for (let i = 2; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 50 }
-  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 1, notesColIdx)
+  const BULK_CAT_COLORS = ['4472C4','375623','A0522D','558B2F','7030A0','E65100']
+  const bulkCatColorByCol = {}
+  let bccIdx = 1
+  bulkCatGroups.forEach(([count], gi) => { for (let k = 0; k < count; k++) bulkCatColorByCol[bccIdx + k] = BULK_CAT_COLORS[gi % BULK_CAT_COLORS.length]; bccIdx += count })
+  // PVBBSL (No Frosting) gets bright red for instant recognition
+  const pvbbslColIdx = BULK_COLS.findIndex(c => c.code === 'PVBBSL') + 1
+  if (pvbbslColIdx > 0) bulkCatColorByCol[pvbbslColIdx] = 'B71C1C'
+  applyStyles(ws, rows.length, numCols, dayRowIdxs, totalRowIdxs, storeRowIdxs, includePricing, grandTotalIdx, 2, notesColIdx, bulkCatColorByCol)
   XLSX.utils.book_append_sheet(wb, ws, 'Bulk Orders')
 }
 
@@ -957,8 +982,8 @@ export default function Orders() {
       buildBulkSheet(wb, sheetOrders, weekLabel, includePricing)
       const suffix = includePricing ? 'FULL' : 'TEAM'
       await writeWorkbookWithFreeze(wb, 'KK_Order_Sheet_' + weekLabel.replace(/[^a-zA-Z0-9]/g, '_') + '_' + suffix + '.xlsx', {
-        'Retail Packs': { xSplit: 1, ySplit: 3, topLeftCell: 'B4' },
-        'Bulk Orders': { xSplit: 1, ySplit: 2, topLeftCell: 'B3' },
+        'Retail Packs': { xSplit: 0, ySplit: 3, topLeftCell: 'A4' },
+        'Bulk Orders': { xSplit: 0, ySplit: 3, topLeftCell: 'A4' },
       })
     } catch(err) { alert('Export failed: ' + err.message) }
     setExportLoading(false)

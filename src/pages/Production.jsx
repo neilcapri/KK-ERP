@@ -36,6 +36,12 @@ function fmtDate(dateStr) {
   } catch { return dateStr }
 }
 
+// Use production_value for batch tracking if set, otherwise fall back to price_per_pack
+function productionValueFor(prod) {
+  if (!prod) return 0
+  return prod.production_value != null ? parseFloat(prod.production_value) : (parseFloat(prod.price_per_pack) || 0)
+}
+
 export default function Production() {
   const { profile, isAdmin } = useAuth()
   const [view, setView] = useState('log')
@@ -814,11 +820,7 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
   const [rmStatus, setRMStatus] = useState(null)
   const [batchValue, setBatchValue] = useState(null)
 
-  // Use production_value for batch tracking if set, otherwise fall back to price_per_pack
-  function productionValueFor(prod) {
-    if (!prod) return 0
-    return prod.production_value != null ? parseFloat(prod.production_value) : (parseFloat(prod.price_per_pack) || 0)
-  }
+
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)

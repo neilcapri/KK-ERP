@@ -220,7 +220,8 @@ async function addFreezePanes(buffer, freezeConfig) {
     if (!file) continue
     let xml = await file.async('string')
     const { xSplit, ySplit, topLeftCell } = freeze
-    const paneXml = '<pane xSplit="' + xSplit + '" ySplit="' + ySplit + '" topLeftCell="' + topLeftCell + '" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="' + topLeftCell + '" sqref="' + topLeftCell + '"/>'
+    const activePane = xSplit > 0 ? 'bottomRight' : 'bottomLeft'
+    const paneXml = (xSplit > 0 ? '<pane xSplit="' + xSplit + '" ySplit="' + ySplit + '" topLeftCell="' + topLeftCell + '" activePane="' + activePane + '" state="frozen"/>' : '<pane ySplit="' + ySplit + '" topLeftCell="' + topLeftCell + '" activePane="' + activePane + '" state="frozen"/>') + '<selection pane="' + activePane + '" activeCell="' + topLeftCell + '" sqref="' + topLeftCell + '"/>'
     if (/<sheetView([^>]*)\/>/.test(xml)) {
       xml = xml.replace(/<sheetView([^>]*)\/>/, '<sheetView$1>' + paneXml + '</sheetView>')
     } else if (/<sheetView([^>]*)>/.test(xml)) {

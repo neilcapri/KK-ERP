@@ -139,7 +139,7 @@ function applyStyles(ws, totalRows, numCols, dayRowIdxs, totalRowIdxs, storeRowI
         if (c === 0) ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 36, true, 'left')
         else if (notesColIdx !== undefined && c === notesColIdx) ws[addr].s = cellStyle('FBC02D', '3E2723', true, 10, true, 'center')
         else if (includePricing && c === numCols - 1) ws[addr].s = cellStyle(S.KK_PEACH, 'FFFFFF', true, 10, true, 'center')
-        else ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 28, true, 'center')
+        else ws[addr].s = cellStyle(S.KK_GREEN, S.KK_CREAM, true, 20, true, 'center')
         continue
       }
       if (r === 1 && headerRowIdx !== 1) {

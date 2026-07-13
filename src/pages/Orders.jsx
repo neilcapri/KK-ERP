@@ -386,7 +386,7 @@ function buildRetailSheet(wb, orders, includePricing, weekLabel) {
   for (let i = 0; i < RETAIL_COLS.length; i++) colWidths.push({ wch: perColWidths[i] || 13 })
   if (includePricing) colWidths.push({ wch: 14 })
   colWidths.push({ wch: 32 })
-  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 32 }, { hpt: 70 }, { hpt: 337 }]
+  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 32 }, { hpt: 70 }, { hpt: 80 }]
   for (let i = 3; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 61 }
   // Slightly smaller for the summary rows at bottom
   ws['!rows'][grandTotalIdx + 1] = { hpt: 40 }
@@ -448,7 +448,7 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   XLSX.utils.sheet_add_aoa(ws, rows, { origin: 'A1' }); ws['!merges'] = merges
   const colWidths = [{ wch: 52 }]; for (let i = 0; i < BULK_COLS.length; i++) colWidths.push({ wch: 16 }); if (includePricing) colWidths.push({ wch: 14 })
   colWidths.push({ wch: 32 })
-  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 120 }]
+  ws['!cols'] = colWidths; ws['!rows'] = [{ hpt: 24 }, { hpt: 52 }, { hpt: 80 }]
   for (let i = 2; i < rows.length; i++) { if (!ws['!rows'][i]) ws['!rows'][i] = {}; ws['!rows'][i].hpt = 50 }
   const BULK_CAT_COLORS = ['4472C4','375623','A0522D','558B2F','7030A0','E65100']
   const bulkCatColorByCol = {}

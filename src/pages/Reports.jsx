@@ -130,7 +130,14 @@ function LabourReport({ products }) {
           </div>
           {range === 'week' && <input type="date" value={weekOf} onChange={e => setWeekOf(e.target.value)} style={inp} />}
           {range === 'month' && <input type="month" value={monthOf} onChange={e => setMonthOf(e.target.value)} style={inp} />}
-          {range === 'custom' && <><input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} style={inp} /><span style={{ color: 'var(--ink3)', fontSize: 12 }}>to</span><input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} style={inp} /></>}
+          {range === 'custom' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--ink3)' }}>From</span>
+              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} style={inp} />
+              <span style={{ fontSize: 11, color: 'var(--ink3)' }}>To</span>
+              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} style={inp} />
+            </div>
+          )}
         </div>
       </div>
       {data.length > 0 && (

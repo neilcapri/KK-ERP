@@ -77,7 +77,7 @@ function LabourReport({ products }) {
       dayLabour[day].hours += parseFloat(t.hours_worked || 0)
       dayLabour[day].cost += parseFloat(t.hours_worked || 0) * parseFloat(t.employees?.hourly_rate || 0)
     })
-    const allDates = [...new Set([...Object.keys(dayProd), ...Object.keys(dayLabour)])].sort()
+    const allDates = [...new Set([...Object.keys(dayProd), ...Object.keys(dayLabour)])].sort((a,b) => b.localeCompare(a))
     setData(allDates.map(date => ({ date, prodValue: dayProd[date]?.value || 0, items: dayProd[date]?.items || [], labourHours: dayLabour[date]?.hours || 0, labourCost: dayLabour[date]?.cost || 0 })))
     setLoading(false)
   }

@@ -588,7 +588,14 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
     + '- Notations like "4PK", "5 PK", "350G", "90G" in the product name are PACK SIZE DESCRIPTIONS — ignore them for quantity\n'
     + '- If a product spans multiple lines (e.g. "KONKI KETO COOKIE ALMOND BUTTE\\n5 PK\\n4 $8.40"), the quantity is the number on the LAST line before the first dollar sign (4 in this example)\n'
     + '- A line that is only a number followed by a dollar total (e.g. "38 $308.68") is a GRAND TOTAL — skip it\n'
-    + '- BOTH CASES AND PACKS MENTIONED: If a customer specifies both cases and packs for the same item (e.g. "2 cases 12 packs" or "blueberry muffins 2 case 12 packs"), ALWAYS return the PACKS number and set quantity_type="packs". The packs figure is the authoritative quantity — ignore the cases figure entirely.\n\n'
+    + '- BOTH CASES AND PACKS MENTIONED: If a customer specifies both cases and packs for the same item (e.g. "2 cases 12 packs" or "blueberry muffins 2 case 12 packs"), ALWAYS return the PACKS number and set quantity_type="packs". The packs figure is the authoritative quantity — ignore the cases figure entirely.\n'
+    + '- COLUMN FORMAT ORDERS (e.g. Natures Emporium): Some orders are pasted as separate columns — Item codes, Descriptions, Purch Qty, Units (Case4/Case6/Case12/EA), Rates, Amounts. In this case:\n'
+    + '  * Match item codes (like BRWGN, MCC, KWAL) OR descriptions to our product list\n'
+    + '  * "Purch Qty" is the number of CASES ordered\n'
+    + '  * Case size is in the Units column: Case4=4 packs/case, Case6=6 packs/case, Case12=12 packs/case, EA=1\n'
+    + '  * Total packs = Purch Qty x case size (e.g. 3 cases x Case4 = 12 packs)\n'
+    + '  * Codes starting with BLK (BLKPVBR, BLKKCCCUP, BLKKVCUP etc) are BULK orders — set is_bulk=true\n'
+    + '  * EA unit means quantity = Purch Qty directly (no multiplication)\n\n'
     + 'OUR PRODUCT LIST:\n' + productList + '\n\n'
     + 'SEMANTIC MATCHING GUIDE:\n'
     + '- blueberry muffin / paleo muffin = PBB\n'
@@ -610,6 +617,23 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
     + '- keto almond butter cookie = KAB\n'
     + '- keto walnut cookie = KWAL\n'
     + '- snickerdoodle = KSCo\n'
+    + '- BRWGN / brownie ganache 90g = PVBRG\n'
+    + '- COBIS / choc orange biscotti = COBIS\n'
+    + '- HZLSPRD / hazelnut spread = WIPNotella\n'
+    + '- MCC / mini carrot cake = CMC\n'
+    + '- MLC / mini lemon cake = LMC\n'
+    + '- MRPC / mini raspberry pistachio = PRMC\n'
+    + '- VDTC / truffle cake for 2 = TMC\n'
+    + '- KLRCAK / klr cake = KLRCKE\n'
+    + '- PCrt / paleo carrot cake = PCrt\n'
+    + '- PPOSC / pistachio orange shortbread = POS\n'
+    + '- BLKPVBR / brownie ganache bulk = PVBRG (is_bulk=true)\n'
+    + '- BLKKCALM / keto choc almond cupcake = CKAC (is_bulk=true)\n'
+    + '- BLKKCCCUP / keto choc cupcake = KCC (is_bulk=true)\n'
+    + '- BLKKVCUP / keto vanilla cupcake = KVC (is_bulk=true)\n'
+    + '- BLKKLRCUP / klr cupcake = KLRCup (is_bulk=true)\n'
+    + '- BLKVPCAN / pecan bar = VPCANBu (is_bulk=true)\n'
+    + '- BLKVPB / pistachio bar = VPBBu (is_bulk=true)\n'
     + '- KSCO = KSCo (same product, always use KSCo)\n'
     + '- collagen cookie = KCCo (KCOC)\n'
     + '- banana bread / banana loaf = PVBB\n'
@@ -645,7 +669,7 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
   const messages = isImage
     ? [{ role: 'user', content: [isPDF ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: content } } : { type: 'image', source: { type: 'base64', media_type: fileType, data: content } }, { type: 'text', text: prompt }] }]
     : [{ role: 'user', content: 'This is a customer order:\n\n' + content + '\n\n' + prompt }]
-  const response = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: API_HEADERS, body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 1000, messages }) })
+  const response = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: API_HEADERS, body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2000, messages }) })
   const data = await response.json()
   if (!response.ok) throw new Error('API ' + response.status + ': ' + JSON.stringify(data))
   const text = data.content?.[0]?.text?.trim()

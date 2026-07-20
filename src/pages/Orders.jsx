@@ -85,7 +85,7 @@ const BULK_COLS = [
   { code: 'KABISBu', name: 'Keto Almond Biscotti' },
   // BARS
   { code: 'VPCANBu', name: 'Pecan Bars' }, { code: 'VPBBu', name: 'Pistachio Bars' },
-  { code: 'PNFBu', name: "No'tella Bars" }, { code: 'PVBRG', name: 'Brownie Ganache' },
+  { code: 'PNFBu', name: "No'tella Bars" }, { code: 'PVBRGBu', name: 'Brownie Ganache Bulk' },
   // MUFFINS
   { code: 'PBBBu', name: 'Protein Blueberry Muffins' }, { code: 'PCCBu', name: 'Protein Choco Muffins' },
   { code: 'KLRBu', name: 'Keto Lemon Rasp Muffins' },
@@ -571,7 +571,7 @@ function printDispatchSlip(ordersInput) {
 async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '', orderMode = 'cases') {
   const productList = products.map(p => p.code + ': ' + p.name).join('\n')
   const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
-  const neRule = isNaturesEmporium ? '\nSPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):\n- "brownie ganache 90g" or "brownie ganache pouch" = PVBRG (packaged, retail)\n- "brownie ganache" without 90g or pouch = PVBRG-BULK (bulk order)\n' : ''
+  const neRule = isNaturesEmporium ? '\nSPECIAL RULE FOR THIS CUSTOMER (Natures Emporium):\n- "brownie ganache 90g" or "brownie ganache pouch" = PVBRG (packaged, retail)\n- "brownie ganache" without 90g or pouch = PVBRGBu (bulk order, is_bulk=true)\n' : ''
   const orderModeInstruction = orderMode === 'packs'
     ? 'ORDER MODE: PACKS — every quantity in this order is in PACKS. Set quantity_type="packs" for ALL items.'
     : orderMode === 'bulk'
@@ -627,7 +627,7 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
     + '- KLRCAK / klr cake = KLRCKE\n'
     + '- PCrt / paleo carrot cake = PCrt\n'
     + '- PPOSC / pistachio orange shortbread = POS\n'
-    + '- BLKPVBR / brownie ganache bulk = PVBRG (is_bulk=true)\n'
+    + '- BLKPVBR / brownie ganache bulk = PVBRGBu (is_bulk=true)\n'
     + '- BLKKCALM / keto choc almond cupcake = CKAC (is_bulk=true)\n'
     + '- BLKKCCCUP / keto choc cupcake = KCC (is_bulk=true)\n'
     + '- BLKKVCUP / keto vanilla cupcake = KVC (is_bulk=true)\n'

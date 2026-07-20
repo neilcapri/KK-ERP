@@ -90,10 +90,8 @@ const BULK_COLS = [
   { code: 'PBBBu', name: 'Protein Blueberry Muffins' }, { code: 'PCCBu', name: 'Protein Choco Muffins' },
   { code: 'KLRBu', name: 'Keto Lemon Rasp Muffins' },
   // DONUTS
-  { code: 'KSCDBu', name: 'Sweet Cinnamon Donuts' }, { code: 'KHD', name: 'Keto Choc Hazelnut Donuts' },
-  { code: 'VPBD', name: 'Chocolate PB Donuts' },
+  { code: 'KSCDBu', name: 'Sweet Cinnamon Donuts' },
   // GO BANANAS
-  { code: 'PVBB', name: 'Banana Bread Whole — METAL PANS' },
   { code: 'PVBBSLF', name: 'Banana Bread Slices WITH FROSTING' },
   { code: 'PVBBSL', name: 'Banana Bread Slices — NO FROSTING' },
 ]
@@ -403,7 +401,7 @@ function buildBulkSheet(wb, orders, weekLabel, includePricing) {
   const rows = []; const titleRow = [title]; for (let i = 1; i < numCols; i++) titleRow.push(''); rows.push(titleRow)
   // bulkCatGroups defined inline above the headerRow
   // Category groups for bulk sheet
-  const bulkCatGroups = [[5,'CUPCAKES'],[5,'COOKIES'],[4,'BARS'],[3,'MUFFINS'],[3,'DONUTS'],[3,'GO BANANAS']]
+  const bulkCatGroups = [[5,'CUPCAKES'],[5,'COOKIES'],[4,'BARS'],[3,'MUFFINS'],[1,'DONUTS'],[2,'GO BANANAS']]
   const bulkCatRow = ['']
   for (const [count, label] of bulkCatGroups) { bulkCatRow.push(label); for (let i = 1; i < count; i++) bulkCatRow.push('') }
   if (includePricing) bulkCatRow.push(''); bulkCatRow.push(''); rows.push(bulkCatRow)

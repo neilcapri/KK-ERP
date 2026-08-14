@@ -3,16 +3,16 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
 const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:64,CMC:24,LMC:24,PRMC:24,TMC:24 }
-const CAKE_YIELD  = { TRFCS:8 }  // per 9-inch cake
-const CAKE_PRICES = { '6inch': 15, '9inch': 25 } // frosting cake prices per cake
+const CAKE_YIELD  = { TRFCS:8 }
 const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 
+// Must match Inventory.jsx PACK_SIZE exactly
 const PACK_SIZE = {
-  PBB:2, PCC:2, KLR:2,
-  VPCAN:3, PNF:3, VPB:3,
-  KAB:5, KWAL:5, HPCo:5, PVHC:5, KABIS:5, WSBIS:5, COBIS:5, PGCo:5, KSCo:5,
-  KSCD:4,
-  VPBD:2, KHD:2,
+  VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,
+  HPC:5,KABIS:5,WSBIS:5,COBIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,
+  KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,
+  TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,
+  KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1
 }
 
 function packsDisplay(code, units) {
@@ -36,7 +36,6 @@ function fmtDate(dateStr) {
   } catch { return dateStr }
 }
 
-// Use production_value for batch tracking if set, otherwise fall back to price_per_pack
 function productionValueFor(prod) {
   if (!prod) return 0
   return prod.production_value != null ? parseFloat(prod.production_value) : (parseFloat(prod.price_per_pack) || 0)
@@ -84,18 +83,15 @@ export default function Production() {
     if (inputType === 'logs' && LOG_YIELD[code]) return Math.round(q * LOG_YIELD[code])
     if (inputType === 'logs') return Math.round(q * 10)
     if (inputType === 'cakes' && CAKE_YIELD[code]) return Math.round(q * CAKE_YIELD[code])
-    if (inputType === '6inch' || inputType === '9inch') return Math.round(q) // 1 cake = 1 unit
+    if (inputType === '6inch' || inputType === '9inch') return Math.round(q)
     return Math.round(q)
   }
 
-  // Fetch all WIP product codes once for lookup
   async function getWIPCodes() {
     const { data } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
     return data || []
   }
 
-  // Recursively flatten a BOM into raw material requirements
-  // Returns { rm_name -> total_grams_needed }
   async function flattenToRM(productCode, multiplier, wipCodes, visited = new Set()) {
     if (visited.has(productCode)) return {}
     visited.add(productCode)
@@ -106,13 +102,10 @@ export default function Production() {
       if (!item.rm_name) continue
       const wipProduct = wipCodes.find(w => w.code.toLowerCase() === item.rm_name.toLowerCase())
       if (wipProduct) {
-        // WIP ingredient — recurse into its BOM
         let wipMultiplier = multiplier
         if (item.unit === 'ea') {
-          // fraction of a full batch
           wipMultiplier = multiplier * item.qty_per_unit
         } else {
-          // gms of WIP — need to know WIP batch yield to scale
           const { data: wipBom } = await supabase.from('bom').select('qty_per_unit,unit').eq('product_code', wipProduct.code)
           const wipYield = (wipBom || []).reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
           wipMultiplier = wipYield > 0 ? multiplier * (item.qty_per_unit / wipYield) : multiplier
@@ -122,7 +115,6 @@ export default function Production() {
           rmNeeds[name] = (rmNeeds[name] || 0) + qty
         }
       } else {
-        // Raw material
         const qtyGms = item.unit === 'ea' ? item.qty_per_unit * multiplier * 1000 : item.qty_per_unit * multiplier
         rmNeeds[item.rm_name] = (rmNeeds[item.rm_name] || 0) + qtyGms
       }
@@ -135,35 +127,20 @@ export default function Production() {
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (!bom?.length) return []
     const warns = []
-
-    // ── Level 1: WIP stock check ──────────────────────────────
     for (const item of bom) {
       if (!item.rm_name) continue
       const wipProduct = wipCodes.find(w => w.code.toLowerCase() === item.rm_name.toLowerCase())
       if (wipProduct || item.component_type === 'wip') {
         const wip = wipProduct || wipCodes.find(w => w.code === item.wip_code)
         if (!wip) continue
-        let needed = 0
-        if (item.unit === 'ea') {
-          needed = item.qty_per_unit * outputUnits
-        } else {
-          // gms of WIP needed
-          needed = item.qty_per_unit * outputUnits
-        }
+        const needed = item.qty_per_unit * outputUnits
         const have = wip.units || 0
         const unitLabel = item.unit === 'ea' ? ' ea' : 'g'
         if (have < needed) {
-          warns.push({
-            rm: (wip.name || item.rm_name) + ' [WIP]',
-            needed: needed.toFixed(item.unit === 'ea' ? 2 : 0) + unitLabel,
-            have: have.toFixed(item.unit === 'ea' ? 2 : 0) + unitLabel,
-            isWip: true
-          })
+          warns.push({ rm: (wip.name || item.rm_name) + ' [WIP]', needed: needed.toFixed(item.unit === 'ea' ? 2 : 0) + unitLabel, have: have.toFixed(item.unit === 'ea' ? 2 : 0) + unitLabel, isWip: true })
         }
       }
     }
-
-    // ── Level 2: Flatten to raw materials ─────────────────────
     const rmNeeds = await flattenToRM(code, outputUnits, wipCodes)
     const rmNames = Object.keys(rmNeeds)
     if (rmNames.length > 0) {
@@ -175,16 +152,10 @@ export default function Production() {
         if (!rm) continue
         const neededKg = neededGms / 1000
         if (rm.stock < neededKg) {
-          warns.push({
-            rm: rmName + ' [RM]',
-            needed: neededKg.toFixed(3) + 'kg',
-            have: (rm.stock || 0).toFixed(3) + 'kg',
-            isWip: false
-          })
+          warns.push({ rm: rmName + ' [RM]', needed: neededKg.toFixed(3) + 'kg', have: (rm.stock || 0).toFixed(3) + 'kg', isWip: false })
         }
       }
     }
-
     return warns
   }
 
@@ -280,31 +251,33 @@ export default function Production() {
     if (!code || !inputQty || !outputUnits) { alert('Please fill in all fields.'); return }
     const output = parseInt(outputUnits)
     addLog('Saving ' + code + ' +' + output + ' units...')
-    const { data: prod } = await supabase.from('products').select('units,name').eq('code', code).single()
-    const newUnits = (prod?.units || 0) + output
-    await supabase.from('products').update({ units: newUnits }).eq('code', code)
-    addLog('✓ FG stock updated: ' + prod?.units + ' → ' + newUnits, 'ok')
+
+    // ── KEY FIX: update freezer_units, recalculate total units ──
+    const { data: prod } = await supabase.from('products')
+      .select('units,name,freezer_units,packed_units').eq('code', code).single()
+    const ps = PACK_SIZE[code] || 1
+    const currentFreezer = prod?.freezer_units ?? prod?.units ?? 0
+    const currentPacked = prod?.packed_units ?? 0
+    const newFreezer = currentFreezer + output
+    const newTotal = newFreezer + (currentPacked * ps)
+    await supabase.from('products').update({ freezer_units: newFreezer, units: newTotal }).eq('code', code)
+    addLog('✓ Freezer stock updated: ' + currentFreezer + ' → ' + newFreezer + ' units frozen (' + newTotal + ' total)', 'ok')
+
+    // ── Deduct BOM ingredients ──
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (bom?.length) {
-      // Fetch all WIP product codes for lookup
       const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
       const wipMap = {}
       ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
       let rmCount = 0, wipCount = 0
       for (const item of bom) {
         if (!item.rm_name) continue
-        // Detect WIP by component_type OR by rm_name matching a WIP product code
         const wipProduct = wipMap[item.rm_name.toLowerCase()]
         const wipCode = item.component_type === 'wip' ? item.wip_code : (wipProduct ? wipProduct.code : null)
         if (wipCode) {
           const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
           if (wip) {
-            let deductQty = 0
-            if (item.unit === 'ea') {
-              deductQty = item.qty_per_unit * output
-            } else {
-              deductQty = item.qty_per_unit * output // gms of WIP used
-            }
+            const deductQty = item.qty_per_unit * output
             await supabase.from('products').update({ units: Math.max(0, (wip.units || 0) - deductQty) }).eq('code', wipCode)
             wipCount++
           }
@@ -316,8 +289,17 @@ export default function Production() {
       }
       addLog('✓ ' + rmCount + ' RMs' + (wipCount ? ' + ' + wipCount + ' WIP components' : '') + ' deducted via BOM', 'ok')
     }
-    await supabase.from('productions').insert({ date, product_code: code, product_name: prod?.name || code, input_qty: parseFloat(inputQty), input_type: inputType, output_units: output, notes, created_by_name: profile?.name })
-    await supabase.from('activity').insert({ type: 'production', title: code + ': +' + output + ' units', description: inputQty + ' ' + inputType + ' · ' + (prod?.name), created_by_name: profile?.name })
+
+    await supabase.from('productions').insert({
+      date, product_code: code, product_name: prod?.name || code,
+      input_qty: parseFloat(inputQty), input_type: inputType,
+      output_units: output, notes, created_by_name: profile?.name
+    })
+    await supabase.from('activity').insert({
+      type: 'production', title: code + ': +' + output + ' units frozen',
+      description: inputQty + ' ' + inputType + ' · ' + (prod?.name),
+      created_by_name: profile?.name
+    })
     addLog('✓ Production saved successfully!', 'ok')
     setForm({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
     setRmWarnings([])
@@ -328,8 +310,17 @@ export default function Production() {
     if (!window.confirm('Delete production entry for ' + h.product_code + ' (+' + h.output_units + ' units) on ' + h.date + '?\n\nThis will reverse the stock change.')) return
     setDeletingId(h.id)
     try {
-      const { data: prod } = await supabase.from('products').select('units').eq('code', h.product_code).single()
-      if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - h.output_units) }).eq('code', h.product_code)
+      // ── KEY FIX: reverse freezer_units, recalculate total ──
+      const { data: prod } = await supabase.from('products')
+        .select('units,freezer_units,packed_units').eq('code', h.product_code).single()
+      if (prod) {
+        const ps = PACK_SIZE[h.product_code] || 1
+        const newFreezer = Math.max(0, (prod.freezer_units ?? prod.units ?? 0) - h.output_units)
+        const packedUnits = prod.packed_units ?? 0
+        const newTotal = newFreezer + (packedUnits * ps)
+        await supabase.from('products').update({ freezer_units: newFreezer, units: newTotal }).eq('code', h.product_code)
+      }
+
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', h.product_code)
       if (bom?.length) {
         const { data: wipProds } = await supabase.from('products').select('code,units').eq('category', 'WIP')
@@ -353,7 +344,11 @@ export default function Production() {
         }
       }
       await supabase.from('productions').delete().eq('id', h.id)
-      await supabase.from('activity').insert({ type: 'production', title: 'Production Deleted: ' + h.product_code, description: h.output_units + ' units reversed · ' + h.date, created_by_name: profile?.name || 'admin' })
+      await supabase.from('activity').insert({
+        type: 'production', title: 'Production Deleted: ' + h.product_code,
+        description: h.output_units + ' units reversed · ' + h.date,
+        created_by_name: profile?.name || 'admin'
+      })
       loadData()
     } catch(err) { alert('Delete failed: ' + err.message) }
     setDeletingId(null)
@@ -364,7 +359,11 @@ export default function Production() {
     if (!scheduled_date || !product_code) { alert('Please fill in date and product.'); return }
     const { data: p } = await supabase.from('products').select('name').eq('code', product_code).single()
     const planned_output = calcOutput(product_code, input_type, planned_input)
-    const { error } = await supabase.from('production_schedule').insert({ scheduled_date, product_code, product_name: p?.name || product_code, planned_input: parseFloat(planned_input) || 0, input_type, planned_output, notes, status: 'planned', created_by_name: profile?.name }).select()
+    const { error } = await supabase.from('production_schedule').insert({
+      scheduled_date, product_code, product_name: p?.name || product_code,
+      planned_input: parseFloat(planned_input) || 0, input_type, planned_output,
+      notes, status: 'planned', created_by_name: profile?.name
+    }).select()
     if (error) { alert('Schedule save error: ' + error.message); return }
     setShowScheduleModal(false)
     setSchedForm({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
@@ -399,13 +398,12 @@ export default function Production() {
       const rows = byDate[date] || []
       const label = new Date(date + 'T12:00:00').toLocaleDateString('en-CA', { weekday:'long', month:'long', day:'numeric' }).toUpperCase()
       body += label + '%0A'
-      rows.forEach(s => { body += '  ' + s.product_code + ' - ' + s.product_name + ': ' + s.planned_input + ' ' + s.input_type + ' → ' + (s.planned_output || 0) + ' units (' + s.status + ')%0A' })
+      rows.forEach(s => { body += '  ' + s.product_code + ' - ' + s.product_name + ': ' + s.planned_input + ' ' + s.input_type + ' -> ' + (s.planned_output || 0) + ' units (' + s.status + ')%0A' })
       body += '%0A'
     })
     window.location.href = 'mailto:?subject=KK Production Schedule&body=' + body
   }
 
-  // Group history by date
   const historyByDate = {}
   history.forEach(h => {
     const d = h.date || h.created_at?.split('T')[0] || 'Unknown'
@@ -446,6 +444,9 @@ export default function Production() {
           <div className="grid2">
             <div className="card">
               <div className="card-title">Log Production Batch</div>
+              <div style={{ background: 'var(--blue-l)', padding: '8px 12px', borderRadius: 6, marginBottom: 14, fontSize: 11, color: 'var(--blue)' }}>
+                📦 Production goes to <strong>freezer stock</strong>. Use Packing tab in Inventory to move to packed.
+              </div>
               <div className="field"><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} /></div>
               <div className="field">
                 <label>Product</label>
@@ -474,7 +475,7 @@ export default function Production() {
               </div>
               {form.outputUnits && (
                 <div style={{ background: 'var(--green-l)', padding: 12, borderRadius: 3, marginBottom: 14, fontSize: 12, color: 'var(--green)' }}>
-                  <strong>Output: {packsDisplay(form.code, parseInt(form.outputUnits))}</strong>
+                  <strong>Output: {packsDisplay(form.code, parseInt(form.outputUnits))} → freezer</strong>
                 </div>
               )}
               {rmWarnings.length > 0 && (
@@ -484,7 +485,7 @@ export default function Production() {
                 </div>
               )}
               <div className="field"><label>Notes</label><textarea value={form.notes} onChange={e => setForm(f=>({...f,notes:e.target.value}))} placeholder="Batch notes..." rows={2} /></div>
-              <button className="btn btn-green btn-full" onClick={saveProduction}>✓ Save & Update Stock</button>
+              <button className="btn btn-green btn-full" onClick={saveProduction}>✓ Save & Update Freezer Stock</button>
               {log.length > 0 && (
                 <div className="log" style={{ marginTop: 12 }}>
                   {log.map((l,i) => <div key={i} className={l.type}>{l.time} — {l.msg}</div>)}
@@ -564,7 +565,6 @@ export default function Production() {
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowScheduleModal(true)}>+ Add</button>
               </div>
             </div>
-
             {schedule.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 32, color: 'var(--ink3)' }}>No scheduled production. Click "+ Schedule" to add.</div>
             ) : (() => {
@@ -626,7 +626,7 @@ export default function Production() {
                         <div style={{ fontSize: 9, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)', textTransform: 'uppercase' }}>Units</div>
                         <div style={{ fontFamily: 'var(--display)', fontSize: 16, color: 'var(--kk-cream)', letterSpacing: 1 }}>{dayUnits.toLocaleString()}</div>
                       </div>
-                      {dayValue > 0 && (
+                      {isAdmin && dayValue > 0 && (
                         <div style={{ textAlign: 'right' }}>
                           <div style={{ fontSize: 9, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)', textTransform: 'uppercase' }}>Retail Value</div>
                           <div style={{ fontFamily: 'var(--display)', fontSize: 16, color: 'var(--kk-peach)', letterSpacing: 1 }}>${dayValue.toFixed(0)}</div>
@@ -638,7 +638,7 @@ export default function Production() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr>
-                          {['Product','Input','Output','Value','By','Notes',''].map((h,i) => (
+                          {['Product','Input','Output (Frozen)','Value','By','Notes',''].map((h,i) => (
                             <th key={i} style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                           ))}
                         </tr>
@@ -653,7 +653,7 @@ export default function Production() {
                             <tr key={h.id} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '10px 14px' }}><span className="code-tag">{h.product_code}</span></td>
                               <td style={{ padding: '10px 14px', color: 'var(--ink3)' }}>{h.input_qty} {h.input_type}</td>
-                              <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--green)' }}>+{h.output_units}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--green)' }}>+{h.output_units} units</td>
                               <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--kk-brown)' }}>
                                 {isAdmin && (batchVal > 0 ? '$' + batchVal.toFixed(0) : <span style={{ color: 'var(--ink3)' }}>—</span>)}
                               </td>
@@ -701,8 +701,8 @@ export default function Production() {
                   <option value="loaves">Loaves</option>
                   <option value="logs">Logs (Biscotti)</option>
                   <option value="cakes">Cakes (9 inch)</option>
-                  <option value="6inch">6 inch Frosting Cake ($15 each)</option>
-                  <option value="9inch">9 inch Frosting Cake ($25 each)</option>
+                  <option value="6inch">6 inch Frosting Cake</option>
+                  <option value="9inch">9 inch Frosting Cake</option>
                 </select>
               </div>
               <div className="field" style={{margin:0}}><label>Planned Qty</label>
@@ -757,8 +757,8 @@ export default function Production() {
                   <option value="loaves">Loaves</option>
                   <option value="logs">Logs (Biscotti)</option>
                   <option value="cakes">Cakes (9 inch)</option>
-                  <option value="6inch">6 inch Frosting Cake ($15 each)</option>
-                  <option value="9inch">9 inch Frosting Cake ($25 each)</option>
+                  <option value="6inch">6 inch Frosting Cake</option>
+                  <option value="9inch">9 inch Frosting Cake</option>
                 </select>
               </div>
               <div className="field" style={{margin:0}}><label>Planned Qty</label>
@@ -820,7 +820,6 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
   const [rmStatus, setRMStatus] = useState(null)
   const [batchValue, setBatchValue] = useState(null)
 
-
   useEffect(() => {
     async function check() {
       const out = s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)
@@ -828,12 +827,10 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
       if (p) { const pv = p.production_value != null ? parseFloat(p.production_value) : (parseFloat(p.price_per_pack) || 0); setBatchValue(sellableQty(s.product_code, out) * pv) } else setBatchValue(0)
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', s.product_code)
       if (!bom?.length) { setRMStatus([]); return }
-      // Fetch WIP products to detect new-style WIP ingredients (rm_name = WIP product code)
       const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
       const wipMap = {}
       ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
       const warns = []
-      // Level 1: WIP stock check
       for (const item of bom) {
         if (!item.rm_name) continue
         const wipProduct = wipMap[item.rm_name.toLowerCase()]
@@ -841,12 +838,11 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
         if (wipCode) {
           const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
           if (wip) {
-            const needed = item.unit === 'ea' ? item.qty_per_unit * out : item.qty_per_unit * out
+            const needed = item.qty_per_unit * out
             if ((wip.units || 0) < needed) warns.push({ rm: (wip.name || wipCode) + ' [WIP]', needed: needed.toFixed(item.unit === 'ea' ? 2 : 0) + (item.unit === 'ea' ? ' ea' : 'g'), have: (wip.units || 0).toFixed(item.unit === 'ea' ? 2 : 0) + (item.unit === 'ea' ? ' ea' : 'g'), isWip: true })
           }
         }
       }
-      // Level 2: Raw material stock check (direct ingredients only, no flatten)
       const rmItems = bom.filter(b => b.rm_name && !wipMap[b.rm_name.toLowerCase()] && b.component_type !== 'wip')
       if (rmItems.length) {
         const { data: stocks } = await supabase.from('raw_materials').select('name,stock').in('name', rmItems.map(b => b.rm_name).filter(Boolean))
@@ -862,20 +858,21 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
     }
     check()
   }, [s.id])
+
   return (
     <tr>
       <td><span className="code-tag">{s.product_code}</span> <span style={{fontSize:11,color:'var(--ink2)'}}>{s.product_name}</span></td>
       <td style={{fontSize:12}}>{s.planned_input} {s.input_type}</td>
       <td style={{fontWeight:500,color:'var(--green)'}}>{packsDisplay(s.product_code, s.planned_output)}</td>
-      <td style={{fontWeight:600,color:'var(--kk-brown)'}}>
-        {isAdmin ? (batchValue === null ? '...' : batchValue > 0 ? '$' + batchValue.toFixed(2) : <span style={{color:'var(--ink3)'}}>—</span>) : '—'}
-      </td>
+      {isAdmin && <td style={{fontWeight:600,color:'var(--kk-brown)'}}>
+        {batchValue === null ? '...' : batchValue > 0 ? '$' + batchValue.toFixed(2) : <span style={{color:'var(--ink3)'}}>—</span>}
+      </td>}
       <td>
         {rmStatus === null ? <span style={{fontSize:11,color:'var(--ink3)'}}>...</span>
           : rmStatus.length === 0 ? <span style={{fontSize:11,color:'var(--green)'}}>✅ All OK</span>
           : rmStatus.map((w,i) => (
             <div key={i} style={{fontSize:10,color:'var(--red)',lineHeight:1.6}}>
-              ⚠️ {w.rm.split(' ').slice(0,2).join(' ')}: need {w.needed}kg, {parseFloat(w.remaining) < 0 ? 'none left' : w.remaining + 'kg left'} (short {w.shortBy}kg)
+              ⚠️ {w.rm}: need {w.needed}, have {w.have}
             </div>
           ))
         }

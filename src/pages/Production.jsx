@@ -6,7 +6,6 @@ const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,N
 const CAKE_YIELD  = { TRFCS:8 }
 const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 
-// Must match Inventory.jsx PACK_SIZE exactly
 const PACK_SIZE = {
   VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,
   HPC:5,KABIS:5,WSBIS:5,COBIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,
@@ -14,6 +13,8 @@ const PACK_SIZE = {
   TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,
   KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1
 }
+
+const REJECTION_REASONS = ['Burnt', 'Undercooked', 'Damaged', 'Packaging Defect', 'Failed QC', 'Other']
 
 function packsDisplay(code, units) {
   const ps = PACK_SIZE[code]
@@ -26,14 +27,6 @@ function sellableQty(code, units) {
   const ps = PACK_SIZE[code]
   if (!ps || !units) return units
   return Math.round(units / ps)
-}
-
-function fmtDate(dateStr) {
-  if (!dateStr) return '—'
-  try {
-    const d = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T00:00:00')
-    return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
-  } catch { return dateStr }
 }
 
 function productionValueFor(prod) {
@@ -58,7 +51,11 @@ export default function Production() {
   const [deletingId, setDeletingId] = useState(null)
   const [selectedSchedDates, setSelectedSchedDates] = useState(new Set())
 
-  const [form, setForm] = useState({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
+  const [form, setForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    code: '', inputType: 'units', inputQty: '', outputUnits: '',
+    rejectedUnits: '', rejectionReason: '', notes: ''
+  })
   const [schedForm, setSchedForm] = useState({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
   const [editForm, setEditForm] = useState({ scheduled_date: '', product_code: '', planned_input: '', input_type: 'trays', notes: '' })
 
@@ -247,23 +244,31 @@ export default function Production() {
   }
 
   async function saveProduction() {
-    const { code, date, inputType, inputQty, outputUnits, notes } = form
+    const { code, date, inputType, inputQty, outputUnits, rejectedUnits, rejectionReason, notes } = form
     if (!code || !inputQty || !outputUnits) { alert('Please fill in all fields.'); return }
-    const output = parseInt(outputUnits)
-    addLog('Saving ' + code + ' +' + output + ' units...')
+    const totalOutput = parseInt(outputUnits)
+    const rejected = parseInt(rejectedUnits) || 0
+    const goodUnits = totalOutput - rejected
 
-    // ── KEY FIX: update freezer_units, recalculate total units ──
+    if (rejected > totalOutput) { alert('Rejected units cannot exceed total output.'); return }
+    if (rejected > 0 && !rejectionReason) { alert('Please select a rejection reason.'); return }
+
+    addLog('Saving ' + code + ': ' + totalOutput + ' total, ' + rejected + ' rejected, ' + goodUnits + ' good...')
+
+    // ── RM deducted for TOTAL output (you used those ingredients) ──
     const { data: prod } = await supabase.from('products')
       .select('units,name,freezer_units,packed_units').eq('code', code).single()
     const ps = PACK_SIZE[code] || 1
     const currentFreezer = prod?.freezer_units ?? prod?.units ?? 0
     const currentPacked = prod?.packed_units ?? 0
-    const newFreezer = currentFreezer + output
+
+    // ── Freezer gets GOOD units only ──
+    const newFreezer = currentFreezer + goodUnits
     const newTotal = newFreezer + (currentPacked * ps)
     await supabase.from('products').update({ freezer_units: newFreezer, units: newTotal }).eq('code', code)
-    addLog('✓ Freezer stock updated: ' + currentFreezer + ' → ' + newFreezer + ' units frozen (' + newTotal + ' total)', 'ok')
+    addLog('✓ Freezer updated: +' + goodUnits + ' good units' + (rejected > 0 ? ' (' + rejected + ' rejected)' : '') + ' → ' + newFreezer + ' frozen', 'ok')
 
-    // ── Deduct BOM ingredients ──
+    // ── Deduct BOM for TOTAL output ──
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (bom?.length) {
       const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
@@ -277,31 +282,35 @@ export default function Production() {
         if (wipCode) {
           const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
           if (wip) {
-            const deductQty = item.qty_per_unit * output
+            const deductQty = item.qty_per_unit * totalOutput
             await supabase.from('products').update({ units: Math.max(0, (wip.units || 0) - deductQty) }).eq('code', wipCode)
             wipCount++
           }
         } else {
-          const deductKg = (item.qty_per_unit * output) / 1000
+          const deductKg = (item.qty_per_unit * totalOutput) / 1000
           const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
           if (rm) { await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductKg) }).eq('name', item.rm_name); rmCount++ }
         }
       }
-      addLog('✓ ' + rmCount + ' RMs' + (wipCount ? ' + ' + wipCount + ' WIP components' : '') + ' deducted via BOM', 'ok')
+      addLog('✓ ' + rmCount + ' RMs' + (wipCount ? ' + ' + wipCount + ' WIP' : '') + ' deducted for ' + totalOutput + ' units (full batch)', 'ok')
     }
 
     await supabase.from('productions').insert({
       date, product_code: code, product_name: prod?.name || code,
       input_qty: parseFloat(inputQty), input_type: inputType,
-      output_units: output, notes, created_by_name: profile?.name
+      output_units: goodUnits,
+      rejected_units: rejected || 0,
+      rejection_reason: rejected > 0 ? rejectionReason : null,
+      notes, created_by_name: profile?.name
     })
     await supabase.from('activity').insert({
-      type: 'production', title: code + ': +' + output + ' units frozen',
-      description: inputQty + ' ' + inputType + ' · ' + (prod?.name),
+      type: 'production',
+      title: code + ': +' + goodUnits + ' units frozen' + (rejected > 0 ? ' (' + rejected + ' rejected)' : ''),
+      description: inputQty + ' ' + inputType + ' · ' + (prod?.name) + (rejected > 0 ? ' · ' + rejectionReason : ''),
       created_by_name: profile?.name
     })
-    addLog('✓ Production saved successfully!', 'ok')
-    setForm({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', notes: '' })
+    addLog('✓ Production saved!', 'ok')
+    setForm({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', rejectedUnits: '', rejectionReason: '', notes: '' })
     setRmWarnings([])
     loadData()
   }
@@ -310,17 +319,17 @@ export default function Production() {
     if (!window.confirm('Delete production entry for ' + h.product_code + ' (+' + h.output_units + ' units) on ' + h.date + '?\n\nThis will reverse the stock change.')) return
     setDeletingId(h.id)
     try {
-      // ── KEY FIX: reverse freezer_units, recalculate total ──
       const { data: prod } = await supabase.from('products')
         .select('units,freezer_units,packed_units').eq('code', h.product_code).single()
       if (prod) {
         const ps = PACK_SIZE[h.product_code] || 1
+        // Reverse good units only (output_units already excludes rejected)
         const newFreezer = Math.max(0, (prod.freezer_units ?? prod.units ?? 0) - h.output_units)
         const packedUnits = prod.packed_units ?? 0
         const newTotal = newFreezer + (packedUnits * ps)
         await supabase.from('products').update({ freezer_units: newFreezer, units: newTotal }).eq('code', h.product_code)
       }
-
+      const totalForRM = (h.output_units || 0) + (h.rejected_units || 0)
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', h.product_code)
       if (bom?.length) {
         const { data: wipProds } = await supabase.from('products').select('code,units').eq('category', 'WIP')
@@ -333,11 +342,11 @@ export default function Production() {
           if (wipCode) {
             const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
             if (wip) {
-              const restoreQty = item.qty_per_unit * h.output_units
+              const restoreQty = item.qty_per_unit * totalForRM
               await supabase.from('products').update({ units: (wip.units || 0) + restoreQty }).eq('code', wipCode)
             }
           } else {
-            const restoreKg = (item.qty_per_unit * h.output_units) / 1000
+            const restoreKg = (item.qty_per_unit * totalForRM) / 1000
             const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
             if (rm) await supabase.from('raw_materials').update({ stock: rm.stock + restoreKg }).eq('name', item.rm_name)
           }
@@ -377,7 +386,7 @@ export default function Production() {
   }
 
   function startFromSchedule(s) {
-    setForm({ date: new Date().toISOString().split('T')[0], code: s.product_code, inputType: s.input_type || 'trays', inputQty: String(s.planned_input), outputUnits: String(s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)), notes: s.notes || '' })
+    setForm({ date: new Date().toISOString().split('T')[0], code: s.product_code, inputType: s.input_type || 'trays', inputQty: String(s.planned_input), outputUnits: String(s.planned_output || calcOutput(s.product_code, s.input_type, s.planned_input)), rejectedUnits: '', rejectionReason: '', notes: s.notes || '' })
     setView('log')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -415,6 +424,10 @@ export default function Production() {
   const selectStyle = { width: '100%', padding: '12px 14px', fontSize: '14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--ink)', fontFamily: 'var(--mono)', cursor: 'pointer', height: '48px' }
   const btnToggle = (active) => ({ padding: '4px 10px', borderRadius: 20, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 11, fontFamily: 'var(--display)', background: active ? 'var(--kk-green)' : 'var(--surface)', color: active ? 'var(--kk-cream)' : 'var(--ink3)', fontWeight: active ? 600 : 400 })
 
+  const rejected = parseInt(form.rejectedUnits) || 0
+  const totalOut = parseInt(form.outputUnits) || 0
+  const goodUnits = totalOut - rejected
+
   return (
     <>
       <div className="page-header">
@@ -445,7 +458,7 @@ export default function Production() {
             <div className="card">
               <div className="card-title">Log Production Batch</div>
               <div style={{ background: 'var(--blue-l)', padding: '8px 12px', borderRadius: 6, marginBottom: 14, fontSize: 11, color: 'var(--blue)' }}>
-                📦 Production goes to <strong>freezer stock</strong>. Use Packing tab in Inventory to move to packed.
+                📦 Production goes to <strong>freezer stock</strong>. RMs deducted for full batch. Only good units added to freezer.
               </div>
               <div className="field"><label>Date</label><input type="date" value={form.date} onChange={e => setForm(f=>({...f,date:e.target.value}))} /></div>
               <div className="field">
@@ -473,11 +486,46 @@ export default function Production() {
                   <input type="number" value={form.inputQty} onChange={e => handleQtyChange(e.target.value)} placeholder="0" />
                 </div>
               </div>
+
+              {/* Output preview */}
               {form.outputUnits && (
-                <div style={{ background: 'var(--green-l)', padding: 12, borderRadius: 3, marginBottom: 14, fontSize: 12, color: 'var(--green)' }}>
-                  <strong>Output: {packsDisplay(form.code, parseInt(form.outputUnits))} → freezer</strong>
+                <div style={{ background: 'var(--green-l)', padding: 12, borderRadius: 3, marginBottom: 10, fontSize: 12, color: 'var(--green)' }}>
+                  <strong>Total output: {packsDisplay(form.code, totalOut)}</strong>
                 </div>
               )}
+
+              {/* Rejection section */}
+              {form.outputUnits && (
+                <div style={{ background: 'var(--surface2)', padding: 12, borderRadius: 6, marginBottom: 14, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>Rejected / Damaged (optional)</div>
+                  <div className="field-row" style={{ marginBottom: 0 }}>
+                    <div className="field" style={{margin:0}}>
+                      <label>Rejected Units</label>
+                      <input type="number" min="0" max={totalOut} value={form.rejectedUnits}
+                        onChange={e => setForm(f=>({...f, rejectedUnits: e.target.value}))}
+                        placeholder="0" style={{ borderColor: rejected > 0 ? 'var(--red)' : '' }} />
+                    </div>
+                    <div className="field" style={{margin:0}}>
+                      <label>Reason</label>
+                      <select style={selectStyle} value={form.rejectionReason}
+                        onChange={e => setForm(f=>({...f, rejectionReason: e.target.value}))}>
+                        <option value="">Select reason...</option>
+                        {REJECTION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {rejected > 0 && rejected <= totalOut && (
+                    <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 12 }}>
+                      <div style={{ color: 'var(--red)' }}>🗑 {rejected} units rejected</div>
+                      <div style={{ color: 'var(--green)', fontWeight: 600 }}>✓ {goodUnits} units → freezer</div>
+                    </div>
+                  )}
+                  {rejected > totalOut && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--red)' }}>⚠️ Rejected cannot exceed total output</div>
+                  )}
+                </div>
+              )}
+
               {rmWarnings.length > 0 && (
                 <div className="alert alert-red" style={{ flexDirection: 'column', gap: 4 }}>
                   <strong>⚠️ Insufficient RM stock:</strong>
@@ -615,6 +663,7 @@ export default function Production() {
                 return sum + (packs * ppp)
               }, 0)
               const dayUnits = entries.reduce((sum, h) => sum + (h.output_units || 0), 0)
+              const dayRejected = entries.reduce((sum, h) => sum + (h.rejected_units || 0), 0)
               return (
                 <div key={date} style={{ marginBottom: 24 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: 'var(--kk-green)', borderRadius: '6px 6px 0 0' }}>
@@ -623,9 +672,15 @@ export default function Production() {
                     </div>
                     <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: 9, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)', textTransform: 'uppercase' }}>Units</div>
+                        <div style={{ fontSize: 9, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)', textTransform: 'uppercase' }}>Good Units</div>
                         <div style={{ fontFamily: 'var(--display)', fontSize: 16, color: 'var(--kk-cream)', letterSpacing: 1 }}>{dayUnits.toLocaleString()}</div>
                       </div>
+                      {dayRejected > 0 && (
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 9, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)', textTransform: 'uppercase' }}>Rejected</div>
+                          <div style={{ fontFamily: 'var(--display)', fontSize: 16, color: '#E79B81', letterSpacing: 1 }}>{dayRejected}</div>
+                        </div>
+                      )}
                       {isAdmin && dayValue > 0 && (
                         <div style={{ textAlign: 'right' }}>
                           <div style={{ fontSize: 9, letterSpacing: 1, color: 'rgba(227,221,209,.5)', fontFamily: 'var(--display)', textTransform: 'uppercase' }}>Retail Value</div>
@@ -638,7 +693,7 @@ export default function Production() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr>
-                          {['Product','Input','Output (Frozen)','Value','By','Notes',''].map((h,i) => (
+                          {['Product','Input','Good Units','Rejected','Value','By','Notes',''].map((h,i) => (
                             <th key={i} style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>{h}</th>
                           ))}
                         </tr>
@@ -653,7 +708,15 @@ export default function Production() {
                             <tr key={h.id} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '10px 14px' }}><span className="code-tag">{h.product_code}</span></td>
                               <td style={{ padding: '10px 14px', color: 'var(--ink3)' }}>{h.input_qty} {h.input_type}</td>
-                              <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--green)' }}>+{h.output_units} units</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--green)' }}>+{h.output_units}</td>
+                              <td style={{ padding: '10px 14px' }}>
+                                {h.rejected_units > 0 ? (
+                                  <div>
+                                    <span style={{ fontWeight: 600, color: 'var(--red)' }}>{h.rejected_units}</span>
+                                    {h.rejection_reason && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{h.rejection_reason}</div>}
+                                  </div>
+                                ) : <span style={{ color: 'var(--ink3)' }}>—</span>}
+                              </td>
                               <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--kk-brown)' }}>
                                 {isAdmin && (batchVal > 0 ? '$' + batchVal.toFixed(0) : <span style={{ color: 'var(--ink3)' }}>—</span>)}
                               </td>

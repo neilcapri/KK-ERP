@@ -14,6 +14,7 @@ const navItems = [
   { to: '/orders', icon: '🛒', label: 'Orders', roles: ['admin','kitchen'] },
   { to: '/expenses', icon: '💰', label: 'Expenses', roles: ['admin'] },
   { to: '/costing', icon: '🧮', label: 'Product Costing', roles: ['admin'] },
+  { to: '/storemap', icon: '🗺️', label: 'Store Map', roles: ['admin','kitchen'] },
 ]
 
 export default function Layout() {
@@ -40,7 +41,7 @@ export default function Layout() {
               key={item.to}
               to={item.to}
               end={item.to === '/'}
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+              className={({ isActive }) => 'nav-item ' + (isActive ? 'active' : '')}
             >
               <span className="nav-icon">{item.icon}</span>
               {item.label}
@@ -68,7 +69,7 @@ export default function Layout() {
             key={item.to}
             to={item.to}
             end={item.to === '/'}
-            className={({ isActive }) => `bnav-item ${isActive ? 'active' : ''}`}
+            className={({ isActive }) => 'bnav-item ' + (isActive ? 'active' : '')}
           >
             <span className="bi">{item.icon}</span>
             {item.label}

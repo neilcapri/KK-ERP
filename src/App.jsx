@@ -12,6 +12,7 @@ import TimeTracking from './pages/TimeTracking'
 import Orders from './pages/Orders'
 import Expenses from './pages/Expenses'
 import Costing from './pages/Costing'
+import StoreMap from './pages/StoreMap'
 
 function ProtectedRoute({ children, roles }) {
   const { user, profile, loading } = useAuth()
@@ -38,6 +39,7 @@ function AppRoutes() {
         <Route path="orders" element={<ProtectedRoute roles={['admin','kitchen']}><Orders /></ProtectedRoute>} />
         <Route path="expenses" element={<ProtectedRoute roles={['admin']}><Expenses /></ProtectedRoute>} />
         <Route path="costing" element={<ProtectedRoute roles={['admin']}><Costing /></ProtectedRoute>} />
+        <Route path="storemap" element={<ProtectedRoute roles={['admin','kitchen']}><StoreMap /></ProtectedRoute>} />
       </Route>
     </Routes>
   )

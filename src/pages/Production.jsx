@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:64,CMC:24,LMC:24,PRMC:24,TMC:24 }
+const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24 }
 const CAKE_YIELD  = { TRFCS:8 }
 const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 
@@ -50,6 +50,10 @@ export default function Production() {
   const [log, setLog] = useState([])
   const [deletingId, setDeletingId] = useState(null)
   const [selectedSchedDates, setSelectedSchedDates] = useState(new Set())
+  const [rmList, setRmList] = useState([])
+  const [rmUsageForm, setRmUsageForm] = useState({ date: new Date().toISOString().split('T')[0], rm_name: '', quantity: '', unit: 'kg', notes: '' })
+  const [rmUsageLog, setRmUsageLog] = useState([])
+  const [savingRM, setSavingRM] = useState(false)
 
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -63,14 +67,16 @@ export default function Production() {
 
   async function loadData() {
     setLoading(true)
-    const [p, s, h] = await Promise.all([
+    const [p, s, h, rm] = await Promise.all([
       supabase.from('products').select('code,name,category,price_per_pack,production_value').order('code'),
       supabase.from('production_schedule').select('*').order('scheduled_date').limit(50),
       supabase.from('productions').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(100),
+      supabase.from('raw_materials').select('name,stock,unit').order('name'),
     ])
     setProducts(p.data || [])
     setSchedule(s.data || [])
     setHistory(h.data || [])
+    setRmList(rm.data || [])
     setLoading(false)
   }
 
@@ -363,6 +369,33 @@ export default function Production() {
     setDeletingId(null)
   }
 
+  async function saveRMUsage() {
+    const { date, rm_name, quantity, unit, notes } = rmUsageForm
+    if (!rm_name || !quantity) { alert('Please select a raw material and enter quantity.'); return }
+    const qty = parseFloat(quantity)
+    if (isNaN(qty) || qty <= 0) { alert('Please enter a valid quantity.'); return }
+    setSavingRM(true)
+    setRmUsageLog([])
+
+    const deductKg = unit === 'g' ? qty / 1000 : unit === 'kg' ? qty : qty / 1000
+    const { data: rm } = await supabase.from('raw_materials').select('stock,name').eq('name', rm_name).single()
+    if (!rm) { alert('Raw material not found.'); setSavingRM(false); return }
+    const newStock = Math.max(0, rm.stock - deductKg)
+    await supabase.from('raw_materials').update({ stock: newStock }).eq('name', rm_name)
+    setRmUsageLog(l => [...l, { msg: rm_name + ': ' + rm.stock.toFixed(3) + 'kg → ' + newStock.toFixed(3) + 'kg', type: 'ok' }])
+
+    await supabase.from('activity').insert({
+      type: 'stock',
+      title: 'RM Usage: ' + rm_name,
+      description: qty + unit + ' used for ' + (notes || 'lining/general') + ' · ' + date,
+      created_by_name: profile?.name
+    })
+    setRmUsageLog(l => [...l, { msg: 'Saved successfully', type: 'ok' }])
+    setRmUsageForm({ date: new Date().toISOString().split('T')[0], rm_name: '', quantity: '', unit: 'kg', notes: '' })
+    setSavingRM(false)
+    loadData()
+  }
+
   async function saveSchedule() {
     const { scheduled_date, product_code, planned_input, input_type, notes } = schedForm
     if (!scheduled_date || !product_code) { alert('Please fill in date and product.'); return }
@@ -445,10 +478,10 @@ export default function Production() {
 
       <div className="page-body">
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
-          {['log','schedule','history'].map(v => (
+          {['log','schedule','rmusage','history'].map(v => (
             <button key={v} onClick={() => setView(v)}
               style={{ padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '2px', textTransform: 'uppercase', color: view===v?'var(--ink)':'var(--ink3)', borderBottom: view===v?'2px solid var(--ink)':'2px solid transparent', marginBottom: -1 }}>
-              {v === 'log' ? '📝 Log Batch' : v === 'schedule' ? '📅 Schedule' : '📜 History'}
+              {v === 'log' ? '📝 Log Batch' : v === 'schedule' ? '📅 Schedule' : v === 'rmusage' ? '🧴 RM Usage' : '📜 History'}
             </button>
           ))}
         </div>
@@ -582,6 +615,83 @@ export default function Production() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view === 'rmusage' && (
+          <div className="grid2">
+            <div className="card">
+              <div className="card-title">Log Raw Material Usage</div>
+              <div style={{ background: 'var(--blue-l)', padding: '8px 12px', borderRadius: 6, marginBottom: 14, fontSize: 11, color: 'var(--blue)' }}>
+                🧴 Use this to log RM consumption not covered by a BOM — e.g. coconut oil for lining trays, cleaning supplies, samples.
+              </div>
+              <div className="field"><label>Date</label>
+                <input type="date" value={rmUsageForm.date} onChange={e => setRmUsageForm(f=>({...f,date:e.target.value}))} />
+              </div>
+              <div className="field">
+                <label>Raw Material</label>
+                <select style={selectStyle} value={rmUsageForm.rm_name} onChange={e => setRmUsageForm(f=>({...f,rm_name:e.target.value}))}>
+                  <option value="">Select raw material...</option>
+                  {rmList.map(r => (
+                    <option key={r.name} value={r.name}>{r.name} (stock: {parseFloat(r.stock||0).toFixed(2)}{r.unit || 'kg'})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field-row">
+                <div className="field" style={{margin:0}}>
+                  <label>Quantity</label>
+                  <input type="number" min="0" step="0.001" value={rmUsageForm.quantity}
+                    onChange={e => setRmUsageForm(f=>({...f,quantity:e.target.value}))} placeholder="0" />
+                </div>
+                <div className="field" style={{margin:0}}>
+                  <label>Unit</label>
+                  <select style={selectStyle} value={rmUsageForm.unit} onChange={e => setRmUsageForm(f=>({...f,unit:e.target.value}))}>
+                    <option value="g">Grams (g)</option>
+                    <option value="kg">Kilograms (kg)</option>
+                    <option value="ml">Millilitres (ml)</option>
+                    <option value="L">Litres (L)</option>
+                  </select>
+                </div>
+              </div>
+              {rmUsageForm.rm_name && rmUsageForm.quantity && (() => {
+                const rm = rmList.find(r => r.name === rmUsageForm.rm_name)
+                const qty = parseFloat(rmUsageForm.quantity) || 0
+                const deductKg = rmUsageForm.unit === 'g' ? qty/1000 : rmUsageForm.unit === 'kg' ? qty : qty/1000
+                const remaining = ((rm?.stock || 0) - deductKg)
+                return (
+                  <div style={{ background: remaining >= 0 ? 'var(--green-l)' : 'var(--red-l)', padding: 10, borderRadius: 4, marginBottom: 12, fontSize: 12, color: remaining >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                    {remaining >= 0
+                      ? 'Stock after: ' + remaining.toFixed(3) + 'kg'
+                      : 'Warning: insufficient stock (have ' + (rm?.stock||0).toFixed(3) + 'kg)'}
+                  </div>
+                )
+              })()}
+              <div className="field"><label>Notes (optional)</label>
+                <input type="text" value={rmUsageForm.notes}
+                  onChange={e => setRmUsageForm(f=>({...f,notes:e.target.value}))}
+                  placeholder="e.g. tray lining, samples, cleaning..." />
+              </div>
+              <button className="btn btn-green btn-full" onClick={saveRMUsage} disabled={savingRM}>
+                {savingRM ? 'Saving...' : '✓ Log RM Usage & Deduct Stock'}
+              </button>
+              {rmUsageLog.length > 0 && (
+                <div className="log" style={{ marginTop: 12 }}>
+                  {rmUsageLog.map((l,i) => <div key={i} className={l.type}>{l.msg}</div>)}
+                </div>
+              )}
+            </div>
+            <div className="card">
+              <div className="card-title">Common Uses</div>
+              <div style={{ fontSize: 12, color: 'var(--ink2)', lineHeight: 2 }}>
+                <div>🫙 <strong>Coconut Oil</strong> — tray lining before baking</div>
+                <div>🧂 <strong>Salt</strong> — finishing/seasoning adjustments</div>
+                <div>🥥 <strong>Coconut Flour</strong> — dusting surfaces</div>
+                <div>🍁 <strong>Maple Syrup</strong> — glazing/brushing</div>
+              </div>
+              <div style={{ marginTop: 16, padding: '10px 12px', background: 'var(--surface2)', borderRadius: 6, fontSize: 11, color: 'var(--ink3)' }}>
+                💡 Log this at the end of each production day. Each entry deducts from RM inventory and appears in the Activity log.
               </div>
             </div>
           </div>

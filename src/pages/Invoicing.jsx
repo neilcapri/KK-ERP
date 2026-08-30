@@ -361,6 +361,9 @@ export default function Invoicing() {
     '<scr' + 'ipt>window.onload=function(){window.print();}</scr' + 'ipt>' +
     '</body></html>'
     win.document.write(html)
+    win.document.close()
+  }
+
   function sendEmail(inv) {
     const balance = getBalance(inv)
     const subject = 'Invoice ' + inv.invoice_number + ' from Konscious Kitchen'

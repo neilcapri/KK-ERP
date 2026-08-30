@@ -265,84 +265,102 @@ export default function Invoicing() {
   }
 
   function printInvoice(inv) {
-    const taxRate = getTaxRate(inv.customer_name)
     const win = window.open('', '_blank')
     const taxRate2 = getTaxRate(inv.customer_name)
-    const taxLabel = taxRate2 === 0 ? 'Tax (Export - 0%)' : 'HST (13%)'
     const paid2 = getAmountPaid(inv)
     const balance2 = getBalance(inv)
     const sc2 = STATUS_COLORS[inv.status] || STATUS_COLORS.draft
     const itemRows = (inv.invoice_items || []).map(function(item) {
-      const codeHtml = item.product_code
-        ? '<span style="font-family:monospace;background:#f0f0f0;padding:2px 6px;border-radius:3px">' + item.product_code + '</span>'
-        : '—'
-      return '<tr><td>' + item.description + '</td><td>' + codeHtml + '</td>' +
-        '<td style="text-align:right">' + item.quantity + '</td>' +
+      return '<tr>' +
+        '<td>' + item.description + '</td>' +
+        '<td style="text-align:center">' + item.quantity + '</td>' +
         '<td style="text-align:right">$' + parseFloat(item.unit_price).toFixed(2) + '</td>' +
-        '<td style="text-align:right;font-weight:600">$' + parseFloat(item.line_total).toFixed(2) + '</td></tr>'
+        '<td style="text-align:right">$' + parseFloat(item.line_total).toFixed(2) + '</td>' +
+        '</tr>'
     }).join('')
-    const paidRow = paid2 > 0
-      ? '<div class="total-row" style="color:#27ae60"><span>Payments Received</span><span>-$' + paid2.toFixed(2) + '</span></div>'
-      : ''
-    const notesHtml = inv.notes
-      ? '<div class="pay-info"><strong>Notes:</strong> ' + inv.notes + '</div>'
-      : ''
-    const emailHtml = inv.customer_email
-      ? '<div style="font-size:12px;color:#888;margin-top:4px">' + inv.customer_email + '</div>'
-      : ''
     const balColor = balance2 > 0 ? '#c0392b' : '#27ae60'
+    const taxLabel = taxRate2 === 0 ? 'Tax (Export 0%)' : 'HST (ON) @ 13%'
 
     const html = '<!DOCTYPE html><html><head><title>Invoice ' + inv.invoice_number + '</title>' +
     '<style>' +
-    'body{font-family:Helvetica Neue,sans-serif;color:#222;margin:0;padding:40px}' +
-    '.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px;border-bottom:3px solid #223824;padding-bottom:20px}' +
-    '.logo{font-size:24px;font-weight:700;color:#223824;letter-spacing:2px}' +
-    '.inv-number{font-size:28px;font-weight:700;color:#223824}' +
-    '.bill-section{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-bottom:30px}' +
-    '.bill-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:#888;margin-bottom:6px}' +
-    '.bill-name{font-size:16px;font-weight:600;color:#223824}' +
+    'body{font-family:Arial,sans-serif;color:#222;margin:0;padding:40px;font-size:13px}' +
+    '.header{margin-bottom:30px}' +
+    '.company-name{font-size:20px;font-weight:700;color:#223824;margin-bottom:4px}' +
+    '.company-info{font-size:12px;color:#555;line-height:1.6}' +
+    '.inv-box{float:right;text-align:right;margin-top:-80px}' +
+    '.inv-title{font-size:28px;font-weight:700;color:#223824;letter-spacing:2px;margin-bottom:10px}' +
+    '.inv-meta{font-size:12px;line-height:1.8}' +
+    '.inv-meta strong{display:inline-block;width:90px}' +
+    '.clearfix:after{content:"";display:table;clear:both}' +
+    '.bill-section{margin:30px 0;padding:16px;background:#f9f9f9;border-left:4px solid #223824}' +
+    '.bill-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#888;margin-bottom:6px}' +
+    '.bill-name{font-size:14px;font-weight:700;color:#223824}' +
+    '.bill-company{font-size:13px;color:#444}' +
     'table{width:100%;border-collapse:collapse;margin-bottom:24px}' +
-    'th{background:#223824;color:#E3DDD1;padding:10px 14px;text-align:left;font-size:11px;letter-spacing:1px;text-transform:uppercase}' +
-    'td{padding:10px 14px;border-bottom:1px solid #f0f0f0;font-size:13px}' +
-    '.totals{margin-left:auto;width:300px}' +
-    '.total-row{display:flex;justify-content:space-between;padding:8px 0;font-size:13px;border-bottom:1px solid #eee}' +
-    '.grand-total{font-size:18px;font-weight:700;color:#223824;border-top:2px solid #223824;padding-top:10px;margin-top:4px}' +
-    '.pay-info{background:#f8f8f8;border-left:4px solid #223824;padding:16px 20px;margin:20px 0;border-radius:4px}' +
-    '.footer{margin-top:40px;padding-top:20px;border-top:1px solid #eee;font-size:11px;color:#888;text-align:center}' +
+    'thead tr{background:#223824;color:#E3DDD1}' +
+    'th{padding:10px 14px;text-align:left;font-size:11px;letter-spacing:1px;text-transform:uppercase;font-weight:600}' +
+    'th.right{text-align:right}' +
+    'th.center{text-align:center}' +
+    'td{padding:10px 14px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}' +
+    'tr:nth-child(even) td{background:#fafafa}' +
+    '.totals-wrap{display:flex;justify-content:flex-end;margin-bottom:20px}' +
+    '.totals{width:280px}' +
+    '.total-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #eee}' +
+    '.total-row.grand{font-size:16px;font-weight:700;color:#223824;border-top:2px solid #223824;padding-top:10px;border-bottom:none}' +
+    '.balance-row{display:flex;justify-content:space-between;padding:10px 14px;font-size:18px;font-weight:700;background:#223824;color:#E3DDD1;border-radius:4px;margin-top:8px}' +
+    '.tax-summary{margin:20px 0;padding:14px;background:#f9f9f9;border:1px solid #eee;border-radius:4px}' +
+    '.tax-summary table{margin:0}' +
+    '.tax-summary thead tr{background:#555}' +
+    '.footer{margin-top:30px;padding-top:20px;border-top:2px solid #223824;font-size:12px;color:#555;line-height:1.8}' +
+    '.footer strong{color:#223824}' +
     '@media print{body{padding:20px}}' +
     '</style></head><body>' +
-    '<div class="header">' +
-    '<div><div class="logo">KK ERP</div>' +
-    '<div style="font-size:12px;color:#888;margin-top:4px">Konscious Kitchen</div>' +
-    '<div style="font-size:11px;color:#888">Toronto, Ontario, Canada</div>' +
-    '<div style="font-size:11px;color:#888">konsciouskitchen.com</div></div>' +
-    '<div style="text-align:right"><div class="inv-number">' + inv.invoice_number + '</div>' +
-    '<div style="font-size:12px;color:#888;margin-top:4px">Issue Date: ' + fmtDate(inv.issue_date) + '</div>' +
-    '<div style="font-size:12px;color:#888">Due Date: ' + fmtDate(inv.due_date) + '</div>' +
-    '<div style="font-size:12px;color:#888">Terms: ' + inv.payment_terms + '</div>' +
-    '<div style="margin-top:6px;font-size:11px;font-weight:600;text-transform:uppercase;background:' + sc2.bg + ';color:' + sc2.color + ';padding:4px 12px;border-radius:20px;display:inline-block">' + inv.status + '</div></div></div>' +
-    '<div class="bill-section"><div><div class="bill-label">Bill To</div>' +
-    '<div class="bill-name">' + inv.customer_name + '</div>' + emailHtml + '</div>' +
-    '<div><div class="bill-label">Payment Info</div>' +
-    '<div style="font-size:12px;color:#555"><div>E-Transfer: <strong>accounting@konsciousskitchen.com</strong></div>' +
-    '<div style="margin-top:4px">Reference: <strong>' + inv.invoice_number + '</strong></div></div></div></div>' +
-    '<table><thead><tr><th>Description</th><th>Code</th><th style="text-align:right">Qty (Packs)</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Line Total</th></tr></thead>' +
-    '<tbody>' + itemRows + '</tbody></table>' +
-    '<div style="display:flex;justify-content:flex-end"><div class="totals">' +
-    '<div class="total-row"><span>Subtotal</span><span>$' + parseFloat(inv.subtotal).toFixed(2) + '</span></div>' +
+    '<div class="header clearfix">' +
+    '<div class="company-name">Konscious Kitchen Inc</div>' +
+    '<div class="company-info">' +
+    '705 College St<br>' +
+    'Toronto ON M6G 1C2<br>' +
+    'neil.mukharji@konsciouskitchen.com<br>' +
+    'www.konsciouskitchen.com<br>' +
+    'GST/HST Registration No.: 782691661' +
+    '</div>' +
+    '<div class="inv-box">' +
+    '<div class="inv-title">INVOICE</div>' +
+    '<div class="inv-meta">' +
+    '<div><strong>INVOICE #</strong>' + inv.invoice_number + '</div>' +
+    '<div><strong>DATE</strong>' + (function(d){var p=d.split('-');return p[2]+'/'+p[1]+'/'+p[0]})(inv.issue_date) + '</div>' +
+    '<div><strong>DUE DATE</strong>' + (function(d){var p=d.split('-');return p[2]+'/'+p[1]+'/'+p[0]})(inv.due_date) + '</div>' +
+    '<div><strong>TERMS</strong>' + inv.payment_terms + '</div>' +
+    '</div>' +
+    '</div>' +
+    '</div>' +
+    '<div class="bill-section">' +
+    '<div class="bill-label">BILL TO</div>' +
+    '<div class="bill-name">' + inv.customer_name + '</div>' +
+    (inv.customer_email ? '<div class="bill-company">' + inv.customer_email + '</div>' : '') +
+    '</div>' +
+    '<table>' +
+    '<thead><tr><th>DESCRIPTION</th><th class="center">QTY</th><th class="right">RATE</th><th class="right">AMOUNT</th></tr></thead>' +
+    '<tbody>' + itemRows + '</tbody>' +
+    '</table>' +
+    '<div class="totals-wrap"><div class="totals">' +
+    '<div class="total-row"><span>SUBTOTAL</span><span>$' + parseFloat(inv.subtotal).toFixed(2) + '</span></div>' +
     '<div class="total-row"><span>' + taxLabel + '</span><span>$' + parseFloat(inv.tax_amount).toFixed(2) + '</span></div>' +
-    '<div class="total-row grand-total"><span>Total</span><span>$' + parseFloat(inv.total_amount).toFixed(2) + '</span></div>' +
-    paidRow +
-    '<div class="total-row" style="font-weight:700;font-size:16px;color:' + balColor + '"><span>Balance Due</span><span>$' + balance2.toFixed(2) + '</span></div>' +
-    '</div></div>' + notesHtml +
-    '<div class="footer"><p>Konscious Kitchen &middot; Toronto, Ontario, Canada &middot; MAD CLEAN INGREDIENTS</p>' +
-    '<p>Please include invoice number <strong>' + inv.invoice_number + '</strong> as reference with your payment.</p></div>' +
+    '<div class="total-row grand"><span>TOTAL</span><span>$' + parseFloat(inv.total_amount).toFixed(2) + '</span></div>' +
+    '</div></div>' +
+    '<div class="balance-row"><span>BALANCE DUE</span><span style="color:' + (balance2 > 0 ? '#E79B81' : '#90EE90') + '">$' + balance2.toFixed(2) + '</span></div>' +
+    (taxRate2 > 0 ?
+      '<div class="tax-summary"><table><thead><tr><th></th><th class="right">TAX</th><th class="right">NET</th></tr></thead>' +
+      '<tbody><tr><td>' + taxLabel + '</td><td style="text-align:right">$' + parseFloat(inv.tax_amount).toFixed(2) + '</td><td style="text-align:right">$' + parseFloat(inv.subtotal).toFixed(2) + '</td></tr></tbody>' +
+      '</table></div>' : '') +
+    '<div class="footer">' +
+    '<strong>KEEP FROZEN ON RECEIPT</strong><br>' +
+    'Interac transfer to <strong>neil.mukharji@konsciouskitchen.com</strong>' +
+    (inv.notes ? '<br><br>' + inv.notes : '') +
+    '</div>' +
     '<scr' + 'ipt>window.onload=function(){window.print();}</scr' + 'ipt>' +
     '</body></html>'
     win.document.write(html)
-    win.document.close()
-  }
-
   function sendEmail(inv) {
     const balance = getBalance(inv)
     const subject = 'Invoice ' + inv.invoice_number + ' from Konscious Kitchen'

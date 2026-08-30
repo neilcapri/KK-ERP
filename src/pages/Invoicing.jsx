@@ -36,6 +36,7 @@ const STATUS_COLORS = {
 export default function Invoicing() {
   const { profile, isAdmin } = useAuth()
   const [tab, setTab] = useState('invoices')
+  const [invoiceTab, setInvoiceTab] = useState('invoices')
   const [invoices, setInvoices] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -264,8 +265,14 @@ export default function Invoicing() {
     await loadData()
   }
 
-  function printInvoice(inv) {
+  async function printInvoice(inv) {
     const win = window.open('', '_blank')
+    const { data: custData } = await supabase.from('customers')
+      .select('name,street_address,city,province,postal_code')
+      .ilike('name', inv.customer_name).single()
+    const custAddr = custData
+      ? [custData.street_address, custData.city, custData.province, custData.postal_code].filter(Boolean).join(', ')
+      : ''
     const taxRate2 = getTaxRate(inv.customer_name)
     const paid2 = getAmountPaid(inv)
     const balance2 = getBalance(inv)
@@ -337,6 +344,7 @@ export default function Invoicing() {
     '<div class="bill-section">' +
     '<div class="bill-label">BILL TO</div>' +
     '<div class="bill-name">' + inv.customer_name + '</div>' +
+    (custAddr ? '<div class="bill-company">' + custAddr + '</div>' : '') +
     (inv.customer_email ? '<div class="bill-company">' + inv.customer_email + '</div>' : '') +
     '</div>' +
     '<table>' +
@@ -383,12 +391,15 @@ export default function Invoicing() {
   }
 
   // AR Summary
-  const totalOutstanding = invoices.filter(i => ['sent','partial','overdue'].includes(i.status)).reduce((s, i) => s + getBalance(i), 0)
-  const totalOverdue = invoices.filter(i => i.status === 'overdue').reduce((s, i) => s + getBalance(i), 0)
-  const totalPaid30 = invoices.filter(i => i.status === 'paid' && i.issue_date >= addDays(new Date().toISOString().split('T')[0], -30)).reduce((s, i) => s + parseFloat(i.total_amount || 0), 0)
+  const totalOutstanding = realInvoices.filter(i => ['sent','partial','overdue'].includes(i.status)).reduce((s, i) => s + getBalance(i), 0)
+  const totalOverdue = realInvoices.filter(i => i.status === 'overdue').reduce((s, i) => s + getBalance(i), 0)
+  const totalPaid30 = realInvoices.filter(i => i.status === 'paid' && i.issue_date >= addDays(new Date().toISOString().split('T')[0], -30)).reduce((s, i) => s + parseFloat(i.total_amount || 0), 0)
 
-  const filtered = invoices.filter(i => {
-    const matchStatus = statusFilter === 'all' || i.status === statusFilter
+  const drafts = invoices.filter(i => i.status === 'draft')
+  const realInvoices = invoices.filter(i => i.status !== 'draft')
+
+  const filtered = (invoiceTab === 'drafts' ? drafts : realInvoices).filter(i => {
+    const matchStatus = invoiceTab === 'invoices' ? (statusFilter === 'all' || i.status === statusFilter) : true
     const matchSearch = !search || i.customer_name.toLowerCase().includes(search.toLowerCase()) || i.invoice_number.toLowerCase().includes(search.toLowerCase())
     return matchStatus && matchSearch
   })
@@ -436,7 +447,7 @@ export default function Invoicing() {
           <div className="stat" style={{ borderTop:'3px solid var(--blue)' }}>
             <div className="stat-label">Total Invoices</div>
             <div className="stat-value" style={{ color:'var(--blue)' }}>{invoices.length}</div>
-            <div className="stat-sub">{invoices.filter(i => i.status === 'draft').length} draft · {invoices.filter(i => i.status === 'sent').length} sent</div>
+            <div className="stat-sub">{drafts.length} draft · {realInvoices.filter(i => i.status === 'sent').length} sent</div>
           </div>
         </div>
 
@@ -448,10 +459,32 @@ export default function Invoicing() {
 
         {tab === 'invoices' && (
           <div className="card">
+            {/* Inner tabs: Drafts / Invoices */}
+            <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--border)', marginBottom:16 }}>
+              <button onClick={() => setInvoiceTab('drafts')} style={{
+                padding:'8px 20px', border:'none', background:'none', cursor:'pointer',
+                fontFamily:'var(--display)', fontSize:11, letterSpacing:'2px', textTransform:'uppercase',
+                color: invoiceTab === 'drafts' ? 'var(--ink)' : 'var(--ink3)',
+                borderBottom: invoiceTab === 'drafts' ? '2px solid var(--kk-green)' : '2px solid transparent',
+                marginBottom:-1,
+              }}>
+                Drafts <span style={{ marginLeft:6, background:'var(--surface2)', borderRadius:20, padding:'1px 8px', fontSize:10 }}>{drafts.length}</span>
+              </button>
+              <button onClick={() => setInvoiceTab('invoices')} style={{
+                padding:'8px 20px', border:'none', background:'none', cursor:'pointer',
+                fontFamily:'var(--display)', fontSize:11, letterSpacing:'2px', textTransform:'uppercase',
+                color: invoiceTab === 'invoices' ? 'var(--ink)' : 'var(--ink3)',
+                borderBottom: invoiceTab === 'invoices' ? '2px solid var(--kk-green)' : '2px solid transparent',
+                marginBottom:-1,
+              }}>
+                Invoices <span style={{ marginLeft:6, background:'var(--surface2)', borderRadius:20, padding:'1px 8px', fontSize:10 }}>{realInvoices.length}</span>
+              </button>
+            </div>
+
             <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
-              <input placeholder="Search customer or invoice #..." value={search} onChange={e => setSearch(e.target.value)}
+              <input placeholder={'Search ' + (invoiceTab === 'drafts' ? 'draft' : 'invoice') + ' or customer...'} value={search} onChange={e => setSearch(e.target.value)}
                 style={{ flex:1, minWidth:200, padding:'8px 12px', border:'1px solid var(--border)', borderRadius:6, fontSize:12, background:'var(--surface)', color:'var(--ink)' }} />
-              {['all','draft','sent','partial','paid','overdue','void'].map(s => (
+              {invoiceTab === 'invoices' && ['all','sent','partial','paid','overdue','void'].map(s => (
                 <button key={s} onClick={() => setStatusFilter(s)} style={{
                   padding:'6px 14px', borderRadius:20, border:'1px solid var(--border)', cursor:'pointer', fontSize:11,
                   fontFamily:'var(--display)', letterSpacing:1, textTransform:'uppercase',

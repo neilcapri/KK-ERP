@@ -13,6 +13,7 @@ import Orders from './pages/Orders'
 import Expenses from './pages/Expenses'
 import Costing from './pages/Costing'
 import StoreMap from './pages/StoreMap'
+import Invoicing from './pages/Invoicing'
 
 function ProtectedRoute({ children, roles }) {
   const { user, profile, loading } = useAuth()
@@ -40,6 +41,7 @@ function AppRoutes() {
         <Route path="expenses" element={<ProtectedRoute roles={['admin']}><Expenses /></ProtectedRoute>} />
         <Route path="costing" element={<ProtectedRoute roles={['admin']}><Costing /></ProtectedRoute>} />
         <Route path="storemap" element={<ProtectedRoute roles={['admin','kitchen']}><StoreMap /></ProtectedRoute>} />
+        <Route path="invoicing" element={<ProtectedRoute roles={['admin']}><Invoicing /></ProtectedRoute>} />
       </Route>
     </Routes>
   )

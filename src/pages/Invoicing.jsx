@@ -390,13 +390,14 @@ export default function Invoicing() {
     if (inv.status === 'draft') updateStatus(inv.id, 'sent')
   }
 
+  // Split invoices into drafts and real invoices
+  const drafts = invoices.filter(i => i.status === 'draft')
+  const realInvoices = invoices.filter(i => i.status !== 'draft')
+
   // AR Summary
   const totalOutstanding = realInvoices.filter(i => ['sent','partial','overdue'].includes(i.status)).reduce((s, i) => s + getBalance(i), 0)
   const totalOverdue = realInvoices.filter(i => i.status === 'overdue').reduce((s, i) => s + getBalance(i), 0)
   const totalPaid30 = realInvoices.filter(i => i.status === 'paid' && i.issue_date >= addDays(new Date().toISOString().split('T')[0], -30)).reduce((s, i) => s + parseFloat(i.total_amount || 0), 0)
-
-  const drafts = invoices.filter(i => i.status === 'draft')
-  const realInvoices = invoices.filter(i => i.status !== 'draft')
 
   const filtered = (invoiceTab === 'drafts' ? drafts : realInvoices).filter(i => {
     const matchStatus = invoiceTab === 'invoices' ? (statusFilter === 'all' || i.status === statusFilter) : true

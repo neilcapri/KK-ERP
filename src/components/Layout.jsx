@@ -15,6 +15,7 @@ const navItems = [
   { to: '/expenses', icon: '💰', label: 'Expenses', roles: ['admin'] },
   { to: '/costing', icon: '🧮', label: 'Product Costing', roles: ['admin'] },
   { to: '/storemap', icon: '🗺️', label: 'Store Map', roles: ['admin','kitchen'] },
+  { to: '/invoicing', icon: '💵', label: 'Invoicing', roles: ['admin'] },
 ]
 
 export default function Layout() {

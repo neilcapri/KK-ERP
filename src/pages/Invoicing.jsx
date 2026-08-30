@@ -192,6 +192,19 @@ export default function Invoicing() {
     setCreating(false)
   }
 
+  async function convertToInvoice(inv) {
+    if (!window.confirm('Convert ' + inv.invoice_number + ' to a real invoice? This will assign a permanent invoice number.')) return
+    const { data: numData } = await supabase.rpc('next_invoice_number')
+    const invoiceNumber = numData || ('INV-' + Date.now())
+    await supabase.from('invoices').update({
+      invoice_number: invoiceNumber,
+      status: 'sent',
+      issue_date: new Date().toISOString().split('T')[0],
+    }).eq('id', inv.id)
+    await loadData()
+    alert('Converted to ' + invoiceNumber)
+  }
+
   async function openView(inv) {
     const { data } = await supabase.from('invoices')
       .select('*, invoice_items(*), invoice_payments(*)')
@@ -453,7 +466,10 @@ export default function Invoicing() {
                           <div style={{ display:'flex', gap:4 }}>
                             <button onClick={() => printInvoice(inv)} style={{ background:'var(--surface2)', border:'none', borderRadius:4, padding:'4px 8px', fontSize:11, cursor:'pointer' }}>🖨️</button>
                             <button onClick={() => sendEmail(inv)} style={{ background:'var(--surface2)', border:'none', borderRadius:4, padding:'4px 8px', fontSize:11, cursor:'pointer' }}>✉️</button>
-                            <button onClick={() => { setViewInvoice(inv); setShowPaymentModal(true) }} style={{ background:'var(--green-l)', border:'none', borderRadius:4, padding:'4px 8px', fontSize:11, cursor:'pointer', color:'var(--green)' }}>+ Pay</button>
+                            {inv.status === 'draft'
+                              ? <button onClick={e => { e.stopPropagation(); convertToInvoice(inv) }} style={{ background:'var(--green-l)', border:'none', borderRadius:4, padding:'4px 8px', fontSize:11, cursor:'pointer', color:'var(--green)', fontWeight:600 }}>Convert</button>
+                              : <button onClick={() => { setViewInvoice(inv); setShowPaymentModal(true) }} style={{ background:'var(--green-l)', border:'none', borderRadius:4, padding:'4px 8px', fontSize:11, cursor:'pointer', color:'var(--green)' }}>+ Pay</button>
+                            }
                           </div>
                         </td>
                       </tr>
@@ -727,7 +743,14 @@ export default function Invoicing() {
             )}
 
             <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-              <button className="btn btn-green" onClick={() => { setShowPaymentModal(true) }}>+ Record Payment</button>
+              {viewInvoice.status === 'draft' && (
+                <button className="btn btn-green" onClick={() => { convertToInvoice(viewInvoice); setShowViewModal(false) }}>
+                  ✅ Convert to Invoice
+                </button>
+              )}
+              {viewInvoice.status !== 'draft' && (
+                <button className="btn btn-green" onClick={() => { setShowPaymentModal(true) }}>+ Record Payment</button>
+              )}
               <button className="btn btn-secondary" onClick={() => printInvoice(viewInvoice)}>🖨️ Print / PDF</button>
               <button className="btn btn-secondary" onClick={() => sendEmail(viewInvoice)}>✉️ Send Email</button>
               <button style={{ marginLeft:'auto', background:'none', border:'1px solid var(--red)', color:'var(--red)', borderRadius:6, padding:'8px 14px', fontSize:12, cursor:'pointer' }}

@@ -956,6 +956,53 @@ export default function Orders() {
       if (itemsError) throw new Error('Items save failed: ' + itemsError.message)
       if (form.customer_id && form.delivery_day) await supabase.from('customers').update({ preferred_delivery_day: form.delivery_day }).eq('id', form.customer_id)
       await supabase.from('activity').insert({ type: 'dispatch', title: 'Order received: ' + form.customer_name, description: order_number + ' · ' + slipNum + ' · ' + orderItems.length + ' items · $' + total.toFixed(2), created_by_name: profile?.name })
+
+      // ── Auto-create draft invoice ──────────────────────────
+      try {
+        const HST_RATE = 0.13
+        const EXPORT_NAMES = ['ontario natural food']
+        const isExport = EXPORT_NAMES.some(e => (form.customer_name || '').toLowerCase().includes(e))
+        const taxRate = isExport ? 0 : HST_RATE
+        const subtotal = total
+        const taxAmount = Math.round(subtotal * taxRate * 100) / 100
+        const totalAmount = Math.round((subtotal + taxAmount) * 100) / 100
+        const issueDate = new Date().toISOString().split('T')[0]
+        const dueD = new Date(); dueD.setDate(dueD.getDate() + 30)
+        const dueDate = dueD.toISOString().split('T')[0]
+        const invNum = 'DRAFT-' + order_number
+
+        const { data: inv } = await supabase.from('invoices').insert({
+          invoice_number: invNum,
+          order_id: order.id,
+          customer_name: form.customer_name,
+          customer_email: null,
+          issue_date: issueDate,
+          due_date: dueDate,
+          payment_terms: 'Net 30',
+          subtotal, tax_amount: taxAmount, total_amount: totalAmount,
+          status: 'draft',
+          notes: 'Auto-created from order ' + order_number,
+          created_by_name: profile?.name
+        }).select().single()
+
+        if (inv) {
+          const invItems = itemsToInsert.map(i => {
+            const packs = i.packs || Math.round((i.quantity || 0) / Math.max(1, i.units_per_pack || 1))
+            const qty = i.packs === null ? (i.quantity || 0) : packs
+            return {
+              invoice_id: inv.id,
+              product_code: i.product_code || null,
+              description: i.product_name || i.product_code || '',
+              quantity: qty,
+              unit_price: parseFloat(i.price_per_pack || 0),
+              line_total: qty * parseFloat(i.price_per_pack || 0)
+            }
+          })
+          if (invItems.length > 0) await supabase.from('invoice_items').insert(invItems)
+        }
+      } catch(invErr) { console.warn('Draft invoice creation failed:', invErr.message) }
+      // ── End auto-create draft invoice ──────────────────────
+
       setShowModal(false); resetForm(); await loadData()
     } catch(err) { alert('Save failed: ' + err.message) }
     setSaving(false)
@@ -1360,7 +1407,7 @@ export default function Orders() {
                         <td style={{ fontWeight:500, fontSize:12 }}>{item.product_name}</td>
                         <td>{item.product_code ? <span className="code-tag">{item.product_code}</span> : '—'}</td>
                         <td style={{ fontWeight:700, color: isBulk ? 'var(--blue)' : 'var(--kk-green)', fontSize:13 }}>
-                          {isBulk ? `${item.quantity} units` : `${packs} packs`}
+                          {isBulk ? (item.quantity + ' units') : (packs + ' packs')}
                         </td>
                         {isAdmin && <td style={{ fontSize:11, color:'var(--ink3)' }}>${(item.price_per_pack||0).toFixed(2)}</td>}
                         {isAdmin && <td style={{ fontSize:11, fontWeight:600, color:'var(--kk-green)' }}>${lineTotal.toFixed(2)}</td>}

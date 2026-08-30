@@ -205,6 +205,17 @@ export default function Invoicing() {
     alert('Converted to ' + invoiceNumber)
   }
 
+  async function revertToDraft(inv) {
+    if (!window.confirm('Revert ' + inv.invoice_number + ' back to draft? The invoice number will be reset.')) return
+    const draftNum = 'DRAFT-' + (inv.order_id || inv.id)
+    await supabase.from('invoices').update({
+      invoice_number: draftNum,
+      status: 'draft',
+    }).eq('id', inv.id)
+    setShowViewModal(false)
+    await loadData()
+  }
+
   async function openView(inv) {
     const { data } = await supabase.from('invoices')
       .select('*, invoice_items(*), invoice_payments(*)')
@@ -753,6 +764,11 @@ export default function Invoicing() {
               )}
               <button className="btn btn-secondary" onClick={() => printInvoice(viewInvoice)}>🖨️ Print / PDF</button>
               <button className="btn btn-secondary" onClick={() => sendEmail(viewInvoice)}>✉️ Send Email</button>
+              {viewInvoice.status !== 'draft' && (
+                <button onClick={() => revertToDraft(viewInvoice)} style={{ background:'none', border:'1px solid var(--amber)', color:'var(--amber)', borderRadius:6, padding:'8px 14px', fontSize:12, cursor:'pointer' }}>
+                  ↩ Revert to Draft
+                </button>
+              )}
               <button style={{ marginLeft:'auto', background:'none', border:'1px solid var(--red)', color:'var(--red)', borderRadius:6, padding:'8px 14px', fontSize:12, cursor:'pointer' }}
                 onClick={() => deleteInvoice(viewInvoice.id)}>Delete</button>
             </div>

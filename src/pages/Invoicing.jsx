@@ -242,9 +242,6 @@ export default function Invoicing() {
 
   function printInvoice(inv) {
     const taxRate = getTaxRate(inv.customer_name)
-    const taxLabel = taxRate === 0 ? 'Tax (Export - 0%)' : 'HST (13%)'
-    const paid = getAmountPaid(inv)
-    const balance = getBalance(inv)
     const win = window.open('', '_blank')
     const taxRate2 = getTaxRate(inv.customer_name)
     const taxLabel = taxRate2 === 0 ? 'Tax (Export - 0%)' : 'HST (13%)'

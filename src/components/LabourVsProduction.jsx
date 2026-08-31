@@ -81,9 +81,9 @@ export default function LabourVsProduction() {
       let prodValue = 0, totalUnits = 0
       if (prods?.length) {
         const codes = [...new Set(prods.map(p => p.product_code))]
-        const { data: products } = await supabase.from('products').select('code, price_per_pack').in('code', codes)
+        const { data: products } = await supabase.from('products').select('code, price_per_pack, production_value').in('code', codes)
         const priceMap = {}
-        ;(products || []).forEach(p => { priceMap[p.code] = p.price_per_pack || 0 })
+        ;(products || []).forEach(p => { priceMap[p.code] = p.production_value != null ? parseFloat(p.production_value) : (parseFloat(p.price_per_pack) || 0) })
         prods.forEach(p => {
           totalUnits += p.output_units || 0
           const packs = sellableQty(p.product_code, p.output_units)

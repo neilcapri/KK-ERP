@@ -6,15 +6,16 @@ import { useAuth } from '../context/AuthContext'
 const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,WSBIS:5,COBIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1 }
 // ── Finished Goods groupings ──────────────────────────────
 const FG_GROUPS = [
-  { label: 'Muffins',       codes: ['PBB','PCC','KLR','KLRCup','PRMC'] },
+  { label: 'Muffins',       codes: ['PBB','PCC','KLR','KLRCup','KCC','KVC'] },
   { label: 'Loaves',        codes: ['PVBB','GBL','KPL','CCL','BAGL','Focaccia'] },
   { label: 'Donuts',        codes: ['KSCD','KHD','VPBD'] },
   { label: 'Paleo Cookies', codes: ['HPCo','HPC','POS','PGCo','PVHC','PVHCBu'] },
   { label: 'Keto Cookies',  codes: ['KAB','KWAL','KABIS','WSBIS','COBIS','KCOC','KSCo','KSCO'] },
   { label: 'Bars',          codes: ['VPB','VPCAN','PNF','PVBR','PVBRG'] },
   { label: 'Slices',        codes: ['HRCS','VSCS','TRFCS'] },
-  { label: 'Cakes',         codes: ['TRFC','KLRCKE','KCCKE','KCC','KVC','KCCKE','KVCKE'] },
+  { label: 'Cakes',         codes: ['TRFC','KLRCKE','KCCKE','KVCKE','ACC','AVBC','VDCCKE'] },
   { label: 'Mini Cakes',    codes: ['TMC','CMC','LMC','PRMC'] },
+  { label: 'Seasonal',      codes: ['CCB','CCBS','SFNL','PRMNTBG','WSBIS','COBIS'] },
   { label: 'Natures',       codes: ['NALCOB','NALCO-S','NALCO-D','NBFB'] },
   { label: 'Cake Cups',     codes: ['LCKCU','TCKCU','CCKCU','CSCC','KSCKCU','ACC','AVBC','CMC2'] },
 ]
@@ -266,6 +267,7 @@ export default function Inventory() {
 
   const filteredFG = products.filter(p => {
     if (BULK_FG_EXCLUDE.has(p.code) || p.category === 'WIP') return false
+    if (p.active === false) return false
     if (showAlertsOnly && p.units > p.min_stock) return false
     if (catFilter !== 'all' && p.category !== catFilter) return false
     if (search && !p.code.toLowerCase().includes(search.toLowerCase()) && !p.name.toLowerCase().includes(search.toLowerCase())) return false
@@ -442,22 +444,22 @@ export default function Inventory() {
               <div className="grid4" style={{ marginBottom: 16 }}>
                 <div className="stat green"><div className="stat-label">Total Units</div><div className="stat-value">{fgStats.total.toLocaleString()}</div></div>
                 <div className="stat"><div className="stat-label">SKUs</div><div className="stat-value">{filteredFG.length}</div></div>
-                <div className="stat amber"><div className="stat-label">Low Stock</div><div className="stat-value">{fgStats.low}</div></div>
-                <div className="stat red"><div className="stat-label">Out of Stock</div><div className="stat-value">{fgStats.out}</div></div>
+                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Low Stock</div><div className="stat-value">{fgStats.low}</div></div>
+                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Out of Stock</div><div className="stat-value">{fgStats.out}</div></div>
               </div>
             ) : tab === 'wip' ? (
               <div className="grid4" style={{ marginBottom: 16 }}>
                 <div className="stat blue"><div className="stat-label">WIP Items</div><div className="stat-value">{wipStats.items}</div></div>
                 <div className="stat green"><div className="stat-label">Showing</div><div className="stat-value">{filteredWIP.length}</div></div>
-                <div className="stat amber"><div className="stat-label">Low Stock</div><div className="stat-value">{wipStats.low}</div></div>
-                <div className="stat red"><div className="stat-label">Out of Stock</div><div className="stat-value">{wipStats.out}</div></div>
+                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Low Stock</div><div className="stat-value">{wipStats.low}</div></div>
+                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Out of Stock</div><div className="stat-value">{wipStats.out}</div></div>
               </div>
             ) : (
               <div className="grid4" style={{ marginBottom: 16 }}>
                 <div className="stat blue"><div className="stat-label">Total RMs</div><div className="stat-value">{rmStats.total}</div></div>
                 <div className="stat green"><div className="stat-label">In Stock</div><div className="stat-value">{rmStats.total - rmStats.out - rmStats.low}</div></div>
-                <div className="stat amber"><div className="stat-label">Low Stock</div><div className="stat-value">{rmStats.low}</div></div>
-                <div className="stat red"><div className="stat-label">Zero Stock</div><div className="stat-value">{rmStats.out}</div></div>
+                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Low Stock</div><div className="stat-value">{rmStats.low}</div></div>
+                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Zero Stock</div><div className="stat-value">{rmStats.out}</div></div>
               </div>
             )}
 

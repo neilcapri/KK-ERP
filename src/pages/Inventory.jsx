@@ -4,6 +4,44 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
 const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:4,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPC:5,KABIS:5,WSBIS:5,COBIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCO:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1 }
+// ── Finished Goods groupings ──────────────────────────────
+const FG_GROUPS = [
+  { label: 'Muffins',       codes: ['PBB','PCC','KLR','KLRCup','PRMC'] },
+  { label: 'Loaves',        codes: ['PVBB','GBL','KPL','CCL','BAGL','Focaccia'] },
+  { label: 'Donuts',        codes: ['KSCD','KHD','VPBD'] },
+  { label: 'Paleo Cookies', codes: ['HPCo','HPC','POS','PGCo','PVHC','PVHCBu'] },
+  { label: 'Keto Cookies',  codes: ['KAB','KWAL','KABIS','WSBIS','COBIS','KCOC','KSCo','KSCO'] },
+  { label: 'Bars',          codes: ['VPB','VPCAN','PNF','PVBR','PVBRG'] },
+  { label: 'Slices',        codes: ['HRCS','VSCS','TRFCS'] },
+  { label: 'Cakes',         codes: ['TRFC','KLRCKE','KCCKE','KCC','KVC','KCCKE','KVCKE'] },
+  { label: 'Mini Cakes',    codes: ['TMC','CMC','LMC','PRMC'] },
+  { label: 'Natures',       codes: ['NALCOB','NALCO-S','NALCO-D','NBFB'] },
+  { label: 'Cake Cups',     codes: ['LCKCU','TCKCU','CCKCU','CSCC','KSCKCU','ACC','AVBC','CMC2'] },
+]
+
+// ── WIP groupings ──────────────────────────────────────────
+const WIP_GROUPS = [
+  { label: '6 Inch',  match: (p) => /6in|6 inch|6"/.test(p.name) || /6$/.test(p.code) },
+  { label: '9 Inch',  match: (p) => /9in|9 inch/.test(p.name) },
+  { label: 'Tray',    match: (p) => /tray/i.test(p.name) || /TR$/.test(p.code) },
+  { label: 'Others',  match: (p) => true },
+]
+
+// ── RM groupings ───────────────────────────────────────────
+const RM_GROUPS = [
+  { label: 'Flours',             match: (r) => /flour|starch|cassava/i.test(r.name) },
+  { label: 'Sweeteners',         match: (r) => /sugar|syrup|honey|maple|stevia|monk/i.test(r.name) },
+  { label: 'Fats & Oils',        match: (r) => /oil|butter|shortening|ghee|lard/i.test(r.name) },
+  { label: 'Chocolate',          match: (r) => /chocolate|cocoa|cacao/i.test(r.name) },
+  { label: 'Nuts & Proteins',    match: (r) => /hazelnut|almond|walnut|pecan|pistachio|hemp|collagen|protein|egg/i.test(r.name) },
+  { label: 'Leavening & Baking', match: (r) => /baking|soda|powder|cream of tartar|psyllium|vinegar/i.test(r.name) },
+  { label: 'Flavours & Extracts',match: (r) => /vanilla|extract|flavour|flavor|coffee|espresso|ginger|cinnamon|spice/i.test(r.name) },
+  { label: 'Liquids',            match: (r) => /milk|cream|water|juice|coconut milk/i.test(r.name) },
+  { label: 'Salts & Spices',     match: (r) => /salt|pepper|turmeric|cardamom/i.test(r.name) },
+  { label: 'Packaging',          match: (r) => /box|bag|wrap|film|label|packaging|container|tray|cup|sleeve/i.test(r.name) },
+  { label: 'Other',              match: (r) => true },
+]
+
 const TRAY_SIZE = { VPB:64, VPCAN:36, PNF:40, PVBRG:36, PVBR:12, VSCS:48, NALCOB:21, NBFB:21, HRCS:84, CMC:24, LMC:24, PRMC:24, TMC:24 }
 const DATE_RANGES = [
   { label: '3 Months', days: 90 },
@@ -166,7 +204,7 @@ export default function Inventory() {
     const packs = parseInt(packForm.packs)
     const units = packs * ps
     if ((p.freezer_units || 0) < units) {
-      alert(`Not enough freezer stock. Need ${units} units, have ${p.freezer_units || 0}.`)
+      alert('Not enough freezer stock. Need ' + units + ' units, have ' + (p.freezer_units || 0) + '.')
       return
     }
     setPackSaving(true)
@@ -189,8 +227,8 @@ export default function Inventory() {
           }
         }
       }
-      await supabase.from('activity').insert({ type: 'production', title: `Packed: ${p.name}`, description: `${packs} packs (${units} units) · ${packForm.date}` })
-      setPackLog(l => [`✓ Packed ${packs} packs (${units} units) of ${p.name}`, ...l])
+      await supabase.from('activity').insert({ type: 'production', title: 'Packed: ' + p.name, description: packs + ' packs (' + units + ' units) · ' + packForm.date })
+      setPackLog(l => ['✓ Packed ' + packs + ' packs (' + units + ' units) of ' + p.name, ...l])
       setPackForm(f => ({ ...f, product_code: '', packs: '', notes: '' }))
       setPackPreview(null)
       await loadData(); await loadPackingRuns()
@@ -440,8 +478,25 @@ export default function Inventory() {
             {loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Loading...</div> : (
               tab === 'fg' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: selectedProduct ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
-                  <div className="stock-grid">
-                    {filteredFG.map(p => {
+                  <div>
+                    {(() => {
+                      const grouped = []
+                      const usedCodes = new Set()
+                      FG_GROUPS.forEach(grp => {
+                        const items = filteredFG.filter(p => grp.codes.includes(p.code) && !usedCodes.has(p.code))
+                        items.forEach(p => usedCodes.add(p.code))
+                        if (items.length > 0) grouped.push({ label: grp.label, items })
+                      })
+                      const remaining = filteredFG.filter(p => !usedCodes.has(p.code))
+                      if (remaining.length > 0) grouped.push({ label: 'Other', items: remaining })
+                      if (grouped.length === 0) return <div style={{ textAlign:'center', padding:40, color:'var(--ink3)' }}>No products found</div>
+                      return grouped.map(grp => (
+                        <div key={grp.label} style={{ marginBottom: 28 }}>
+                          <div style={{ fontSize:11, letterSpacing:'2px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', marginBottom:10, paddingBottom:6, borderBottom:'1px solid var(--border)', fontWeight:600 }}>
+                            {grp.label} <span style={{ fontSize:10, color:'var(--ink3)', fontWeight:400 }}>({grp.items.length})</span>
+                          </div>
+                          <div className="stock-grid">
+                    {grp.items.map(p => {
                       const ps = PACK_SIZE[p.code] || p.pack_size || 1
                       const cls = p.units <= 0 ? 'critical' : p.units <= p.min_stock ? 'low' : 'healthy'
                       const bar = p.units <= 0 ? 'var(--red)' : p.units <= p.min_stock ? 'var(--amber)' : 'var(--green)'
@@ -483,6 +538,10 @@ export default function Inventory() {
                         </div>
                       )
                     })}
+                          </div>
+                        </div>
+                      ))
+                    })()}
                   </div>
 
                   {selectedProduct && (
@@ -556,11 +615,27 @@ export default function Inventory() {
                 </div>
               ) : tab === 'wip' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: selectedWIP ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
-                  <div className="stock-grid">
+                  <div>
                     {filteredWIP.length === 0 && (
                       <div style={{ fontSize: 12, color: 'var(--ink3)', padding: 24, textAlign: 'center' }}>No WIP items match this filter.</div>
                     )}
-                    {filteredWIP.map(p => {
+                    {(() => {
+                      const usedCodes = new Set()
+                      const groups = []
+                      WIP_GROUPS.slice(0,-1).forEach(grp => {
+                        const items = filteredWIP.filter(p => grp.match(p) && !usedCodes.has(p.code))
+                        items.forEach(p => usedCodes.add(p.code))
+                        if (items.length > 0) groups.push({ label: grp.label, items })
+                      })
+                      const others = filteredWIP.filter(p => !usedCodes.has(p.code))
+                      if (others.length > 0) groups.push({ label: 'Others', items: others })
+                      return groups.map(grp => (
+                        <div key={grp.label} style={{ marginBottom: 28 }}>
+                          <div style={{ fontSize:11, letterSpacing:'2px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', marginBottom:10, paddingBottom:6, borderBottom:'1px solid var(--border)', fontWeight:600 }}>
+                            {grp.label} <span style={{ fontSize:10, fontWeight:400 }}>({grp.items.length})</span>
+                          </div>
+                          <div className="stock-grid">
+                    {grp.items.map(p => {
                       const cls = p.units <= 0 ? 'critical' : p.units <= p.min_stock ? 'low' : 'healthy'
                       const bar = p.units <= 0 ? 'var(--red)' : p.units <= p.min_stock ? 'var(--amber)' : 'var(--green)'
                       const isSelected = selectedWIP === p.code
@@ -583,6 +658,10 @@ export default function Inventory() {
                         </div>
                       )
                     })}
+                          </div>
+                        </div>
+                      ))
+                    })()}
                   </div>
 
                   {selectedWIP && (
@@ -851,7 +930,7 @@ function PackagingPreview({ productCode, packs, rms }) {
             </div>
             {rm !== undefined && (
               <span style={{ fontSize: 11, fontWeight: 600, color: hasStock ? 'var(--kk-green)' : 'var(--red)' }}>
-                {hasStock ? `✓ ${rm.stock} in stock` : `✗ Only ${rm?.stock || 0} in stock`}
+                {hasStock ? '✓ ' + rm.stock + ' in stock' : '✗ Only ' + (rm?.stock || 0) + ' in stock'}
               </span>
             )}
           </div>

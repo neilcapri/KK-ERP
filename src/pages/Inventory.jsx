@@ -13,7 +13,7 @@ const FG_GROUPS = [
   { label: 'Keto Cookies',  codes: ['KAB','KWAL','KABIS','WSBIS','COBIS','KCOC','KSCo','KSCO'] },
   { label: 'Bars',          codes: ['VPB','VPCAN','PNF','PVBR','PVBRG'] },
   { label: 'Slices',        codes: ['HRCS','VSCS','TRFCS'] },
-  { label: 'Cakes',         codes: ['TRFC','KLRCKE','KCCKE','KVCKE','ACC','AVBC','VDCCKE'] },
+  { label: 'Cakes',         codes: ['TRFC','KLRCKE','KCCKE','KVCKE','ACC','AVBC','VDCCKE','PCRT'] },
   { label: 'Mini Cakes',    codes: ['TMC','CMC','LMC','PRMC'] },
   { label: 'Seasonal',      codes: ['CCB','CCBS','SFNL','PRMNTBG','WSBIS','COBIS'] },
   { label: 'Natures',       codes: ['NALCOB','NALCO-S','NALCO-D','NBFB'] },
@@ -284,6 +284,7 @@ export default function Inventory() {
   })
 
   const filteredRM = rms.filter(r => {
+    if ((r.category || '').toUpperCase() === 'WIP') return false
     if (showAlertsOnly && r.stock > r.min_stock) return false
     if (catFilter !== 'all' && r.category !== catFilter) return false
     if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false
@@ -729,7 +730,23 @@ export default function Inventory() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredRM.map(r => {
+                        {(() => {
+                          const usedNames = new Set()
+                          const groups = []
+                          RM_GROUPS.slice(0,-1).forEach(grp => {
+                            const items = filteredRM.filter(r => grp.match(r) && !usedNames.has(r.name))
+                            items.forEach(r => usedNames.add(r.name))
+                            if (items.length > 0) groups.push({ label: grp.label, items })
+                          })
+                          const others = filteredRM.filter(r => !usedNames.has(r.name))
+                          if (others.length > 0) groups.push({ label: 'Other', items: others })
+                          return groups.map(grp => [
+                            <tr key={grp.label + '-header'}>
+                              <td colSpan={10} style={{ background:'var(--surface2)', padding:'8px 14px', fontSize:10, letterSpacing:'2px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', fontWeight:700, borderTop:'2px solid var(--border)' }}>
+                                {grp.label} <span style={{ fontWeight:400 }}>({grp.items.length})</span>
+                              </td>
+                            </tr>,
+                            ...grp.items.map(r => {
                           const cls = r.stock <= 0 ? 'red' : r.stock <= r.min_stock ? 'amber' : 'green'
                           const label = r.stock <= 0 ? '🔴 OUT' : r.stock <= r.min_stock ? '⚠️ LOW' : '✅ OK'
                           const isSelected = selectedRM === r.name
@@ -754,7 +771,9 @@ export default function Inventory() {
                               {(isAdmin || isKitchen) && <td><button onClick={e => { e.stopPropagation(); setEditItem(r); setEditVal(String(r.stock)); }} className="btn btn-secondary btn-sm">edit</button></td>}
                             </tr>
                           )
-                        })}
+                            })
+                          ])
+                        })()}
                       </tbody>
                     </table>
                   </div>

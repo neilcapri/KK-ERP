@@ -86,7 +86,7 @@ export default function Inventory() {
   const [editReason, setEditReason] = useState('')
   const [editFreezerVal, setEditFreezerVal] = useState('')
   const [editPackedVal, setEditPackedVal] = useState('')
-  const [showAlertsOnly, setShowAlertsOnly] = useState(false)
+  const [alertFilter, setAlertFilter] = useState(null) // null | 'low' | 'out'
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [selectedRM, setSelectedRM] = useState(null)
   const [selectedWIP, setSelectedWIP] = useState(null)
@@ -317,6 +317,7 @@ export default function Inventory() {
 
   return (
     <>
+      <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;800&display=swap" rel="stylesheet" />
       <div className="page-header">
         <div><h2>INVENTORY</h2><p>Finished goods & raw materials</p></div>
         <button className="btn btn-secondary btn-sm" onClick={loadData}>↻ Refresh</button>
@@ -445,26 +446,26 @@ export default function Inventory() {
               <div className="grid4" style={{ marginBottom: 16 }}>
                 <div className="stat green"><div className="stat-label">Total Units</div><div className="stat-value">{fgStats.total.toLocaleString()}</div></div>
                 <div className="stat"><div className="stat-label">SKUs</div><div className="stat-value">{filteredFG.length}</div></div>
-                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Low Stock</div><div className="stat-value">{fgStats.low}</div></div>
-                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Out of Stock</div><div className="stat-value">{fgStats.out}</div></div>
+                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setAlertFilter(alertFilter === 'low' ? null : 'low')}><div className="stat-label">Low Stock</div><div className="stat-value">{fgStats.low}</div></div>
+                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setAlertFilter(alertFilter === 'out' ? null : 'out')}><div className="stat-label">Out of Stock</div><div className="stat-value">{fgStats.out}</div></div>
               </div>
             ) : tab === 'wip' ? (
               <div className="grid4" style={{ marginBottom: 16 }}>
                 <div className="stat blue"><div className="stat-label">WIP Items</div><div className="stat-value">{wipStats.items}</div></div>
                 <div className="stat green"><div className="stat-label">Showing</div><div className="stat-value">{filteredWIP.length}</div></div>
-                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Low Stock</div><div className="stat-value">{wipStats.low}</div></div>
-                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Out of Stock</div><div className="stat-value">{wipStats.out}</div></div>
+                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setAlertFilter(alertFilter === 'low' ? null : 'low')}><div className="stat-label">Low Stock</div><div className="stat-value">{wipStats.low}</div></div>
+                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setAlertFilter(alertFilter === 'out' ? null : 'out')}><div className="stat-label">Out of Stock</div><div className="stat-value">{wipStats.out}</div></div>
               </div>
             ) : (
               <div className="grid4" style={{ marginBottom: 16 }}>
                 <div className="stat blue"><div className="stat-label">Total RMs</div><div className="stat-value">{rmStats.total}</div></div>
                 <div className="stat green"><div className="stat-label">In Stock</div><div className="stat-value">{rmStats.total - rmStats.out - rmStats.low}</div></div>
-                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Low Stock</div><div className="stat-value">{rmStats.low}</div></div>
-                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setShowAlertsOnly(true)}><div className="stat-label">Zero Stock</div><div className="stat-value">{rmStats.out}</div></div>
+                <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setAlertFilter(alertFilter === 'low' ? null : 'low')}><div className="stat-label">Low Stock</div><div className="stat-value">{rmStats.low}</div></div>
+                <div className="stat red" style={{cursor:'pointer'}} onClick={() => setAlertFilter(alertFilter === 'out' ? null : 'out')}><div className="stat-label">Zero Stock</div><div className="stat-value">{rmStats.out}</div></div>
               </div>
             )}
 
-            {showAlertsOnly && (
+            {alertFilter && (
               <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', background:'var(--amber-l)', borderRadius:6, marginBottom:12, fontSize:12, color:'var(--amber)' }}>
                 <span>⚠️ Showing low stock & out of stock only</span>
                 <button onClick={() => setShowAlertsOnly(false)} style={{ marginLeft:'auto', background:'none', border:'1px solid var(--amber)', color:'var(--amber)', borderRadius:4, padding:'2px 10px', fontSize:11, cursor:'pointer' }}>Show all</button>
@@ -495,8 +496,8 @@ export default function Inventory() {
                       if (grouped.length === 0) return <div style={{ textAlign:'center', padding:40, color:'var(--ink3)' }}>No products found</div>
                       return grouped.map(grp => (
                         <div key={grp.label} style={{ marginBottom: 28 }}>
-                          <div style={{ fontSize:11, letterSpacing:'2px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', marginBottom:10, paddingBottom:6, borderBottom:'1px solid var(--border)', fontWeight:600 }}>
-                            {grp.label} <span style={{ fontSize:10, color:'var(--ink3)', fontWeight:400 }}>({grp.items.length})</span>
+                          <div style={{ fontSize:15, letterSpacing:'1px', textTransform:'uppercase', color:'var(--ink)', fontFamily:"'Hanken Grotesk', var(--display), sans-serif", marginBottom:12, paddingBottom:8, borderBottom:'2px solid var(--kk-green)', fontWeight:800 }}>
+                            {grp.label} <span style={{ fontSize:11, color:'var(--ink3)', fontWeight:400 }}>({grp.items.length})</span>
                           </div>
                           <div className="stock-grid">
                     {grp.items.map(p => {
@@ -634,8 +635,8 @@ export default function Inventory() {
                       if (others.length > 0) groups.push({ label: 'Others', items: others })
                       return groups.map(grp => (
                         <div key={grp.label} style={{ marginBottom: 28 }}>
-                          <div style={{ fontSize:11, letterSpacing:'2px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', marginBottom:10, paddingBottom:6, borderBottom:'1px solid var(--border)', fontWeight:600 }}>
-                            {grp.label} <span style={{ fontSize:10, fontWeight:400 }}>({grp.items.length})</span>
+                          <div style={{ fontSize:15, letterSpacing:'1px', textTransform:'uppercase', color:'var(--ink)', fontFamily:"'Hanken Grotesk', var(--display), sans-serif", marginBottom:12, paddingBottom:8, borderBottom:'2px solid var(--kk-green)', fontWeight:800 }}>
+                            {grp.label} <span style={{ fontSize:11, color:'var(--ink3)', fontWeight:400 }}>({grp.items.length})</span>
                           </div>
                           <div className="stock-grid">
                     {grp.items.map(p => {
@@ -742,7 +743,7 @@ export default function Inventory() {
                           if (others.length > 0) groups.push({ label: 'Other', items: others })
                           return groups.map(grp => [
                             <tr key={grp.label + '-header'}>
-                              <td colSpan={10} style={{ background:'var(--surface2)', padding:'8px 14px', fontSize:10, letterSpacing:'2px', textTransform:'uppercase', color:'var(--ink3)', fontFamily:'var(--display)', fontWeight:700, borderTop:'2px solid var(--border)' }}>
+                              <td colSpan={10} style={{ background:'var(--surface2)', padding:'10px 14px', fontSize:14, letterSpacing:'1px', textTransform:'uppercase', color:'var(--ink)', fontFamily:"'Hanken Grotesk', var(--display), sans-serif", fontWeight:800, borderTop:'3px solid var(--kk-green)' }}>
                                 {grp.label} <span style={{ fontWeight:400 }}>({grp.items.length})</span>
                               </td>
                             </tr>,

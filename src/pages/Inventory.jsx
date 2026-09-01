@@ -268,7 +268,7 @@ export default function Inventory() {
   const filteredFG = products.filter(p => {
     if (BULK_FG_EXCLUDE.has(p.code) || p.category === 'WIP') return false
     if (p.active === false) return false
-    if (showAlertsOnly && p.units > p.min_stock) return false
+    if (alertFilter && p.units > p.min_stock) return false
     if (catFilter !== 'all' && p.category !== catFilter) return false
     if (search && !p.code.toLowerCase().includes(search.toLowerCase()) && !p.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
@@ -277,7 +277,7 @@ export default function Inventory() {
   const filteredWIP = products.filter(p => {
     if (p.category !== 'WIP') return false
     const kind = p.wip_unit === 'ea' ? 'Cake Layer (ea)' : 'Batch (g)'
-    if (showAlertsOnly && p.units > p.min_stock) return false
+    if (alertFilter && p.units > p.min_stock) return false
     if (catFilter !== 'all' && kind !== catFilter) return false
     if (search && !p.code.toLowerCase().includes(search.toLowerCase()) && !p.name.toLowerCase().includes(search.toLowerCase())) return false
     return true
@@ -285,7 +285,7 @@ export default function Inventory() {
 
   const filteredRM = rms.filter(r => {
     if ((r.category || '').toUpperCase() === 'WIP') return false
-    if (showAlertsOnly && r.stock > r.min_stock) return false
+    if (alertFilter && r.stock > r.min_stock) return false
     if (catFilter !== 'all' && r.category !== catFilter) return false
     if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false
     return true

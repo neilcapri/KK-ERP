@@ -354,8 +354,13 @@ export default function Dispatch() {
         if (item.type === 'pack' && packs) {
           await deductFromPacked(item.code, packs)
         } else {
-          const { data: prod } = await supabase.from('products').select('units').eq('code', item.code).single()
-          if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - units) }).eq('code', item.code)
+          const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', item.code).single()
+          if (prod) {
+            const ps = prod.packed_units > 0 ? Math.round((prod.units - (prod.freezer_units || 0)) / prod.packed_units) || 1 : 1
+            const newFreezer = Math.max(0, (prod.freezer_units || prod.units || 0) - units)
+            const newTotal = newFreezer + ((prod.packed_units || 0) * ps)
+            await supabase.from('products').update({ units: Math.max(0, newTotal), freezer_units: newFreezer }).eq('code', item.code)
+          }
         }
 
         savedLines++
@@ -410,8 +415,13 @@ export default function Dispatch() {
       if (line.type === 'pack' && packs) {
         await deductFromPacked(line.code, packs)
       } else {
-        const { data: prod } = await supabase.from('products').select('units').eq('code', line.code).single()
-        if (prod) await supabase.from('products').update({ units: Math.max(0, prod.units - units) }).eq('code', line.code)
+        const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', line.code).single()
+        if (prod) {
+          const ps = prod.packed_units > 0 ? Math.round((prod.units - (prod.freezer_units || 0)) / prod.packed_units) || 1 : 1
+          const newFreezer = Math.max(0, (prod.freezer_units || prod.units || 0) - units)
+          const newTotal = newFreezer + ((prod.packed_units || 0) * ps)
+          await supabase.from('products').update({ units: Math.max(0, newTotal), freezer_units: newFreezer }).eq('code', line.code)
+        }
       }
     }
 
@@ -428,8 +438,11 @@ export default function Dispatch() {
     setDeletingId(dispatch.id)
     try {
       for (const item of dispatch.dispatch_items || []) {
-        const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
-        if (prod) await supabase.from('products').update({ units: prod.units + item.units_dispatched }).eq('code', item.product_code)
+        const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', item.product_code).single()
+        if (prod) {
+          const newFreezer = (prod.freezer_units || 0) + item.units_dispatched
+          await supabase.from('products').update({ units: prod.units + item.units_dispatched, freezer_units: newFreezer }).eq('code', item.product_code)
+        }
       }
       await supabase.from('dispatch_items').delete().eq('dispatch_id', dispatch.id)
       await supabase.from('dispatches').delete().eq('id', dispatch.id)
@@ -483,8 +496,11 @@ export default function Dispatch() {
     setEditSaving(true)
     try {
       for (const item of editingDispatch.dispatch_items || []) {
-        const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
-        if (prod) await supabase.from('products').update({ units: prod.units + item.units_dispatched }).eq('code', item.product_code)
+        const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', item.product_code).single()
+        if (prod) {
+          const newFreezer = (prod.freezer_units || 0) + item.units_dispatched
+          await supabase.from('products').update({ units: prod.units + item.units_dispatched, freezer_units: newFreezer }).eq('code', item.product_code)
+        }
       }
       await supabase.from('dispatches').update({ date: editForm.date, customer_name: editForm.customer_name, invoice_number: editForm.invoice_number }).eq('id', editingDispatch.id)
       await supabase.from('dispatch_items').delete().eq('dispatch_id', editingDispatch.id)
@@ -497,8 +513,11 @@ export default function Dispatch() {
           qty: parseFloat(item.qty) || 0, dispatch_type: item.dispatch_type, units_dispatched: units,
           production_date: item.production_date || null, production_verified: item.production_verified || null,
         })
-        const { data: prod } = await supabase.from('products').select('units').eq('code', item.product_code).single()
-        if (prod) await supabase.from('products').update({ units: prod.units - units }).eq('code', item.product_code)
+        const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', item.product_code).single()
+        if (prod) {
+          const newFreezer = Math.max(0, (prod.freezer_units || 0) - units)
+          await supabase.from('products').update({ units: Math.max(0, prod.units - units), freezer_units: newFreezer }).eq('code', item.product_code)
+        }
       }
       await supabase.from('activity').insert({ type: 'dispatch', title: `Dispatch Updated: ${editForm.customer_name}`, description: `Inv #${editForm.invoice_number || '—'} — edited`, created_by_name: profile?.name || 'admin' })
       setEditingDispatch(null); setEditItems([]); loadData()

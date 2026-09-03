@@ -113,7 +113,7 @@ export default function Inventory() {
     if (tabParam === 'fg') setTab('fg')
     if (tabParam === 'pack') setTab('pack')
     if (tabParam === 'wip') setTab('wip')
-    if (filterParam === 'alerts') setShowAlertsOnly(true)
+    if (filterParam === 'alerts') setAlertFilter('low')
   }, [location.search])
   useEffect(() => { if (selectedProduct) loadProductHistory(selectedProduct, dateRange) }, [selectedProduct, dateRange])
   useEffect(() => { if (selectedRM) loadRMHistory(selectedRM, dateRange) }, [selectedRM, dateRange])
@@ -468,7 +468,7 @@ export default function Inventory() {
             {alertFilter && (
               <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 14px', background:'var(--amber-l)', borderRadius:6, marginBottom:12, fontSize:12, color:'var(--amber)' }}>
                 <span>⚠️ Showing low stock & out of stock only</span>
-                <button onClick={() => setShowAlertsOnly(false)} style={{ marginLeft:'auto', background:'none', border:'1px solid var(--amber)', color:'var(--amber)', borderRadius:4, padding:'2px 10px', fontSize:11, cursor:'pointer' }}>Show all</button>
+                <button onClick={() => setAlertFilter(null)} style={{ marginLeft:'auto', background:'none', border:'1px solid var(--amber)', color:'var(--amber)', borderRadius:4, padding:'2px 10px', fontSize:11, cursor:'pointer' }}>Show all</button>
               </div>
             )}
 
@@ -482,70 +482,59 @@ export default function Inventory() {
             {loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Loading...</div> : (
               tab === 'fg' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: selectedProduct ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
-                  <div>
-                    {(() => {
-                      const grouped = []
-                      const usedCodes = new Set()
-                      FG_GROUPS.forEach(grp => {
-                        const items = filteredFG.filter(p => grp.codes.includes(p.code) && !usedCodes.has(p.code))
-                        items.forEach(p => usedCodes.add(p.code))
-                        if (items.length > 0) grouped.push({ label: grp.label, items })
-                      })
-                      const remaining = filteredFG.filter(p => !usedCodes.has(p.code))
-                      if (remaining.length > 0) grouped.push({ label: 'Other', items: remaining })
-                      if (grouped.length === 0) return <div style={{ textAlign:'center', padding:40, color:'var(--ink3)' }}>No products found</div>
-                      return grouped.map(grp => (
-                        <div key={grp.label} style={{ marginBottom: 28 }}>
-                          <div style={{ fontSize:15, letterSpacing:'1px', textTransform:'uppercase', color:'var(--ink)', fontFamily:"'Hanken Grotesk', var(--display), sans-serif", marginBottom:12, paddingBottom:8, borderBottom:'2px solid var(--kk-green)', fontWeight:800 }}>
-                            {grp.label} <span style={{ fontSize:11, color:'var(--ink3)', fontWeight:400 }}>({grp.items.length})</span>
-                          </div>
-                          <div className="stock-grid">
-                    {grp.items.map(p => {
-                      const ps = PACK_SIZE[p.code] || p.pack_size || 1
-                      const cls = p.units <= 0 ? 'critical' : p.units <= p.min_stock ? 'low' : 'healthy'
-                      const bar = p.units <= 0 ? 'var(--red)' : p.units <= p.min_stock ? 'var(--amber)' : 'var(--green)'
-                      const isSelected = selectedProduct === p.code
-                      const frozenUnits = p.freezer_units ?? p.units
-                      const packedPacks = p.packed_units ?? 0
-                      return (
-                        <div key={p.code} className={'stock-item ' + cls}
-                          onClick={() => setSelectedProduct(isSelected ? null : p.code)}
-                          style={{ cursor: 'pointer', outline: isSelected ? '2px solid var(--kk-green)' : 'none', minHeight: 140 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div className="si-code">{p.code}</div>
-                            {(isAdmin || isKitchen) && <button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); setEditFreezerVal(String(p.freezer_units ?? p.units)); setEditPackedVal(String(p.packed_units ?? 0)); }}
-                              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 2, padding: '1px 6px', fontSize: 9, cursor: 'pointer', color: 'var(--ink3)' }}>edit</button>}
-                          </div>
-                          <div className="si-name">{p.name}</div>
-                          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', marginTop: 4 }}>
-                            <div>
-                              <div style={{ fontSize: 32, fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--blue)', lineHeight: 1 }}>{packedPacks}</div>
-                              <div style={{ fontSize: 10, color: 'var(--ink3)' }}>packed</div>
-                            </div>
-                            <div style={{ color: 'var(--border2)', fontSize: 20 }}>·</div>
-                            <div>
-                              {TRAY_SIZE[p.code] ? (
-                                <>
-                                  <div style={{ fontSize: 22, fontFamily: 'var(--display)', fontWeight: 700, color: 'var(--kk-green)', lineHeight: 1 }}>{(frozenUnits / TRAY_SIZE[p.code]).toFixed(1)}</div>
-                                  <div style={{ fontSize: 10, color: 'var(--ink3)' }}>trays frozen</div>
-                                </>
-                              ) : (
-                                <>
-                                  <div style={{ fontSize: 22, fontFamily: 'var(--display)', fontWeight: 700, color: 'var(--kk-green)', lineHeight: 1 }}>{frozenUnits}</div>
-                                  <div style={{ fontSize: 10, color: 'var(--ink3)' }}>units frozen</div>
-                                </>
-                              )}
-                            </div>
-                          </div>
-                          <div style={{ fontSize: 10, color: 'var(--ink3)', marginTop: 4 }}>{p.units} total units</div>
-                          <div className="stock-bar"><div className="stock-bar-fill" style={{ width: Math.min(100,Math.max(0,p.units/(p.min_stock*2)*100)) + '%', background: bar }} /></div>
-                        </div>
-                      )
-                    })}
-                          </div>
-                        </div>
-                      ))
-                    })()}
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Code</th><th>Product</th><th>Packed</th><th>Frozen</th><th>Total</th><th>Status</th>
+                          {(isAdmin || isKitchen) && <th></th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const grouped = []
+                          const usedCodes = new Set()
+                          FG_GROUPS.forEach(grp => {
+                            const items = filteredFG.filter(p => grp.codes.includes(p.code) && !usedCodes.has(p.code))
+                            items.forEach(p => usedCodes.add(p.code))
+                            if (items.length > 0) grouped.push({ label: grp.label, items })
+                          })
+                          const remaining = filteredFG.filter(p => !usedCodes.has(p.code))
+                          if (remaining.length > 0) grouped.push({ label: 'Other', items: remaining })
+                          if (grouped.length === 0) return <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink3)' }}>No products found</td></tr>
+                          return grouped.map(grp => [
+                            <tr key={grp.label + '-header'}>
+                              <td colSpan={7} style={{ background:'var(--surface2)', padding:'10px 14px', fontSize:14, letterSpacing:'1px', textTransform:'uppercase', color:'var(--ink)', fontFamily:"'Hanken Grotesk', var(--display), sans-serif", fontWeight:800, borderTop:'3px solid var(--kk-green)' }}>
+                                {grp.label} <span style={{ fontWeight:400 }}>({grp.items.length})</span>
+                              </td>
+                            </tr>,
+                            ...grp.items.map(p => {
+                              const cls = p.units <= 0 ? 'red' : p.units <= p.min_stock ? 'amber' : 'green'
+                              const label = p.units <= 0 ? '🔴 OUT' : p.units <= p.min_stock ? '⚠️ LOW' : '✅ OK'
+                              const isSelected = selectedProduct === p.code
+                              const frozenUnits = p.freezer_units ?? p.units
+                              const packedPacks = p.packed_units ?? 0
+                              return (
+                                <tr key={p.code} onClick={() => setSelectedProduct(isSelected ? null : p.code)}
+                                  style={{ cursor: 'pointer', background: isSelected ? 'var(--surface2)' : '' }}>
+                                  <td><span className="code-tag">{p.code}</span></td>
+                                  <td style={{ fontWeight: 500 }}>{p.name}</td>
+                                  <td style={{ color: 'var(--blue)', fontWeight: 600 }}>{packedPacks} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>packs</span></td>
+                                  <td style={{ color: 'var(--kk-green)', fontWeight: 600 }}>
+                                    {TRAY_SIZE[p.code]
+                                      ? <>{(frozenUnits / TRAY_SIZE[p.code]).toFixed(1)} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>trays</span></>
+                                      : <>{frozenUnits} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>units</span></>}
+                                  </td>
+                                  <td style={{ fontWeight: 600, color: 'var(--' + cls + ')' }}>{p.units}</td>
+                                  <td><span className={'badge badge-' + cls}>{label}</span></td>
+                                  {(isAdmin || isKitchen) && <td><button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); setEditFreezerVal(String(p.freezer_units ?? p.units)); setEditPackedVal(String(p.packed_units ?? 0)); }} className="btn btn-secondary btn-sm">edit</button></td>}
+                                </tr>
+                              )
+                            })
+                          ])
+                        })()}
+                      </tbody>
+                    </table>
                   </div>
 
                   {selectedProduct && (
@@ -619,53 +608,55 @@ export default function Inventory() {
                 </div>
               ) : tab === 'wip' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: selectedWIP ? '1fr 420px' : '1fr', gap: 16, alignItems: 'start' }}>
-                  <div>
-                    {filteredWIP.length === 0 && (
-                      <div style={{ fontSize: 12, color: 'var(--ink3)', padding: 24, textAlign: 'center' }}>No WIP items match this filter.</div>
-                    )}
-                    {(() => {
-                      const usedCodes = new Set()
-                      const groups = []
-                      WIP_GROUPS.slice(0,-1).forEach(grp => {
-                        const items = filteredWIP.filter(p => grp.match(p) && !usedCodes.has(p.code))
-                        items.forEach(p => usedCodes.add(p.code))
-                        if (items.length > 0) groups.push({ label: grp.label, items })
-                      })
-                      const others = filteredWIP.filter(p => !usedCodes.has(p.code))
-                      if (others.length > 0) groups.push({ label: 'Others', items: others })
-                      return groups.map(grp => (
-                        <div key={grp.label} style={{ marginBottom: 28 }}>
-                          <div style={{ fontSize:15, letterSpacing:'1px', textTransform:'uppercase', color:'var(--ink)', fontFamily:"'Hanken Grotesk', var(--display), sans-serif", marginBottom:12, paddingBottom:8, borderBottom:'2px solid var(--kk-green)', fontWeight:800 }}>
-                            {grp.label} <span style={{ fontSize:11, color:'var(--ink3)', fontWeight:400 }}>({grp.items.length})</span>
-                          </div>
-                          <div className="stock-grid">
-                    {grp.items.map(p => {
-                      const cls = p.units <= 0 ? 'critical' : p.units <= p.min_stock ? 'low' : 'healthy'
-                      const bar = p.units <= 0 ? 'var(--red)' : p.units <= p.min_stock ? 'var(--amber)' : 'var(--green)'
-                      const isSelected = selectedWIP === p.code
-                      const unitLabel = p.wip_unit === 'ea' ? 'ea' : 'g'
-                      return (
-                        <div key={p.code} className={'stock-item ' + cls}
-                          onClick={() => setSelectedWIP(isSelected ? null : p.code)}
-                          style={{ cursor: 'pointer', outline: isSelected ? '2px solid var(--kk-green)' : 'none', minHeight: 120 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div className="si-code">{p.code}</div>
-                            {(isAdmin || isKitchen) && <button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); }}
-                              style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 2, padding: '1px 6px', fontSize: 9, cursor: 'pointer', color: 'var(--ink3)' }}>edit</button>}
-                          </div>
-                          <div className="si-name">{p.name}</div>
-                          <div style={{ fontSize: 28, fontFamily: 'var(--display)', fontWeight: 800, color: bar, lineHeight: 1, marginTop: 6 }}>
-                            {p.units?.toLocaleString()} <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--ink3)' }}>{unitLabel}</span>
-                          </div>
-                          <div style={{ fontSize: 10, color: 'var(--ink3)', marginTop: 4 }}>{p.wip_unit === 'ea' ? 'cake layer' : 'batch component'} · min {p.min_stock}{unitLabel}</div>
-                          <div className="stock-bar"><div className="stock-bar-fill" style={{ width: Math.min(100,Math.max(0,p.units/(p.min_stock*2)*100)) + '%', background: bar }} /></div>
-                        </div>
-                      )
-                    })}
-                          </div>
-                        </div>
-                      ))
-                    })()}
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Code</th><th>WIP Item</th><th>Stock</th><th>Type</th><th>Status</th>
+                          {(isAdmin || isKitchen) && <th></th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredWIP.length === 0 && (
+                          <tr><td colSpan={6} style={{ fontSize: 12, color: 'var(--ink3)', padding: 24, textAlign: 'center' }}>No WIP items match this filter.</td></tr>
+                        )}
+                        {(() => {
+                          const usedCodes = new Set()
+                          const groups = []
+                          WIP_GROUPS.slice(0,-1).forEach(grp => {
+                            const items = filteredWIP.filter(p => grp.match(p) && !usedCodes.has(p.code))
+                            items.forEach(p => usedCodes.add(p.code))
+                            if (items.length > 0) groups.push({ label: grp.label, items })
+                          })
+                          const others = filteredWIP.filter(p => !usedCodes.has(p.code))
+                          if (others.length > 0) groups.push({ label: 'Others', items: others })
+                          return groups.map(grp => [
+                            <tr key={grp.label + '-header'}>
+                              <td colSpan={6} style={{ background:'var(--surface2)', padding:'10px 14px', fontSize:14, letterSpacing:'1px', textTransform:'uppercase', color:'var(--ink)', fontFamily:"'Hanken Grotesk', var(--display), sans-serif", fontWeight:800, borderTop:'3px solid var(--kk-green)' }}>
+                                {grp.label} <span style={{ fontWeight:400 }}>({grp.items.length})</span>
+                              </td>
+                            </tr>,
+                            ...grp.items.map(p => {
+                              const cls = p.units <= 0 ? 'red' : p.units <= p.min_stock ? 'amber' : 'green'
+                              const label = p.units <= 0 ? '🔴 OUT' : p.units <= p.min_stock ? '⚠️ LOW' : '✅ OK'
+                              const isSelected = selectedWIP === p.code
+                              const unitLabel = p.wip_unit === 'ea' ? 'ea' : 'g'
+                              return (
+                                <tr key={p.code} onClick={() => setSelectedWIP(isSelected ? null : p.code)}
+                                  style={{ cursor: 'pointer', background: isSelected ? 'var(--surface2)' : '' }}>
+                                  <td><span className="code-tag">{p.code}</span></td>
+                                  <td style={{ fontWeight: 500 }}>{p.name}</td>
+                                  <td style={{ fontWeight: 600, color: 'var(--' + cls + ')' }}>{p.units?.toLocaleString()} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>{unitLabel}</span></td>
+                                  <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.wip_unit === 'ea' ? 'cake layer' : 'batch component'}</td>
+                                  <td><span className={'badge badge-' + cls}>{label}</span></td>
+                                  {(isAdmin || isKitchen) && <td><button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); }} className="btn btn-secondary btn-sm">edit</button></td>}
+                                </tr>
+                              )
+                            })
+                          ])
+                        })()}
+                      </tbody>
+                    </table>
                   </div>
 
                   {selectedWIP && (

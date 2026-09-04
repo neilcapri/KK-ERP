@@ -74,6 +74,22 @@ function displayStock(name, stock) {
   return { value: converted % 1 === 0 ? converted : converted.toFixed(2), unit: conv.unit, detail: conv.detail, raw: stock }
 }
 
+// Convert a BOM quantity (recorded in the BOM line's own unit, e.g. "gms"/"ml"/"ea") into
+// whatever unit the raw material's stock is tracked in (raw_materials.unit, e.g. "g"/"kg"/"L") —
+// same mass/volume conversion as Production.jsx's deduction logic, so the "used in" total shown
+// here matches what was actually deducted for that batch. Returns null for a genuine measurement
+// -type mismatch (mass recipe vs. volume-tracked stock, etc.) that can't be safely converted.
+function convertToRMUnit(qty, bomUnit, rmUnit) {
+  const bu = (bomUnit || '').trim().toLowerCase()
+  const ru = (rmUnit || '').trim().toLowerCase()
+  const MASS = { g: 1, gm: 1, gms: 1, gram: 1, grams: 1, kg: 1000, kgs: 1000, kilogram: 1000, kilograms: 1000 }
+  const VOL  = { ml: 1, mls: 1, millilitre: 1, millilitres: 1, milliliter: 1, milliliters: 1, l: 1000, lt: 1000, litre: 1000, litres: 1000, liter: 1000, liters: 1000 }
+  if (bu === 'ea' || ru === 'ea' || !bu || !ru) return qty
+  if (bu in MASS && ru in MASS) return qty * MASS[bu] / MASS[ru]
+  if (bu in VOL && ru in VOL) return qty * VOL[bu] / VOL[ru]
+  return null
+}
+
 export default function Inventory() {
   const { isAdmin, isKitchen } = useAuth()
   const [tab, setTab] = useState('fg')
@@ -166,13 +182,24 @@ export default function Inventory() {
     const sinceStr = since.toISOString().split('T')[0]
     const [src, bom] = await Promise.all([
       supabase.from('sourcing').select('*').eq('rm_name', name).gte('date', sinceStr).order('date', { ascending: false }),
-      supabase.from('bom').select('product_code').eq('rm_name', name),
+      supabase.from('bom').select('product_code,qty_per_unit,unit').eq('rm_name', name),
     ])
     let usedInProd = []
     if (bom.data?.length) {
+      const bomByCode = {}
+      bom.data.forEach(b => { bomByCode[b.product_code] = b })
       const codes = bom.data.map(b => b.product_code)
       const { data: prods } = await supabase.from('productions').select('*').in('product_code', codes).gte('date', sinceStr).order('date', { ascending: false })
-      usedInProd = prods || []
+      const rm = rms.find(r => r.name === name)
+      // RM is deducted for the FULL batch (good + rejected units), same as saveProduction in Production.jsx
+      usedInProd = (prods || []).map(p => {
+        const b = bomByCode[p.product_code]
+        if (!b) return p
+        const totalOutput = (p.output_units || 0) + (p.rejected_units || 0)
+        const rawQty = (b.qty_per_unit || 0) * totalOutput
+        const converted = rm ? convertToRMUnit(rawQty, b.unit, rm.unit) : null
+        return { ...p, rmQty: converted != null ? converted : rawQty, rmUnit: converted != null ? rm.unit : (b.unit || '') }
+      })
     }
     setRMHistory({ sourcing: src.data || [], used: usedInProd })
     setHistoryLoading(false)
@@ -828,7 +855,8 @@ export default function Inventory() {
                                 : rmHistory.used.map((p, i) => (
                                   <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                                     <div style={{ fontWeight: 600 }}><span className="code-tag" style={{ fontSize: 10 }}>{p.product_code}</span></div>
-                                    <div style={{ fontSize: 11, color: 'var(--green)' }}>+{p.output_units} units</div>
+                                    <div style={{ fontSize: 11, color: 'var(--green)' }}>+{p.output_units} units{p.rejected_units > 0 ? ' (+' + p.rejected_units + ' rejected)' : ''}</div>
+                                    {p.rmQty != null && <div style={{ fontSize: 11, color: 'var(--ink2)' }}>used {Number(p.rmQty.toFixed(2))} {p.rmUnit}</div>}
                                     <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.date}</div>
                                   </div>
                                 ))

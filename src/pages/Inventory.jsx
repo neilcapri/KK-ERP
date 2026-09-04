@@ -64,6 +64,7 @@ const RM_DISPLAY = {
   'coconut milk':       { divisor: 2400,  unit: 'cases', detail: '6 cans × 400g' },
   'almond butter jar':  { divisor: 750,   unit: 'jars',  detail: '750g/jar' },
   'almond butter tub':  { divisor: 10000, unit: 'tubs',  detail: '10kg/tub' },
+  'bananas':            { divisor: 900,   unit: 'bunches', detail: '~900g/bunch' },
 }
 
 function displayStock(name, stock) {

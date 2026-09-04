@@ -16,6 +16,36 @@ const PACK_SIZE = {
 
 const REJECTION_REASONS = ['Burnt', 'Undercooked', 'Damaged', 'Packaging Defect', 'Failed QC', 'Other']
 
+// Case/whitespace-insensitive raw material lookup — BOM.rm_name is free text and can
+// drift from raw_materials.name (e.g. "Pecans" vs "Pecan"), which made supabase's exact
+// `.eq('name', ...)` matches silently miss and skip the deduction entirely.
+function findRM(rmRows, name) {
+  if (!name) return null
+  const key = name.trim().toLowerCase()
+  return (rmRows || []).find(r => (r.name || '').trim().toLowerCase() === key) || null
+}
+
+// Convert a BOM quantity (recorded in the BOM line's own unit, e.g. "gms"/"ml"/"ea")
+// into whatever unit that raw material's stock is actually tracked in (raw_materials.unit,
+// e.g. "g"/"kg"/"L"). Previously every RM deduction blindly did qty/1000 assuming
+// "recipe qty is grams, stock is kg" — true for most materials, but wrong (by 1000x) for
+// any RM whose stock happens to be tracked in grams instead of kg, and meaningless for one
+// tracked by volume (L) when the recipe was entered in mass (g).
+// Returns null when the recipe unit and stock unit are different *kinds* of measurement
+// (mass vs. volume) — that can't be converted without knowing the ingredient's density, so
+// callers must treat null as "can't safely deduct, needs a human to fix the unit" rather
+// than silently guessing.
+function convertBomQty(qty, bomUnit, rmUnit) {
+  const bu = (bomUnit || '').trim().toLowerCase()
+  const ru = (rmUnit || '').trim().toLowerCase()
+  const MASS = { g: 1, gm: 1, gms: 1, gram: 1, grams: 1, kg: 1000, kgs: 1000, kilogram: 1000, kilograms: 1000 }
+  const VOL  = { ml: 1, mls: 1, millilitre: 1, millilitres: 1, milliliter: 1, milliliters: 1, l: 1000, lt: 1000, litre: 1000, litres: 1000, liter: 1000, liters: 1000 }
+  if (bu === 'ea' || ru === 'ea' || !bu || !ru) return qty
+  if (bu in MASS && ru in MASS) return qty * MASS[bu] / MASS[ru]
+  if (bu in VOL && ru in VOL) return qty * VOL[bu] / VOL[ru]
+  return null
+}
+
 function packsDisplay(code, units) {
   const ps = PACK_SIZE[code]
   if (!ps || !units) return units + ' units'
@@ -114,12 +144,14 @@ export default function Production() {
           wipMultiplier = wipYield > 0 ? multiplier * (item.qty_per_unit / wipYield) : multiplier
         }
         const subNeeds = await flattenToRM(wipProduct.code, wipMultiplier, wipCodes, visited)
-        for (const [name, qty] of Object.entries(subNeeds)) {
-          rmNeeds[name] = (rmNeeds[name] || 0) + qty
+        for (const [name, need] of Object.entries(subNeeds)) {
+          if (!rmNeeds[name]) rmNeeds[name] = { qty: 0, unit: need.unit }
+          rmNeeds[name].qty += need.qty
         }
       } else {
-        const qtyGms = item.unit === 'ea' ? item.qty_per_unit * multiplier * 1000 : item.qty_per_unit * multiplier
-        rmNeeds[item.rm_name] = (rmNeeds[item.rm_name] || 0) + qtyGms
+        const qty = item.qty_per_unit * multiplier
+        if (!rmNeeds[item.rm_name]) rmNeeds[item.rm_name] = { qty: 0, unit: item.unit }
+        rmNeeds[item.rm_name].qty += qty
       }
     }
     return rmNeeds
@@ -147,15 +179,18 @@ export default function Production() {
     const rmNeeds = await flattenToRM(code, outputUnits, wipCodes)
     const rmNames = Object.keys(rmNeeds)
     if (rmNames.length > 0) {
-      const { data: stocks } = await supabase.from('raw_materials').select('name,stock,unit').in('name', rmNames)
-      const stockMap = {}
-      ;(stocks || []).forEach(r => { stockMap[r.name] = r })
-      for (const [rmName, neededGms] of Object.entries(rmNeeds)) {
-        const rm = stockMap[rmName]
-        if (!rm) continue
-        const neededKg = neededGms / 1000
-        if (rm.stock < neededKg) {
-          warns.push({ rm: rmName + ' [RM]', needed: neededKg.toFixed(3) + 'kg', have: (rm.stock || 0).toFixed(3) + 'kg', isWip: false })
+      const { data: stocks } = await supabase.from('raw_materials').select('name,stock,unit')
+      for (const [rmName, need] of Object.entries(rmNeeds)) {
+        const rm = findRM(stocks, rmName)
+        if (!rm) {
+          warns.push({ rm: rmName + ' [RM]', needed: need.qty.toFixed(3) + ' ' + (need.unit || ''), have: 'no match in Raw Materials — check name spelling', isWip: false })
+          continue
+        }
+        const neededInRMUnit = convertBomQty(need.qty, need.unit, rm.unit)
+        if (neededInRMUnit == null) {
+          warns.push({ rm: rmName + ' [RM]', needed: need.qty.toFixed(3) + ' ' + (need.unit || '?'), have: (rm.stock ?? 0) + ' ' + (rm.unit || '?') + ' — units don\'t match, needs review', isWip: false })
+        } else if (rm.stock < neededInRMUnit) {
+          warns.push({ rm: rmName + ' [RM]', needed: neededInRMUnit.toFixed(3) + ' ' + (rm.unit || ''), have: (rm.stock || 0).toFixed(3) + ' ' + (rm.unit || ''), isWip: false })
         }
       }
     }
@@ -280,7 +315,10 @@ export default function Production() {
       const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
       const wipMap = {}
       ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
+      const { data: allRMs } = await supabase.from('raw_materials').select('name,stock,unit')
       let rmCount = 0, wipCount = 0
+      const missedRM = []
+      const unitMismatchRM = []
       for (const item of bom) {
         if (!item.rm_name) continue
         const wipProduct = wipMap[item.rm_name.toLowerCase()]
@@ -293,12 +331,24 @@ export default function Production() {
             wipCount++
           }
         } else {
-          const deductKg = (item.qty_per_unit * totalOutput) / 1000
-          const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
-          if (rm) { await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductKg) }).eq('name', item.rm_name); rmCount++ }
+          const rm = findRM(allRMs, item.rm_name)
+          if (!rm) { missedRM.push(item.rm_name); continue }
+          const deductQty = convertBomQty(item.qty_per_unit * totalOutput, item.unit, rm.unit)
+          if (deductQty == null) {
+            unitMismatchRM.push(item.rm_name + ' (recipe: ' + (item.unit || '?') + ' vs stock: ' + (rm.unit || '?') + ')')
+            continue
+          }
+          await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductQty) }).eq('name', rm.name)
+          rmCount++
         }
       }
       addLog('✓ ' + rmCount + ' RMs' + (wipCount ? ' + ' + wipCount + ' WIP' : '') + ' deducted for ' + totalOutput + ' units (full batch)', 'ok')
+      if (missedRM.length) {
+        addLog('⚠️ No Raw Materials match for: ' + missedRM.join(', ') + ' — stock NOT deducted. Check spelling against the Raw Materials list.', 'warn')
+      }
+      if (unitMismatchRM.length) {
+        addLog('⚠️ Unit mismatch, stock NOT deducted for: ' + unitMismatchRM.join(', ') + ' — fix the recipe unit or the Raw Material\'s tracked unit in Supabase.', 'warn')
+      }
     }
 
     await supabase.from('productions').insert({
@@ -341,6 +391,7 @@ export default function Production() {
         const { data: wipProds } = await supabase.from('products').select('code,units').eq('category', 'WIP')
         const wipMap = {}
         ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
+        const { data: allRMs } = await supabase.from('raw_materials').select('name,stock,unit')
         for (const item of bom) {
           if (!item.rm_name) continue
           const wipProduct = wipMap[item.rm_name.toLowerCase()]
@@ -352,9 +403,12 @@ export default function Production() {
               await supabase.from('products').update({ units: (wip.units || 0) + restoreQty }).eq('code', wipCode)
             }
           } else {
-            const restoreKg = (item.qty_per_unit * totalForRM) / 1000
-            const { data: rm } = await supabase.from('raw_materials').select('stock').eq('name', item.rm_name).single()
-            if (rm) await supabase.from('raw_materials').update({ stock: rm.stock + restoreKg }).eq('name', item.rm_name)
+            const rm = findRM(allRMs, item.rm_name)
+            if (!rm) continue
+            // Mirror saveProduction's convertBomQty — if the original deduction couldn't
+            // convert the units, nothing was deducted, so there's nothing to restore here either.
+            const restoreQty = convertBomQty(item.qty_per_unit * totalForRM, item.unit, rm.unit)
+            if (restoreQty != null) await supabase.from('raw_materials').update({ stock: rm.stock + restoreQty }).eq('name', rm.name)
           }
         }
       }
@@ -1018,13 +1072,13 @@ function ScheduleRow({ s, allSchedule, statusColors, onStatusChange, onDelete, o
       }
       const rmItems = bom.filter(b => b.rm_name && !wipMap[b.rm_name.toLowerCase()] && b.component_type !== 'wip')
       if (rmItems.length) {
-        const { data: stocks } = await supabase.from('raw_materials').select('name,stock').in('name', rmItems.map(b => b.rm_name).filter(Boolean))
-        const stockMap = {}
-        ;(stocks || []).forEach(r => { stockMap[r.name] = r.stock })
+        const { data: stocks } = await supabase.from('raw_materials').select('name,stock,unit')
         for (const item of rmItems) {
-          const neededKg = (item.qty_per_unit * out) / 1000
-          const have = stockMap[item.rm_name] || 0
-          if (have < neededKg) warns.push({ rm: item.rm_name + ' [RM]', needed: neededKg.toFixed(3) + 'kg', have: have.toFixed(3) + 'kg', isWip: false })
+          const rm = findRM(stocks, item.rm_name)
+          if (!rm) { warns.push({ rm: item.rm_name + ' [RM]', needed: (item.qty_per_unit * out).toFixed(3) + ' ' + (item.unit || ''), have: 'no match in Raw Materials', isWip: false }); continue }
+          const neededInRMUnit = convertBomQty(item.qty_per_unit * out, item.unit, rm.unit)
+          if (neededInRMUnit == null) warns.push({ rm: item.rm_name + ' [RM]', needed: (item.qty_per_unit * out) + ' ' + (item.unit || '?'), have: (rm.stock ?? 0) + ' ' + (rm.unit || '?') + ' — units mismatch', isWip: false })
+          else if (rm.stock < neededInRMUnit) warns.push({ rm: item.rm_name + ' [RM]', needed: neededInRMUnit.toFixed(3) + ' ' + (rm.unit || ''), have: (rm.stock || 0).toFixed(3) + ' ' + (rm.unit || ''), isWip: false })
         }
       }
       setRMStatus(warns)

@@ -84,6 +84,9 @@ export default function Production() {
   const [rmUsageForm, setRmUsageForm] = useState({ date: new Date().toISOString().split('T')[0], rm_name: '', quantity: '', unit: 'kg', notes: '' })
   const [rmUsageLog, setRmUsageLog] = useState([])
   const [savingRM, setSavingRM] = useState(false)
+  const [historySearchCode, setHistorySearchCode] = useState('')
+  const [historySearchResults, setHistorySearchResults] = useState(null)
+  const [historySearchLoading, setHistorySearchLoading] = useState(false)
 
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -118,6 +121,18 @@ export default function Production() {
     if (inputType === 'cakes' && CAKE_YIELD[code]) return Math.round(q * CAKE_YIELD[code])
     if (inputType === '6inch' || inputType === '9inch') return Math.round(q)
     return Math.round(q)
+  }
+
+  async function searchProductHistory(code) {
+    setHistorySearchCode(code)
+    if (!code) { setHistorySearchResults(null); return }
+    setHistorySearchLoading(true)
+    const { data } = await supabase.from('productions').select('*')
+      .eq('product_code', code)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
+    setHistorySearchResults(data || [])
+    setHistorySearchLoading(false)
   }
 
   async function getWIPCodes() {
@@ -817,7 +832,80 @@ export default function Production() {
 
         {view === 'history' && (
           <div>
-            {Object.keys(historyByDate).length === 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+              <div style={{ flex: '0 0 320px' }}>
+                <select style={selectStyle} value={historySearchCode} onChange={e => searchProductHistory(e.target.value)}>
+                  <option value="">🔍 Search a product's history...</option>
+                  {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
+                </select>
+              </div>
+              {historySearchCode && (
+                <button className="btn btn-secondary btn-sm" onClick={() => searchProductHistory('')}>✕ Clear search</button>
+              )}
+            </div>
+
+            {historySearchCode ? (
+              historySearchLoading ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Searching...</div>
+              ) : !historySearchResults || historySearchResults.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>
+                  No production runs found for <span className="code-tag">{historySearchCode}</span>.
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: 'var(--kk-green)', borderRadius: '6px 6px 0 0' }}>
+                    <div style={{ fontFamily: 'var(--display)', fontSize: 13, letterSpacing: 2, color: 'var(--kk-cream)', textTransform: 'uppercase' }}>
+                      {historySearchCode} — {products.find(p => p.code === historySearchCode)?.name || ''} ({historySearchResults.length} run{historySearchResults.length === 1 ? '' : 's'})
+                    </div>
+                  </div>
+                  <div style={{ border: '1px solid var(--border)', borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          {['Date','Input','Good Units','Rejected','Value','By','Notes',''].map((h,i) => (
+                            <th key={i} style={{ background: 'var(--surface2)', padding: '8px 14px', textAlign: 'left', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink3)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {historySearchResults.map(h => {
+                          const prod = products.find(p => p.code === h.product_code)
+                          const ppp = productionValueFor(prod)
+                          const packs = sellableQty(h.product_code, h.output_units)
+                          const batchVal = packs * ppp
+                          return (
+                            <tr key={h.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '10px 14px', color: 'var(--ink3)' }}>{new Date((h.date || h.created_at) + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</td>
+                              <td style={{ padding: '10px 14px', color: 'var(--ink3)' }}>{h.input_qty} {h.input_type}</td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--green)' }}>+{h.output_units}</td>
+                              <td style={{ padding: '10px 14px' }}>
+                                {h.rejected_units > 0 ? (
+                                  <div>
+                                    <span style={{ fontWeight: 600, color: 'var(--red)' }}>{h.rejected_units}</span>
+                                    {h.rejection_reason && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{h.rejection_reason}</div>}
+                                  </div>
+                                ) : <span style={{ color: 'var(--ink3)' }}>—</span>}
+                              </td>
+                              <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--kk-brown)' }}>
+                                {isAdmin && (batchVal > 0 ? '$' + batchVal.toFixed(0) : <span style={{ color: 'var(--ink3)' }}>—</span>)}
+                              </td>
+                              <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--ink3)' }}>{h.created_by_name}</td>
+                              <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--ink3)' }}>{h.notes}</td>
+                              <td style={{ padding: '10px 14px' }}>
+                                <button onClick={() => deleteProduction(h)} disabled={deletingId === h.id}
+                                  style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 3, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'var(--mono)', opacity: deletingId === h.id ? 0.5 : 1 }}>
+                                  {deletingId === h.id ? '...' : 'Del'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )
+            ) : Object.keys(historyByDate).length === 0 ? (
               <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>No production history yet.</div>
             ) : Object.entries(historyByDate).map(([date, entries]) => {
               const dayValue = entries.reduce((sum, h) => {

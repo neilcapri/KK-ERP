@@ -190,6 +190,7 @@ export default function TimeTracking({ user, employee }) {
   const [adminClockTime, setAdminClockTime] = useState("");
   const [adminClockOut, setAdminClockOut] = useState("");
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [adminLayout, setAdminLayout] = useState("employee"); // "employee" | "day"
   const calendarRef = useRef(null);
 
   useEffect(() => {
@@ -286,6 +287,22 @@ export default function TimeTracking({ user, employee }) {
     });
     return Object.values(map);
   }
+
+  function groupedByDay() {
+    const map = {};
+    entries.forEach(e => {
+      const day = e.clock_in ? e.clock_in.split("T")[0] : "unknown";
+      if (!map[day]) map[day] = [];
+      map[day].push(e);
+    });
+    return Object.entries(map)
+      .sort((a, b) => b[0].localeCompare(a[0])) // newest day first
+      .map(([day, dayEntries]) => ({
+        day,
+        entries: [...dayEntries].sort((a, b) => (a.employees?.name || "").localeCompare(b.employees?.name || "")),
+      }));
+  }
+  const fmtDayHeader = (day) => day === "unknown" ? "Unknown date" : fmtDate(day + "T12:00:00");
 
   const myEntries = entries.filter(e => e.employee_id === employee?.id);
   const myWeekHours = weeklyTotals(employee?.id);
@@ -413,14 +430,79 @@ export default function TimeTracking({ user, employee }) {
         <div style={s.card}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"16px", flexWrap:"wrap", gap:"8px" }}>
             <div style={s.h3}>All Employees — {rangeLabel}</div>
-            <select style={s.select} value={selectedEmployee||""} onChange={e => setSelectedEmployee(e.target.value||null)}>
-              <option value="">All Employees</option>
-              {allEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </select>
+            <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+              <div style={{ display:"flex", gap:"4px", background:"#f0f4f0", borderRadius:"8px", padding:"3px" }}>
+                {[{key:"employee",label:"Per Employee"},{key:"day",label:"Per Day"}].map(opt => (
+                  <button key={opt.key} onClick={() => setAdminLayout(opt.key)}
+                    style={{
+                      padding:"6px 14px", borderRadius:"6px", border:"none", cursor:"pointer",
+                      background: adminLayout===opt.key ? "#2d5a2d" : "transparent",
+                      color: adminLayout===opt.key ? "#fff" : "#555",
+                      fontSize:"12px", fontWeight:"600",
+                    }}>{opt.label}</button>
+                ))}
+              </div>
+              <select style={s.select} value={selectedEmployee||""} onChange={e => setSelectedEmployee(e.target.value||null)}>
+                <option value="">All Employees</option>
+                {allEmployees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            </div>
           </div>
 
           {loading ? <div style={{ color:"#888", fontSize:"13px" }}>Loading...</div> : (
-            isMobile ? (
+            adminLayout === "day" ? (
+              // ── Per Day layout ──
+              groupedByDay().length === 0 ? (
+                <div style={{ color:"#888", fontSize:"13px", textAlign:"center", padding:"20px" }}>No entries</div>
+              ) : groupedByDay().map(({ day, entries: dayEntries }) => {
+                const dayTotalHrs = dayEntries.filter(e => e.hours_worked!=null).reduce((s,e) => s+parseFloat(e.hours_worked||0), 0);
+                const dayTotalPay = dayEntries.reduce((s,e) => {
+                  const rate = e.employees?.hourly_rate;
+                  return s + (e.hours_worked!=null && rate ? e.hours_worked*rate : 0);
+                }, 0);
+                return (
+                  <div key={day} style={{ marginBottom:"24px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px", flexWrap:"wrap", gap:"8px" }}>
+                      <span style={{ fontWeight:"700", color:"#1a3c1a", fontSize:"14px" }}>{fmtDayHeader(day)}</span>
+                      <div style={{ display:"flex", gap:"12px", fontSize:"13px" }}>
+                        <span style={{ background:"#f0f4f0", borderRadius:"8px", padding:"4px 12px" }}><strong>{fmtHours(dayTotalHrs)}</strong></span>
+                        {dayTotalPay > 0 && (
+                          <span style={{ background:"#e8f5e9", borderRadius:"8px", padding:"4px 12px" }}><strong>${dayTotalPay.toFixed(2)}</strong></span>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ overflowX:"auto" }}>
+                      <table style={s.table}>
+                        <thead><tr>
+                          <th style={s.th}>Employee</th><th style={s.th}>In</th><th style={s.th}>Out</th>
+                          <th style={s.th}>Hours</th><th style={s.th}>Pay</th><th style={s.th}>Notes</th><th style={s.th}>Actions</th>
+                        </tr></thead>
+                        <tbody>
+                          {dayEntries.map(e => {
+                            const rate = e.employees?.hourly_rate;
+                            const entryPay = (e.hours_worked!=null && rate) ? (e.hours_worked*rate).toFixed(2) : null;
+                            return (
+                              <tr key={e.id}>
+                                <td style={s.td}>{e.employees?.name || "—"}</td>
+                                <td style={s.td}>{fmtTime(e.clock_in)}</td>
+                                <td style={s.td}>{e.clock_out ? fmtTime(e.clock_out) : <span style={{ color:"#f0a500", fontWeight:"600" }}>Active</span>}</td>
+                                <td style={s.td}>{e.clock_out ? fmtHours(e.hours_worked) : <LiveTimer clockIn={e.clock_in} hourlyRate={rate} />}</td>
+                                <td style={s.td}>{entryPay?`$${entryPay}`:"—"}</td>
+                                <td style={s.td}>{e.notes||"—"}</td>
+                                <td style={s.td}>
+                                  <button style={s.editBtn} onClick={() => { setEditModal({entry:e,empName:e.employees?.name}); setEditForm({clock_in:toLocalInput(e.clock_in),clock_out:toLocalInput(e.clock_out),notes:e.notes||""}); }}>Edit</button>
+                                  <button style={s.delBtn} onClick={() => handleDelete(e.id)}>Del</button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })
+            ) : isMobile ? (
               // ── Mobile: card layout ──
               groupedEntries().map(({ info, entries: empEntries }) => (
                 <EmployeeCard key={info?.id} info={info} empEntries={empEntries}

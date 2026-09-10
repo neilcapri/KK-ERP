@@ -566,6 +566,82 @@ function printDispatchSlip(ordersInput) {
   const w = window.open('', '_blank'); w.document.write(html); w.document.close(); w.print()
 }
 
+function escapeHtmlPL(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
+function buildPackingList(ordersInput) {
+  const packMap = {} // code -> { name, qty }
+  const bulkMap = {} // code -> { name, qty }
+  ordersInput.forEach(order => {
+    (order.order_items || []).forEach(item => {
+      const code = item.product_code
+      if (!code) return
+      const isBulk = item.item_type === 'bulk' || code.endsWith('Bu') || BULK_CODES.has(code)
+      if (isBulk) {
+        if (!bulkMap[code]) bulkMap[code] = { name: item.product_name || code, qty: 0 }
+        bulkMap[code].qty += item.quantity || 0
+      } else {
+        if (!packMap[code]) packMap[code] = { name: item.product_name || code, qty: 0 }
+        packMap[code].qty += itemToPacks(item) || 0
+      }
+    })
+  })
+
+  // Order by the canonical category order (RETAIL_COLS / BULK_COLS); anything not in
+  // those lists (a code that's changed or new) is appended at the end alphabetically.
+  function ordered(map, refList) {
+    const known = refList.map(c => c.code).filter(code => map[code])
+    const extra = Object.keys(map).filter(code => !known.includes(code)).sort()
+    return [...known, ...extra].map(code => ({ code, name: map[code].name, qty: map[code].qty })).filter(r => r.qty > 0)
+  }
+
+  return { packs: ordered(packMap, RETAIL_COLS), bulk: ordered(bulkMap, BULK_COLS) }
+}
+
+function printPackingListHTML(ordersInput) {
+  const { packs, bulk } = buildPackingList(ordersInput)
+  const storeNames = [...new Set(ordersInput.map(o => o.customer_name))]
+
+  function renderTable(rows, unitLabel) {
+    if (!rows.length) return ''
+    const trs = rows.map(r =>
+      '<tr><td class="chk"><input type="checkbox" /></td><td>' + escapeHtmlPL(r.name) + ' <span class="code">(' + escapeHtmlPL(r.code) + ')</span></td>' +
+      '<td class="qty">' + r.qty + ' ' + unitLabel + '</td></tr>'
+    ).join('')
+    return '<table><thead><tr><th class="chk"></th><th>Product</th><th class="qty">Qty</th></tr></thead><tbody>' + trs + '</tbody></table>'
+  }
+
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8" /><title>KK Packing List</title><style>' + [
+    'body { font-family: Arial, sans-serif; background: #E3DDD1; color: #223824; margin: 0; padding: 24px; }',
+    'h1 { font-size: 18px; letter-spacing: 1px; margin: 0 0 4px; text-transform: uppercase; }',
+    'h2 { font-size: 13px; letter-spacing: 1px; text-transform: uppercase; margin: 24px 0 8px; color: #223824; }',
+    '.meta { font-size: 12px; color: #555; margin-bottom: 4px; }',
+    '.stores { font-size: 11px; color: #666; margin-bottom: 16px; }',
+    '.print-bar { margin-bottom: 16px; }',
+    '.print-bar button { background: #223824; color: #E3DDD1; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; }',
+    'table { border-collapse: collapse; width: 100%; max-width: 640px; background: #fff; margin-bottom: 8px; }',
+    'th, td { border: 1px solid #ccc; padding: 6px 10px; font-size: 13px; text-align: left; }',
+    'th { background: #E79B81; color: #223824; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }',
+    'th.chk, td.chk { width: 30px; text-align: center; }',
+    'th.qty, td.qty { width: 90px; text-align: center; font-weight: 700; }',
+    '.code { color: #888; font-weight: 400; font-size: 11px; }',
+    '@media print { .print-bar { display: none; } body { background: #fff; padding: 0; } }',
+  ].join('\n') + '</style></head><body>' +
+    '<div class="print-bar"><button onclick="window.print()">🖨️ Print / Save as PDF</button></div>' +
+    '<h1>Konscious Kitchen — Packing List</h1>' +
+    '<div class="meta">' + new Date().toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + ' &middot; ' + ordersInput.length + ' order' + (ordersInput.length === 1 ? '' : 's') + '</div>' +
+    '<div class="stores">Stores: ' + storeNames.map(escapeHtmlPL).join(', ') + '</div>' +
+    (packs.length ? '<h2>Packs to Pack</h2>' + renderTable(packs, 'packs') : '') +
+    (bulk.length ? '<h2>Bulk to Pack</h2>' + renderTable(bulk, 'units') : '') +
+    (!packs.length && !bulk.length ? '<div style="padding:20px;color:#888">No items found in the selected orders.</div>' : '') +
+    '</body></html>'
+
+  const w = window.open('', '_blank')
+  if (!w) { alert('Please allow pop-ups to view the packing list.'); return }
+  w.document.open(); w.document.write(html); w.document.close()
+}
+
 async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '', orderMode = 'cases') {
   const productList = products.map(p => p.code + ': ' + p.name).join('\n')
   const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
@@ -1076,6 +1152,7 @@ export default function Orders() {
     else setSelectedOrders(prev => { const next = new Set(prev); allIds.forEach(id => next.add(id)); return next })
   }
   function printSelected() { const toPrint = orders.filter(o => selectedOrders.has(o.id)); if (!toPrint.length) { alert('No orders selected.'); return }; printDispatchSlip(toPrint) }
+  function showPackingList() { const toPack = orders.filter(o => selectedOrders.has(o.id)); if (!toPack.length) { alert('Select the orders you\'re packing first.'); return }; printPackingListHTML(toPack) }
 
   const activeOrders = orders.filter(o => o.status !== 'archived')
   const archivedOrders = orders.filter(o => o.status === 'archived')
@@ -1088,6 +1165,7 @@ export default function Orders() {
         <div><h2>ORDERS</h2><p>Incoming order management</p></div>
         <div style={{ display:'flex', gap:8 }}>
           {selectedOrders.size > 0 && (<>
+            <button className="btn btn-green" onClick={showPackingList}>📦 Packing List ({selectedOrders.size})</button>
             <button className="btn btn-secondary" onClick={printSelected}>🖨️ Print {selectedOrders.size} Slip{selectedOrders.size > 1 ? 's' : ''}</button>
             <button className="btn btn-secondary" onClick={exportManifest}>📋 Manifest ({selectedOrders.size})</button>
           </>)}

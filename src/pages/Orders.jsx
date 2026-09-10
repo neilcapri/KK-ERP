@@ -642,6 +642,214 @@ function printPackingListHTML(ordersInput) {
   w.document.open(); w.document.write(html); w.document.close()
 }
 
+// ── "View in Browser" HTML versions of the order sheet ──────
+// Mirrors buildRetailSheet / buildBulkSheet above, but renders HTML tables
+// in a new tab instead of writing an .xlsx file.
+function buildRetailHTML(orders, includePricing, weekLabel) {
+  const catGroups = [[3,'MUFFINS'],[4,'NATURES PRIVATE LABEL'],[3,'WHOLE CAKES'],[4,'BREAD & LOAVES'],[3,'DOUGHNUTS'],[4,'CAKE SLICES'],[4,'COOKIES - PALEO'],[5,'COOKIES - KETO'],[5,'BROWNIE & BARS'],[4,'MINI CAKES'],[4,'CAKE CUPS'],[5,'HOLIDAY EDITION']]
+  const catCells = catGroups.map(([count, label]) => '<th colspan="' + count + '" class="cat">' + escapeHtmlPL(label) + '</th>').join('')
+  let colCells = RETAIL_COLS.map(c => '<th>' + escapeHtmlPL(c.name) + '<br><span class="code">(' + escapeHtmlPL(c.code) + ')</span></th>').join('')
+  if (includePricing) colCells += '<th>ORDER VALUE ($)</th>'
+  colCells += '<th class="notes-head">NOTES</th>'
+  const numCols = RETAIL_COLS.length + 1 + (includePricing ? 1 : 0) + 1
+
+  const byDay = {}
+  for (const o of orders) { const day = o.delivery_day || 'Unscheduled'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
+  const ALL_DAY_GROUPS = [...DELIVERY_DAYS, 'Unscheduled']
+
+  let bodyRows = ''
+  for (const day of ALL_DAY_GROUPS) {
+    const dayOrders = byDay[day] || []
+    if (!dayOrders.length) continue
+    const dayLabel = day === 'Unscheduled' ? 'UNSCHEDULED / NO PACKING DAY SET' : day.toUpperCase()
+    bodyRows += '<tr class="day-row"><td colspan="' + numCols + '">' + escapeHtmlPL(dayLabel) + '</td></tr>'
+
+    const colTotals = new Array(RETAIL_COLS.length).fill(0)
+    let dayValueTotal = 0
+    for (const order of dayOrders) {
+      const items = order.order_items || []
+      const packsMap = {}, priceMap = {}
+      for (const item of items) {
+        if (!item.product_code) continue
+        const packs = getItemPacks(item)
+        packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
+        priceMap[item.product_code] = item.price_per_pack || 0
+      }
+      const hasRetailItems = RETAIL_COLS.some(col => packsMap[col.code])
+      if (!hasRetailItems) continue
+      let rowTotal = 0
+      let rowCells = '<td class="store">' + escapeHtmlPL(order.customer_name) + (order.po_number ? ' <span class="po">(PO: ' + escapeHtmlPL(order.po_number) + ')</span>' : '') + '</td>'
+      RETAIL_COLS.forEach((col, i) => {
+        const packs = packsMap[col.code]
+        if (packs) { colTotals[i] += packs; if (priceMap[col.code]) rowTotal += packs * priceMap[col.code] }
+        rowCells += '<td>' + (packs || '') + '</td>'
+      })
+      if (includePricing) { rowCells += '<td>' + (rowTotal > 0 ? '$' + rowTotal.toFixed(2) : '') + '</td>'; dayValueTotal += rowTotal }
+      rowCells += '<td class="notes">' + (order.notes ? escapeHtmlPL(order.notes) : '') + '</td>'
+      bodyRows += '<tr>' + rowCells + '</tr>'
+    }
+    let totalCells = '<td class="total-label">TOTAL</td>'
+    colTotals.forEach(t => { totalCells += '<td>' + (t || '') + '</td>' })
+    if (includePricing) totalCells += '<td>' + (dayValueTotal > 0 ? '$' + dayValueTotal.toFixed(2) : '') + '</td>'
+    totalCells += '<td></td>'
+    bodyRows += '<tr class="total-row">' + totalCells + '</tr>'
+    bodyRows += '<tr class="spacer"><td colspan="' + numCols + '"></td></tr>'
+  }
+
+  // Grand totals across ALL orders (not just per day)
+  const grandColTotals = new Array(RETAIL_COLS.length).fill(0)
+  let grandOrderTotal = 0
+  for (const order of orders) {
+    const packsMap = {}, priceMap = {}
+    for (const item of (order.order_items || [])) {
+      if (!item.product_code) continue
+      const packs = getItemPacks(item)
+      packsMap[item.product_code] = (packsMap[item.product_code] || 0) + packs
+      priceMap[item.product_code] = item.price_per_pack || 0
+    }
+    RETAIL_COLS.forEach((col, ci) => {
+      const packs = packsMap[col.code] || 0
+      grandColTotals[ci] += packs
+      if (packs && priceMap[col.code]) grandOrderTotal += packs * priceMap[col.code]
+    })
+  }
+  let grandCells = '<td class="grand-label">GRAND TOTAL</td>'
+  grandColTotals.forEach(t => { grandCells += '<td>' + (t || '') + '</td>' })
+  if (includePricing) grandCells += '<td>' + (grandOrderTotal > 0 ? '$' + grandOrderTotal.toFixed(2) : '') + '</td>'
+  grandCells += '<td></td>'
+  bodyRows += '<tr class="grand-row">' + grandCells + '</tr>'
+
+  let unitsCells = '<td class="units-label">TOTAL UNITS</td>'
+  RETAIL_COLS.forEach((col, ci) => {
+    const packs = grandColTotals[ci] || 0
+    const upp = UNITS_PER_PACK_MAP[col.code] || 1
+    unitsCells += '<td>' + (packs > 0 ? packs * upp : '') + '</td>'
+  })
+  if (includePricing) unitsCells += '<td></td>'
+  unitsCells += '<td></td>'
+  bodyRows += '<tr class="units-row">' + unitsCells + '</tr>'
+
+  let traysCells = '<td class="trays-label">TRAYS TO MAKE</td>'
+  RETAIL_COLS.forEach((col, ci) => {
+    const packs = grandColTotals[ci] || 0
+    const upp = UNITS_PER_PACK_MAP[col.code] || 1
+    const totalUnits = packs * upp
+    const trayYield = TRAY_YIELD_MAP[col.code]
+    traysCells += '<td>' + (trayYield && totalUnits > 0 ? Math.ceil(totalUnits / trayYield) : '') + '</td>'
+  })
+  if (includePricing) traysCells += '<td></td>'
+  traysCells += '<td></td>'
+  bodyRows += '<tr class="trays-row">' + traysCells + '</tr>'
+
+  return '<h1>KONSCIOUS KITCHEN — ORDER SHEET' + (weekLabel ? ' — ' + escapeHtmlPL(weekLabel) : '') + '</h1>' +
+    '<table class="ordersheet"><thead>' +
+    '<tr><th class="store-head"></th>' + catCells + '</tr>' +
+    '<tr><th>Store</th>' + colCells + '</tr>' +
+    '</thead><tbody>' + bodyRows + '</tbody></table>'
+}
+
+function buildBulkHTML(orders, weekLabel, includePricing) {
+  const bulkCatGroups = [[5,'CUPCAKES'],[5,'COOKIES'],[4,'BARS'],[3,'MUFFINS'],[1,'DONUTS'],[2,'GO BANANAS']]
+  const catCells = bulkCatGroups.map(([count, label]) => '<th colspan="' + count + '" class="cat">' + escapeHtmlPL(label) + '</th>').join('')
+  let colCells = BULK_COLS.map(c => '<th>' + escapeHtmlPL(c.name) + '<br><span class="code">(' + escapeHtmlPL(c.code) + ')</span><br>UNITS</th>').join('')
+  if (includePricing) colCells += '<th>ORDER VALUE ($)</th>'
+  colCells += '<th class="notes-head">NOTES</th>'
+  const numCols = BULK_COLS.length + 1 + (includePricing ? 1 : 0) + 1
+
+  const byDay = {}
+  for (const o of orders) { const day = o.delivery_day || 'Unscheduled'; if (!byDay[day]) byDay[day] = []; byDay[day].push(o) }
+  const ALL_DAY_GROUPS = [...DELIVERY_DAYS, 'Unscheduled']
+
+  let bodyRows = ''
+  for (const day of ALL_DAY_GROUPS) {
+    const dayOrders = (byDay[day] || []).filter(o => (o.order_items || []).some(item => BULK_CODES.has(item.product_code)))
+    if (!dayOrders.length) continue
+    const dayLabel = day === 'Unscheduled' ? 'UNSCHEDULED / NO PACKING DAY SET' : day.toUpperCase()
+    bodyRows += '<tr class="day-row"><td colspan="' + numCols + '">' + escapeHtmlPL(dayLabel) + '</td></tr>'
+
+    const colTotals = new Array(BULK_COLS.length).fill(0)
+    let dayValueTotal = 0
+    for (const order of dayOrders) {
+      const items = order.order_items || []
+      const qtyMap = {}, priceMap = {}
+      for (const item of items) { if (item.product_code) { qtyMap[item.product_code] = (qtyMap[item.product_code] || 0) + (item.quantity || 0); priceMap[item.product_code] = item.price_per_pack || 0 } }
+      let rowTotal = 0
+      let rowCells = '<td class="store">' + escapeHtmlPL(order.customer_name) + (order.po_number ? ' <span class="po">(PO: ' + escapeHtmlPL(order.po_number) + ')</span>' : '') + '</td>'
+      BULK_COLS.forEach((col, i) => {
+        const qty = qtyMap[col.code] || 0
+        if (qty) { colTotals[i] += qty; if (priceMap[col.code]) rowTotal += qty * priceMap[col.code] }
+        rowCells += '<td>' + (qty || '') + '</td>'
+      })
+      if (includePricing) { rowCells += '<td>' + (rowTotal > 0 ? '$' + rowTotal.toFixed(2) : '') + '</td>'; dayValueTotal += rowTotal }
+      rowCells += '<td class="notes">' + (order.notes ? escapeHtmlPL(order.notes) : '') + '</td>'
+      bodyRows += '<tr>' + rowCells + '</tr>'
+    }
+    let totalCells = '<td class="total-label">TOTAL</td>'
+    colTotals.forEach(t => { totalCells += '<td>' + (t || '') + '</td>' })
+    if (includePricing) totalCells += '<td>' + (dayValueTotal > 0 ? '$' + dayValueTotal.toFixed(2) : '') + '</td>'
+    totalCells += '<td></td>'
+    bodyRows += '<tr class="total-row">' + totalCells + '</tr>'
+    bodyRows += '<tr class="spacer"><td colspan="' + numCols + '"></td></tr>'
+  }
+
+  const grandBulkTotals = new Array(BULK_COLS.length).fill(0)
+  let grandBulkValue = 0
+  for (const order of orders) {
+    for (const item of (order.order_items || [])) {
+      if (BULK_CODES.has(item.product_code)) {
+        const idx = BULK_COLS.findIndex(c => c.code === item.product_code)
+        if (idx >= 0) grandBulkTotals[idx] += item.quantity || 0
+        grandBulkValue += (item.quantity || 0) * (item.price_per_pack || 0)
+      }
+    }
+  }
+  let grandCells = '<td class="grand-label">GRAND TOTAL</td>'
+  grandBulkTotals.forEach(t => { grandCells += '<td>' + (t || '') + '</td>' })
+  if (includePricing) grandCells += '<td>' + (grandBulkValue > 0 ? '$' + grandBulkValue.toFixed(2) : '') + '</td>'
+  grandCells += '<td></td>'
+  bodyRows += '<tr class="grand-row">' + grandCells + '</tr>'
+
+  return '<h1>KONSCIOUS KITCHEN — BULK ORDERS' + (weekLabel ? ' — ' + escapeHtmlPL(weekLabel) : '') + '</h1>' +
+    '<table class="ordersheet"><thead>' +
+    '<tr><th class="store-head"></th>' + catCells + '</tr>' +
+    '<tr><th>Store</th>' + colCells + '</tr>' +
+    '</thead><tbody>' + bodyRows + '</tbody></table>'
+}
+
+function buildOrderSheetPage(orders, includePricing, weekLabel) {
+  const retailHTML = buildRetailHTML(orders, includePricing, weekLabel)
+  const bulkHTML = buildBulkHTML(orders, weekLabel, includePricing)
+  const css = [
+    'body { font-family: Arial, Helvetica, sans-serif; background: #E3DDD1; margin: 0; padding: 24px; color: #223824; }',
+    'h1 { font-size: 16px; letter-spacing: 1px; margin: 24px 0 8px; text-transform: uppercase; }',
+    'table.ordersheet { border-collapse: collapse; width: 100%; margin-bottom: 32px; background: #fff; }',
+    'table.ordersheet th, table.ordersheet td { border: 1px solid #ccc; padding: 4px 6px; font-size: 11px; text-align: center; white-space: pre-line; }',
+    'table.ordersheet th.cat { background: #223824; color: #E3DDD1; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }',
+    'table.ordersheet thead tr:last-child th { background: #E79B81; color: #223824; font-weight: 700; }',
+    'table.ordersheet .code { font-size: 9px; color: #666; }',
+    'table.ordersheet .po { font-size: 9px; color: #888; font-weight: 400; }',
+    'table.ordersheet td.store, table.ordersheet th.store-head { text-align: left; font-weight: 600; min-width: 160px; white-space: normal; }',
+    'table.ordersheet td.notes, table.ordersheet th.notes-head { text-align: left; min-width: 140px; white-space: normal; }',
+    'table.ordersheet tr.day-row td { background: #223824; color: #fff; font-weight: 700; text-align: left; padding: 6px 8px; letter-spacing: 1px; }',
+    'table.ordersheet tr.total-row td { background: #C8E6C9; font-weight: 700; }',
+    'table.ordersheet tr.total-row td.total-label { text-align: left; }',
+    'table.ordersheet tr.grand-row td { background: #223824; color: #E3DDD1; font-weight: 700; }',
+    'table.ordersheet tr.grand-row td.grand-label { text-align: left; }',
+    'table.ordersheet tr.units-row td { background: #E8F5E9; color: #1B5E20; font-weight: 700; }',
+    'table.ordersheet tr.units-row td.units-label { text-align: left; }',
+    'table.ordersheet tr.trays-row td { background: #EDE7F6; color: #4A148C; font-weight: 700; }',
+    'table.ordersheet tr.trays-row td.trays-label { text-align: left; }',
+    'table.ordersheet tr.spacer td { border: none; padding: 4px; background: transparent; }',
+    '.print-bar { margin-bottom: 16px; }',
+    '.print-bar button { background: #223824; color: #E3DDD1; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; }',
+    '@media print { .print-bar { display: none; } body { background: #fff; padding: 0; } }',
+  ].join('\n')
+  return '<!DOCTYPE html><html><head><meta charset="utf-8" /><title>KK Order Sheet — ' + escapeHtmlPL(weekLabel) + '</title><style>' + css + '</style></head><body>' +
+    '<div class="print-bar"><button onclick="window.print()">🖨️ Print / Save as PDF</button></div>' +
+    retailHTML + bulkHTML +
+    '</body></html>'
+}
+
 async function readOrderWithAI(content, products, customerName = '', isImage = false, fileType = '', orderMode = 'cases') {
   const productList = products.map(p => p.code + ': ' + p.name).join('\n')
   const isNaturesEmporium = customerName.toLowerCase().includes('natures emporium') || customerName.toLowerCase().includes('nature emporium')
@@ -1135,6 +1343,17 @@ export default function Orders() {
     setExportLoading(false)
   }
 
+  function viewOrderSheetInBrowser(includePricing) {
+    const offset = exportWeek === 'next' ? 1 : 0
+    const sheetOrders = orders.filter(o => isWeekOrder(o, offset))
+    if (!sheetOrders.length) { alert('No active orders for ' + (exportWeek === 'next' ? 'next' : 'this') + ' week.'); return }
+    const weekLabel = getWeekLabel(offset)
+    const html = buildOrderSheetPage(sheetOrders, includePricing, weekLabel)
+    const win = window.open('', '_blank')
+    if (!win) { alert('Please allow pop-ups to view the order sheet in your browser.'); return }
+    win.document.open(); win.document.write(html); win.document.close()
+  }
+
   async function resetWeek() {
     const weekLabel = getWeekLabel(0)
     if (!window.confirm('Archive all active orders for week of ' + weekLabel + '?\n\nNext-week orders will NOT be affected.')) return
@@ -1221,6 +1440,8 @@ export default function Orders() {
             <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>
               <button className="btn btn-green" onClick={() => exportOrderSheet(true)} disabled={exportLoading} style={{ display: isAdmin ? 'inline-flex' : 'none' }}>{exportLoading ? '⏳ Generating...' : '📥 Export Full (with pricing)'}</button>
               <button className="btn btn-secondary" onClick={() => exportOrderSheet(false)} disabled={exportLoading}>{exportLoading ? '⏳ Generating...' : '📥 Export Team Sheet'}</button>
+              <button className="btn btn-secondary" onClick={() => viewOrderSheetInBrowser(true)} style={{ display: isAdmin ? 'inline-flex' : 'none' }}>🌐 View Full (browser)</button>
+              <button className="btn btn-secondary" onClick={() => viewOrderSheetInBrowser(false)}>🌐 View Team (browser)</button>
               <button className="btn btn-red" onClick={resetWeek} disabled={exportLoading} style={{ marginLeft:'auto' }}>🗄 Reset Week</button>
             </div>
           </div>

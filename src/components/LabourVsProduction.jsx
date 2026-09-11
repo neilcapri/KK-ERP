@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
+// Kept in sync with the canonical PACK_SIZE map in Production.jsx — this map was
+// missing POS, PGCo, KSCo, WSBIS, COBIS, CCL, BAGL, Focaccia, TRFCS, HRCS and VSCS,
+// so sellableQty() silently skipped dividing those products' units by their pack
+// size, inflating Production Value/Dispatch Value on the Dashboard's Operations
+// Summary vs. the (correct) per-day value shown in Production > History.
 const PACK_SIZE = {
-  PBB:2, PCC:2, KLR:2, VPCAN:3, PNF:3, VPB:3,
-  KAB:5, KWAL:5, HPCo:5, PVHC:5, KABIS:5, KSCD:4,
-  VPBD:2, KHD:2, PVBRG:1, KCOC:1, PVBR:1,
-  CMC:1, LMC:1, PRMC:1, TMC:1, KCC:1, KVC:1,
-  KLRCup:1, KCCKE:1, KVCKE:1, KLRCKE:1,
-  NALCOB:1, NBFB:1, PVBB:1, GBL:1, KPL:1,
+  VPB:3, VPCAN:3, PNF:3, PVBRG:1, PVBR:1, PBB:2, PCC:2, KLR:2, KSCD:4, VPBD:2, KHD:2,
+  HPCo:5, KABIS:5, WSBIS:5, COBIS:5, KAB:5, KWAL:5, PVHC:5, POS:5, PGCo:5,
+  KCOC:1, KSCo:5, PVBB:1, GBL:1, KPL:1, CCL:1, BAGL:4, Focaccia:1,
+  TRFCS:1, HRCS:1, VSCS:1, NALCOB:1, NBFB:1,
+  KCC:1, KVC:1, KLRCup:1, KCCKE:1, KVCKE:1, KLRCKE:1,
 }
 
 function sellableQty(code, units) {

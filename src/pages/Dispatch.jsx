@@ -12,6 +12,8 @@ const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,
 //    product sold loose instead of packed — 1:1 with the base retail product.
 //  - PVBBSL / PVBBSLF (Banana Bread Slices, no-frosting and frosted) are cut
 //    from PVBB loaves at 3 slices per loaf.
+//  - KLRCup (KLR Cupcake) is made from KLR muffin batter, 1:1 — it has no
+//    stock of its own, dispatching a cupcake deducts a KLR muffin.
 const STOCK_ALIAS = {
   PBBBu:   { base: 'PBB',   unitsPerBase: 1 },
   PCCBu:   { base: 'PCC',   unitsPerBase: 1 },
@@ -27,6 +29,7 @@ const STOCK_ALIAS = {
   KSCDBu:  { base: 'KSCD',  unitsPerBase: 1 },
   PVBBSL:  { base: 'PVBB',  unitsPerBase: 3 },
   PVBBSLF: { base: 'PVBB',  unitsPerBase: 3 },
+  KLRCup:  { base: 'KLR',   unitsPerBase: 1 },
 }
 
 // Given a dispatch line's own code and its own units_dispatched, returns the
@@ -72,7 +75,7 @@ Below is a table with columns: Product Name | Cs/Units | Prod. Date
 - The Cs/Units column shows "X/Y" where X = cases and Y = units (e.g. "1/6" = 1 case, 6 units). Extract qty as the UNITS number (Y).
 - The Prod. Date column has the PRODUCTION DATE — capture it exactly as written.
 
-Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC, PVBBSL, PVBBSLF.
+Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC, PVBBSL, PVBBSLF, KLRCup.
 Also: HPC/HPCO = HPCo, PCRT = skip.
 
 Rules:
@@ -80,6 +83,7 @@ Rules:
 - Banana Bread Slice, no frosting (PVBBS, "PVBB Slice", "Banana Bread Slice") = code PVBBSL, type "slice"
 - Banana Bread Slice, frosted ("PVBB Slice Frosted", "Banana Bread Slice Frosted", PVBBSLF) = code PVBBSLF, type "slice"
 - If a banana bread slice line doesn't specify frosted vs. not, default to PVBBSL (no frosting) and add a flag noting the assumption
+- KLR = Keto Lemon Raspberry MUFFIN. KLRCup / "KLR Cupcake" / "Lemon Raspberry Cupcake" is a DIFFERENT product with its own stock — never use code KLR for a line that says "cupcake"
 - Crossed out items = skip entirely (do not include)
 - Arrow pointing down = same slip continues below
 - Multiple separate slips = extract each separately
@@ -398,7 +402,13 @@ export default function Dispatch() {
         const key = `${item.code}_${prodDateStr}`
         const prodVerified = prodDateStr ? verifiedItems[key] : null
 
-        if (item.type === 'pack' && packs) {
+        // Aliased codes (KLRCup, banana bread slices, ...Bu bulk variants)
+        // have no "packed" stock of their own — no matter how the slip marks
+        // the line (pack/bulk/slice), it always comes straight out of the
+        // base product's freezer.
+        const isAliased = !!STOCK_ALIAS[item.code]
+
+        if (item.type === 'pack' && packs && !isAliased) {
           await autoPackIfNeeded(item.code, packs, dateStr, profile?.name, addLog)
         }
 
@@ -412,7 +422,7 @@ export default function Dispatch() {
         })
         if (itemErr) { addLog(`❌ Item error (${item.code}): ${itemErr.message}`, 'err'); continue }
 
-        if (item.type === 'pack' && packs) {
+        if (item.type === 'pack' && packs && !isAliased) {
           await deductFromPacked(item.code, packs)
         } else {
           await deductFromFreezerAliased(item.code, units)
@@ -456,8 +466,9 @@ export default function Dispatch() {
     for (const line of manLines) {
       const units = calcUnits(line.code, line.qty, line.type)
       const packs = line.type === 'pack' ? line.qty : null
+      const isAliased = !!STOCK_ALIAS[line.code]
 
-      if (line.type === 'pack' && packs) {
+      if (line.type === 'pack' && packs && !isAliased) {
         await autoPackIfNeeded(line.code, packs, manForm.date, profile?.name, null)
       }
 
@@ -467,7 +478,7 @@ export default function Dispatch() {
         qty: line.qty, dispatch_type: line.type, units_dispatched: units
       })
 
-      if (line.type === 'pack' && packs) {
+      if (line.type === 'pack' && packs && !isAliased) {
         await deductFromPacked(line.code, packs)
       } else {
         await deductFromFreezerAliased(line.code, units)

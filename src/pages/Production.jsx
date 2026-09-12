@@ -16,6 +16,63 @@ const PACK_SIZE = {
 
 const REJECTION_REASONS = ['Burnt', 'Undercooked', 'Damaged', 'Packaging Defect', 'Failed QC', 'Other']
 
+// ── Custom Cake configurator ─────────────────────────────────
+// "Custom Cake" (product code CSTCK, $60) has no fixed recipe — its WIP mix
+// changes with what the customer picked in Orders (slab flavor / size / layer
+// count / frosting flavor). Every other cake in the system has one static set
+// of `bom` rows for its product_code; CSTCK deliberately has NONE — instead,
+// whichever WIP layer + frosting the kitchen actually used gets deducted
+// directly here, computed from the same 4 choices captured on the order.
+// Layer + frosting codes below are Paleo-line WIP SKUs (confirmed against the
+// live products table on 2026-09-12) — the only line with both 6" and 9"
+// layer stock. Update these maps here if that ever changes.
+const CUSTOM_CAKE_CODE = 'CSTCK'
+const CAKE_SLAB_OPTIONS = ['Chocolate', 'Vanilla']
+const CAKE_SIZE_OPTIONS = ['6', '9']
+const CAKE_LAYER_OPTIONS = ['2', '3', '4']
+const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla', 'Cream Cheese']
+const DEFAULT_CAKE_CONFIG = { slab: 'Chocolate', size: '6', layers: '2', frosting: 'Chocolate' }
+
+const CAKE_LAYER_WIP = {
+  'Chocolate-6': 'WIPPCCKE6', 'Chocolate-9': 'WIPPCCKE9',
+  'Vanilla-6': 'WIPPVCKE6', 'Vanilla-9': 'WIPPVCKE9',
+}
+const CAKE_FROSTING_WIP = {
+  Chocolate: 'Ganache', Vanilla: 'WIPPFROST', 'Cream Cheese': 'WIPCRECHEFR',
+}
+
+// 6": 250g for 2 layers, +125g per layer beyond that. 9": 500g for 2 layers, +250g/layer beyond.
+function frostingGramsFor(size, layers) {
+  const base = size === '9' ? 500 : 250
+  const perExtra = size === '9' ? 250 : 125
+  const extraLayers = Math.max(0, (parseInt(layers) || 2) - 2)
+  return base + extraLayers * perExtra
+}
+
+// Returns the WIP components (code/qty/unit/label) a batch of `qty` custom
+// cakes with this config needs — used both to deduct on save and to restore
+// on delete, so the two stay perfectly symmetric.
+function customCakeWipNeeds(cfg, qty) {
+  const layers = parseInt(cfg.layers) || 2
+  const layerCode = CAKE_LAYER_WIP[cfg.slab + '-' + cfg.size]
+  const frostingCode = CAKE_FROSTING_WIP[cfg.frosting]
+  const needs = []
+  if (layerCode) needs.push({ code: layerCode, qty: layers * qty, unit: 'ea', label: cfg.slab + ' ' + cfg.size + '" Layer' })
+  else needs.push({ code: null, qty: 0, unit: 'ea', label: cfg.slab + ' ' + cfg.size + '" Layer (no WIP code mapped)' })
+  if (frostingCode) needs.push({ code: frostingCode, qty: frostingGramsFor(cfg.size, layers) * qty, unit: 'g', label: cfg.frosting + ' Frosting' })
+  else needs.push({ code: null, qty: 0, unit: 'g', label: cfg.frosting + ' Frosting (no WIP code mapped)' })
+  return needs
+}
+
+function buildCakeTag(cfg) {
+  return '[CAKE:' + cfg.slab + '|' + cfg.size + '|' + cfg.layers + '|' + cfg.frosting + ']'
+}
+function parseCakeTag(notes) {
+  const m = /^\[CAKE:([^|]+)\|([^|]+)\|([^|]+)\|([^\]]+)\]/.exec(notes || '')
+  if (!m) return null
+  return { slab: m[1], size: m[2], layers: m[3], frosting: m[4] }
+}
+
 // Case/whitespace-insensitive raw material lookup — BOM.rm_name is free text and can
 // drift from raw_materials.name (e.g. "Pecans" vs "Pecan"), which made supabase's exact
 // `.eq('name', ...)` matches silently miss and skip the deduction entirely.
@@ -47,6 +104,7 @@ function convertBomQty(qty, bomUnit, rmUnit) {
 }
 
 function packsDisplay(code, units) {
+  if (code === CUSTOM_CAKE_CODE) return units + ' custom cake' + (units === 1 ? '' : 's')
   const ps = PACK_SIZE[code]
   if (!ps || !units) return units + ' units'
   const packs = Math.round(units / ps)
@@ -62,6 +120,20 @@ function sellableQty(code, units) {
 function productionValueFor(prod) {
   if (!prod) return 0
   return prod.production_value != null ? parseFloat(prod.production_value) : (parseFloat(prod.price_per_pack) || 0)
+}
+
+// Custom Cake's price depends on size + layers, not a single fixed price_per_pack
+// on the product row — so its per-batch value is stored directly on the
+// production entry itself (productions.value_override, set in saveProduction)
+// and preferred here over the generic products-table lookup everywhere a
+// production entry's dollar value is displayed.
+const CAKE_PRICE = { '6-2': 60, '6-3': 75, '6-4': 90, '9-2': 75, '9-3': 90, '9-4': 105 }
+function priceForCake(size, layers) {
+  return CAKE_PRICE[size + '-' + layers] ?? (size === '9' ? 75 : 60)
+}
+function valueForEntry(h, prod) {
+  if (h.value_override != null) return parseFloat(h.value_override) || 0
+  return sellableQty(h.product_code, h.output_units) * productionValueFor(prod)
 }
 
 export default function Production() {
@@ -87,6 +159,7 @@ export default function Production() {
   const [historySearchCode, setHistorySearchCode] = useState('')
   const [historySearchResults, setHistorySearchResults] = useState(null)
   const [historySearchLoading, setHistorySearchLoading] = useState(false)
+  const [cakeConfig, setCakeConfig] = useState(DEFAULT_CAKE_CONFIG)
 
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -172,7 +245,23 @@ export default function Production() {
     return rmNeeds
   }
 
-  async function checkRM(code, outputUnits) {
+  async function checkRM(code, outputUnits, cakeConfigOverride) {
+    if (code === CUSTOM_CAKE_CODE) {
+      const cfg = cakeConfigOverride || cakeConfig
+      const needs = customCakeWipNeeds(cfg, outputUnits)
+      const wipCodes = await getWIPCodes()
+      const warns = []
+      for (const need of needs) {
+        if (!need.code) { warns.push({ rm: need.label, needed: '—', have: 'no WIP code mapped — check CAKE_LAYER_WIP/CAKE_FROSTING_WIP', isWip: true }); continue }
+        const wip = wipCodes.find(w => w.code === need.code)
+        const have = wip?.units || 0
+        const unitLabel = need.unit === 'ea' ? ' ea' : 'g'
+        if (!wip || have < need.qty) {
+          warns.push({ rm: (wip?.name || need.label) + ' [WIP]', needed: need.qty.toFixed(0) + unitLabel, have: (wip ? have.toFixed(0) + unitLabel : 'code ' + need.code + ' not found'), isWip: true })
+        }
+      }
+      return warns
+    }
     const wipCodes = await getWIPCodes()
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (!bom?.length) return []
@@ -213,11 +302,14 @@ export default function Production() {
   }
 
   async function handleCodeChange(code) {
-    setForm(f => ({ ...f, code }))
+    // Custom Cake's "input" is just a headcount, not trays/loaves/etc.
+    const forcedType = code === CUSTOM_CAKE_CODE ? 'units' : form.inputType
+    setForm(f => ({ ...f, code, inputType: forcedType }))
+    if (code === CUSTOM_CAKE_CODE) setCakeConfig(DEFAULT_CAKE_CONFIG)
     if (code && form.inputQty) {
-      const out = calcOutput(code, form.inputType, form.inputQty)
+      const out = calcOutput(code, forcedType, form.inputQty)
       setForm(f => ({ ...f, outputUnits: String(out) }))
-      const warns = await checkRM(code, out)
+      const warns = await checkRM(code, out, code === CUSTOM_CAKE_CODE ? DEFAULT_CAKE_CONFIG : undefined)
       setRmWarnings(warns)
     }
   }
@@ -231,6 +323,16 @@ export default function Production() {
         const warns = await checkRM(form.code, out)
         setRmWarnings(warns)
       }
+    }
+  }
+
+  // Updates one cake-config dropdown and immediately re-checks WIP stock
+  // against the merged selection (not the stale pre-update state).
+  function updateCakeConfig(field, val) {
+    const merged = { ...cakeConfig, [field]: val }
+    setCakeConfig(merged)
+    if (form.code === CUSTOM_CAKE_CODE && form.outputUnits) {
+      checkRM(form.code, parseInt(form.outputUnits) || 0, merged).then(setRmWarnings)
     }
   }
 
@@ -325,46 +427,74 @@ export default function Production() {
     addLog('✓ Freezer updated: +' + goodUnits + ' good units' + (rejected > 0 ? ' (' + rejected + ' rejected)' : '') + ' → ' + newFreezer + ' frozen', 'ok')
 
     // ── Deduct BOM for TOTAL output ──
-    const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
-    if (bom?.length) {
-      const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
-      const wipMap = {}
-      ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
-      const { data: allRMs } = await supabase.from('raw_materials').select('name,stock,unit')
-      let rmCount = 0, wipCount = 0
-      const missedRM = []
-      const unitMismatchRM = []
-      for (const item of bom) {
-        if (!item.rm_name) continue
-        const wipProduct = wipMap[item.rm_name.toLowerCase()]
-        const wipCode = item.component_type === 'wip' ? item.wip_code : (wipProduct ? wipProduct.code : null)
-        if (wipCode) {
-          const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
-          if (wip) {
-            const deductQty = item.qty_per_unit * totalOutput
-            await supabase.from('products').update({ units: Math.max(0, (wip.units || 0) - deductQty) }).eq('code', wipCode)
-            wipCount++
+    // Custom Cake has no static bom rows — deduct the WIP layer + frosting
+    // that matches whatever slab/size/layers/frosting was actually configured.
+    if (code === CUSTOM_CAKE_CODE) {
+      const needs = customCakeWipNeeds(cakeConfig, totalOutput)
+      const wipCodes = await getWIPCodes()
+      let wipCount = 0
+      const missedWip = []
+      for (const need of needs) {
+        if (!need.code) { missedWip.push(need.label); continue }
+        const wip = wipCodes.find(w => w.code === need.code)
+        if (!wip) { missedWip.push(need.label + ' (code ' + need.code + ' not found)'); continue }
+        await supabase.from('products').update({ units: Math.max(0, (wip.units || 0) - need.qty) }).eq('code', need.code)
+        wipCount++
+      }
+      addLog('✓ ' + wipCount + ' WIP component(s) deducted for ' + totalOutput + ' custom cake(s) — ' + cakeConfig.slab + ' ' + cakeConfig.size + '" · ' + cakeConfig.layers + ' layers · ' + cakeConfig.frosting + ' frosting', 'ok')
+      if (missedWip.length) addLog('⚠️ Could not deduct: ' + missedWip.join(', ') + ' — check CAKE_LAYER_WIP/CAKE_FROSTING_WIP against the products table.', 'warn')
+    } else {
+      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
+      if (bom?.length) {
+        const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
+        const wipMap = {}
+        ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
+        const { data: allRMs } = await supabase.from('raw_materials').select('name,stock,unit')
+        let rmCount = 0, wipCount = 0
+        const missedRM = []
+        const unitMismatchRM = []
+        for (const item of bom) {
+          if (!item.rm_name) continue
+          const wipProduct = wipMap[item.rm_name.toLowerCase()]
+          const wipCode = item.component_type === 'wip' ? item.wip_code : (wipProduct ? wipProduct.code : null)
+          if (wipCode) {
+            const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
+            if (wip) {
+              const deductQty = item.qty_per_unit * totalOutput
+              await supabase.from('products').update({ units: Math.max(0, (wip.units || 0) - deductQty) }).eq('code', wipCode)
+              wipCount++
+            }
+          } else {
+            const rm = findRM(allRMs, item.rm_name)
+            if (!rm) { missedRM.push(item.rm_name); continue }
+            const deductQty = convertBomQty(item.qty_per_unit * totalOutput, item.unit, rm.unit)
+            if (deductQty == null) {
+              unitMismatchRM.push(item.rm_name + ' (recipe: ' + (item.unit || '?') + ' vs stock: ' + (rm.unit || '?') + ')')
+              continue
+            }
+            await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductQty) }).eq('name', rm.name)
+            rmCount++
           }
-        } else {
-          const rm = findRM(allRMs, item.rm_name)
-          if (!rm) { missedRM.push(item.rm_name); continue }
-          const deductQty = convertBomQty(item.qty_per_unit * totalOutput, item.unit, rm.unit)
-          if (deductQty == null) {
-            unitMismatchRM.push(item.rm_name + ' (recipe: ' + (item.unit || '?') + ' vs stock: ' + (rm.unit || '?') + ')')
-            continue
-          }
-          await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductQty) }).eq('name', rm.name)
-          rmCount++
+        }
+        addLog('✓ ' + rmCount + ' RMs' + (wipCount ? ' + ' + wipCount + ' WIP' : '') + ' deducted for ' + totalOutput + ' units (full batch)', 'ok')
+        if (missedRM.length) {
+          addLog('⚠️ No Raw Materials match for: ' + missedRM.join(', ') + ' — stock NOT deducted. Check spelling against the Raw Materials list.', 'warn')
+        }
+        if (unitMismatchRM.length) {
+          addLog('⚠️ Unit mismatch, stock NOT deducted for: ' + unitMismatchRM.join(', ') + ' — fix the recipe unit or the Raw Material\'s tracked unit in Supabase.', 'warn')
         }
       }
-      addLog('✓ ' + rmCount + ' RMs' + (wipCount ? ' + ' + wipCount + ' WIP' : '') + ' deducted for ' + totalOutput + ' units (full batch)', 'ok')
-      if (missedRM.length) {
-        addLog('⚠️ No Raw Materials match for: ' + missedRM.join(', ') + ' — stock NOT deducted. Check spelling against the Raw Materials list.', 'warn')
-      }
-      if (unitMismatchRM.length) {
-        addLog('⚠️ Unit mismatch, stock NOT deducted for: ' + unitMismatchRM.join(', ') + ' — fix the recipe unit or the Raw Material\'s tracked unit in Supabase.', 'warn')
-      }
     }
+
+    // Custom Cake's config gets folded into notes as a parseable tag (no schema
+    // change needed) so deleteProduction can reverse the exact same WIP amounts.
+    const finalNotes = code === CUSTOM_CAKE_CODE ? (buildCakeTag(cakeConfig) + (notes ? ' ' + notes : '')) : notes
+    // Custom Cake's price depends on size + layers (see CAKE_PRICE), not a single
+    // fixed price_per_pack on the product — store the real dollar value for THIS
+    // batch directly on the entry so History/Dashboard show the correct amount
+    // instead of a flat per-unit guess. Needs `alter table productions add column
+    // value_override numeric;` run once in Supabase — see chat for the exact SQL.
+    const valueOverride = code === CUSTOM_CAKE_CODE ? priceForCake(cakeConfig.size, cakeConfig.layers) * goodUnits : null
 
     await supabase.from('productions').insert({
       date, product_code: code, product_name: prod?.name || code,
@@ -372,7 +502,8 @@ export default function Production() {
       output_units: goodUnits,
       rejected_units: rejected || 0,
       rejection_reason: rejected > 0 ? rejectionReason : null,
-      notes, created_by_name: profile?.name
+      notes: finalNotes, created_by_name: profile?.name,
+      value_override: valueOverride
     })
     await supabase.from('activity').insert({
       type: 'production',
@@ -382,6 +513,7 @@ export default function Production() {
     })
     addLog('✓ Production saved!', 'ok')
     setForm({ date: new Date().toISOString().split('T')[0], code: '', inputType: 'units', inputQty: '', outputUnits: '', rejectedUnits: '', rejectionReason: '', notes: '' })
+    setCakeConfig(DEFAULT_CAKE_CONFIG)
     setRmWarnings([])
     loadData()
   }
@@ -401,29 +533,45 @@ export default function Production() {
         await supabase.from('products').update({ freezer_units: newFreezer, units: newTotal }).eq('code', h.product_code)
       }
       const totalForRM = (h.output_units || 0) + (h.rejected_units || 0)
-      const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', h.product_code)
-      if (bom?.length) {
-        const { data: wipProds } = await supabase.from('products').select('code,units').eq('category', 'WIP')
-        const wipMap = {}
-        ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
-        const { data: allRMs } = await supabase.from('raw_materials').select('name,stock,unit')
-        for (const item of bom) {
-          if (!item.rm_name) continue
-          const wipProduct = wipMap[item.rm_name.toLowerCase()]
-          const wipCode = item.component_type === 'wip' ? item.wip_code : (wipProduct ? wipProduct.code : null)
-          if (wipCode) {
-            const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
-            if (wip) {
-              const restoreQty = item.qty_per_unit * totalForRM
-              await supabase.from('products').update({ units: (wip.units || 0) + restoreQty }).eq('code', wipCode)
+      if (h.product_code === CUSTOM_CAKE_CODE) {
+        // No static bom rows for Custom Cake — recover the config from the
+        // [CAKE:...] tag saveProduction wrote into notes, and restore the
+        // exact same WIP amounts that same config would deduct.
+        const cfg = parseCakeTag(h.notes)
+        if (cfg) {
+          const needs = customCakeWipNeeds(cfg, totalForRM)
+          const wipCodes = await getWIPCodes()
+          for (const need of needs) {
+            if (!need.code) continue
+            const wip = wipCodes.find(w => w.code === need.code)
+            if (wip) await supabase.from('products').update({ units: (wip.units || 0) + need.qty }).eq('code', need.code)
+          }
+        }
+      } else {
+        const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', h.product_code)
+        if (bom?.length) {
+          const { data: wipProds } = await supabase.from('products').select('code,units').eq('category', 'WIP')
+          const wipMap = {}
+          ;(wipProds || []).forEach(w => { wipMap[w.code.toLowerCase()] = w })
+          const { data: allRMs } = await supabase.from('raw_materials').select('name,stock,unit')
+          for (const item of bom) {
+            if (!item.rm_name) continue
+            const wipProduct = wipMap[item.rm_name.toLowerCase()]
+            const wipCode = item.component_type === 'wip' ? item.wip_code : (wipProduct ? wipProduct.code : null)
+            if (wipCode) {
+              const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
+              if (wip) {
+                const restoreQty = item.qty_per_unit * totalForRM
+                await supabase.from('products').update({ units: (wip.units || 0) + restoreQty }).eq('code', wipCode)
+              }
+            } else {
+              const rm = findRM(allRMs, item.rm_name)
+              if (!rm) continue
+              // Mirror saveProduction's convertBomQty — if the original deduction couldn't
+              // convert the units, nothing was deducted, so there's nothing to restore here either.
+              const restoreQty = convertBomQty(item.qty_per_unit * totalForRM, item.unit, rm.unit)
+              if (restoreQty != null) await supabase.from('raw_materials').update({ stock: rm.stock + restoreQty }).eq('name', rm.name)
             }
-          } else {
-            const rm = findRM(allRMs, item.rm_name)
-            if (!rm) continue
-            // Mirror saveProduction's convertBomQty — if the original deduction couldn't
-            // convert the units, nothing was deducted, so there's nothing to restore here either.
-            const restoreQty = convertBomQty(item.qty_per_unit * totalForRM, item.unit, rm.unit)
-            if (restoreQty != null) await supabase.from('raw_materials').update({ stock: rm.stock + restoreQty }).eq('name', rm.name)
           }
         }
       }
@@ -570,24 +718,74 @@ export default function Production() {
                   {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
                 </select>
               </div>
-              <div className="field-row">
-                <div className="field" style={{margin:0}}>
-                  <label>Input Type</label>
-                  <select style={selectStyle} value={form.inputType} onChange={e => { setForm(f=>({...f,inputType:e.target.value})); handleQtyChange(form.inputQty) }}>
-                    <option value="units">Units</option>
-                    <option value="trays">Trays</option>
-                    <option value="loaves">Loaves</option>
-                    <option value="logs">Logs (Biscotti)</option>
-                    <option value="cakes">Cakes (9 inch)</option>
-                    <option value="6inch">6 inch Frosting Cake ($15 each)</option>
-                    <option value="9inch">9 inch Frosting Cake ($25 each)</option>
-                  </select>
+              {form.code === CUSTOM_CAKE_CODE ? (
+                <>
+                  <div className="field">
+                    <label>How many custom cakes?</label>
+                    <input type="number" value={form.inputQty} onChange={e => handleQtyChange(e.target.value)} placeholder="0" />
+                  </div>
+                  <div style={{ background: '#fff', border: '1px dashed var(--kk-peach)', borderRadius: 6, padding: 10, marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>What was actually baked</div>
+                    <div className="field-row" style={{ marginBottom: 8 }}>
+                      <div className="field" style={{margin:0}}>
+                        <label>Slab</label>
+                        <select style={selectStyle} value={cakeConfig.slab} onChange={e => updateCakeConfig('slab', e.target.value)}>
+                          {CAKE_SLAB_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </div>
+                      <div className="field" style={{margin:0}}>
+                        <label>Size</label>
+                        <select style={selectStyle} value={cakeConfig.size} onChange={e => updateCakeConfig('size', e.target.value)}>
+                          {CAKE_SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="field-row" style={{ marginBottom: 0 }}>
+                      <div className="field" style={{margin:0}}>
+                        <label>Layers</label>
+                        <select style={selectStyle} value={cakeConfig.layers} onChange={e => updateCakeConfig('layers', e.target.value)}>
+                          {CAKE_LAYER_OPTIONS.map(o => <option key={o} value={o}>{o} layers</option>)}
+                        </select>
+                      </div>
+                      <div className="field" style={{margin:0}}>
+                        <label>Frosting</label>
+                        <select style={selectStyle} value={cakeConfig.frosting} onChange={e => updateCakeConfig('frosting', e.target.value)}>
+                          {CAKE_FROSTING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    {form.outputUnits > 0 && (() => {
+                      const needs = customCakeWipNeeds(cakeConfig, parseInt(form.outputUnits) || 0)
+                      const unitPrice = priceForCake(cakeConfig.size, cakeConfig.layers)
+                      return (
+                        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ink3)' }}>
+                          <div>Will deduct: {needs.map(n => (n.code || '⚠️ unmapped') + ' — ' + n.qty + (n.unit === 'ea' ? ' ea' : 'g')).join('  ·  ')}</div>
+                          <div style={{ marginTop: 4, fontWeight: 700, color: 'var(--kk-peach)' }}>Value: ${unitPrice}/cake × {form.outputUnits} = ${(unitPrice * (parseInt(form.outputUnits) || 0)).toFixed(0)}</div>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <div className="field-row">
+                  <div className="field" style={{margin:0}}>
+                    <label>Input Type</label>
+                    <select style={selectStyle} value={form.inputType} onChange={e => { setForm(f=>({...f,inputType:e.target.value})); handleQtyChange(form.inputQty) }}>
+                      <option value="units">Units</option>
+                      <option value="trays">Trays</option>
+                      <option value="loaves">Loaves</option>
+                      <option value="logs">Logs (Biscotti)</option>
+                      <option value="cakes">Cakes (9 inch)</option>
+                      <option value="6inch">6 inch Frosting Cake ($15 each)</option>
+                      <option value="9inch">9 inch Frosting Cake ($25 each)</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{margin:0}}>
+                    <label>Quantity</label>
+                    <input type="number" value={form.inputQty} onChange={e => handleQtyChange(e.target.value)} placeholder="0" />
+                  </div>
                 </div>
-                <div className="field" style={{margin:0}}>
-                  <label>Quantity</label>
-                  <input type="number" value={form.inputQty} onChange={e => handleQtyChange(e.target.value)} placeholder="0" />
-                </div>
-              </div>
+              )}
 
               {/* Output preview */}
               {form.outputUnits && (
@@ -870,9 +1068,7 @@ export default function Production() {
                       <tbody>
                         {historySearchResults.map(h => {
                           const prod = products.find(p => p.code === h.product_code)
-                          const ppp = productionValueFor(prod)
-                          const packs = sellableQty(h.product_code, h.output_units)
-                          const batchVal = packs * ppp
+                          const batchVal = valueForEntry(h, prod)
                           return (
                             <tr key={h.id} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '10px 14px', color: 'var(--ink3)' }}>{new Date((h.date || h.created_at) + 'T12:00:00').toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</td>
@@ -910,9 +1106,7 @@ export default function Production() {
             ) : Object.entries(historyByDate).map(([date, entries]) => {
               const dayValue = entries.reduce((sum, h) => {
                 const prod = products.find(p => p.code === h.product_code)
-                const ppp = productionValueFor(prod)
-                const packs = sellableQty(h.product_code, h.output_units)
-                return sum + (packs * ppp)
+                return sum + valueForEntry(h, prod)
               }, 0)
               const dayUnits = entries.reduce((sum, h) => sum + (h.output_units || 0), 0)
               const dayRejected = entries.reduce((sum, h) => sum + (h.rejected_units || 0), 0)
@@ -953,9 +1147,7 @@ export default function Production() {
                       <tbody>
                         {entries.map(h => {
                           const prod = products.find(p => p.code === h.product_code)
-                          const ppp = productionValueFor(prod)
-                          const packs = sellableQty(h.product_code, h.output_units)
-                          const batchVal = packs * ppp
+                          const batchVal = valueForEntry(h, prod)
                           return (
                             <tr key={h.id} style={{ borderBottom: '1px solid var(--border)' }}>
                               <td style={{ padding: '10px 14px' }}><span className="code-tag">{h.product_code}</span></td>

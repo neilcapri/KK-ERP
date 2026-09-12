@@ -104,6 +104,32 @@ const BULK_MAP = {
   KSCD: 'KSCDBu', VPCAN: 'VPCANBu', VPB: 'VPBBu', PNF: 'PNFBu',
 }
 
+// Some SKUs on the order sheet don't carry their own stock — they're made on
+// demand from a different (base) product, exactly like the deduction logic in
+// Dispatch.jsx's STOCK_ALIAS. Keep this in sync with that map: it's what lets
+// the Packing List's Ready/To Manufacture check the product whose stock will
+// actually move when these get dispatched, instead of always reading zero.
+//  - "...Bu" bulk variants = the base retail product sold loose, 1:1.
+//  - PVBBSL / PVBBSLF (Banana Bread Slices) = cut from PVBB loaves, 3 per loaf.
+//  - KLRCup (KLR Cupcake) = made from KLR muffin batter, 1:1.
+const STOCK_ALIAS = {
+  PBBBu:   { base: 'PBB',   unitsPerBase: 1 },
+  PCCBu:   { base: 'PCC',   unitsPerBase: 1 },
+  KLRBu:   { base: 'KLR',   unitsPerBase: 1 },
+  KABBu:   { base: 'KAB',   unitsPerBase: 1 },
+  KWALBu:  { base: 'KWAL',  unitsPerBase: 1 },
+  HPCoBu:  { base: 'HPCo',  unitsPerBase: 1 },
+  PVHCBu:  { base: 'PVHC',  unitsPerBase: 1 },
+  VPCANBu: { base: 'VPCAN', unitsPerBase: 1 },
+  VPBBu:   { base: 'VPB',   unitsPerBase: 1 },
+  PNFBu:   { base: 'PNF',   unitsPerBase: 1 },
+  KABISBu: { base: 'KABIS', unitsPerBase: 1 },
+  KSCDBu:  { base: 'KSCD',  unitsPerBase: 1 },
+  PVBBSL:  { base: 'PVBB',  unitsPerBase: 3 },
+  PVBBSLF: { base: 'PVBB',  unitsPerBase: 3 },
+  KLRCup:  { base: 'KLR',   unitsPerBase: 1 },
+}
+
 // ── Custom Cake configurator ─────────────────────────────────
 // "Custom Cake" is a single $60 product in the catalog (code CSTCK) — no
 // fixed recipe/BOM of its own. When it's picked as an order item these extra
@@ -654,13 +680,27 @@ function buildPackingList(ordersInput) {
 // freezer_units — so they're only ever short by an amount that needs manufacturing.
 async function stockCheckPackingList(ordersInput) {
   const { packs, bulk } = buildPackingList(ordersInput)
-  const codes = [...packs.map(r => r.code), ...bulk.map(r => r.code)]
+  const rawCodes = [...packs.map(r => r.code), ...bulk.map(r => r.code)]
+  // Aliased codes (bulk variants, banana bread slices, KLR cupcake) have no
+  // stock of their own — fetch whichever base product actually carries it.
+  const codes = [...new Set(rawCodes.map(c => STOCK_ALIAS[c]?.base || c))]
   let stockMap = {}
   if (codes.length) {
     const { data, error } = await supabase.from('products').select('code, units, freezer_units, packed_units').in('code', codes)
     if (!error && data) data.forEach(p => { stockMap[p.code] = p })
   }
   const packsWithStock = packs.map(r => {
+    const alias = STOCK_ALIAS[r.code]
+    if (alias) {
+      // No packed tier of its own — it's made fresh from the base product's
+      // freezer stock, same as a bulk item below.
+      const prod = stockMap[alias.base] || {}
+      const freezerUnits = prod.freezer_units || 0
+      const availableInThisSku = Math.floor(freezerUnits * alias.unitsPerBase)
+      const ready = Math.min(r.qty, availableInThisSku)
+      const toManufacture = Math.max(0, r.qty - availableInThisSku)
+      return { ...r, ready, toPack: 0, toManufacture }
+    }
     const ps = UNITS_PER_PACK_MAP[r.code] || 1
     const prod = stockMap[r.code] || {}
     const packedStock = prod.packed_units || 0
@@ -673,10 +713,14 @@ async function stockCheckPackingList(ordersInput) {
     return { ...r, ready, toPack, toManufacture }
   })
   const bulkWithStock = bulk.map(r => {
-    const prod = stockMap[r.code] || {}
+    const alias = STOCK_ALIAS[r.code]
+    const baseCode = alias ? alias.base : r.code
+    const unitsPerBase = alias ? alias.unitsPerBase : 1
+    const prod = stockMap[baseCode] || {}
     const freezerUnits = prod.freezer_units || 0
-    const ready = Math.min(r.qty, freezerUnits)
-    const toManufacture = Math.max(0, r.qty - freezerUnits)
+    const availableInThisSku = Math.floor(freezerUnits * unitsPerBase)
+    const ready = Math.min(r.qty, availableInThisSku)
+    const toManufacture = Math.max(0, r.qty - availableInThisSku)
     return { ...r, ready, toPack: 0, toManufacture }
   })
   return { packs: packsWithStock, bulk: bulkWithStock }

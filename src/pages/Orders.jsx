@@ -599,18 +599,83 @@ function buildPackingList(ordersInput) {
   return { packs: ordered(packMap, RETAIL_COLS), bulk: ordered(bulkMap, BULK_COLS) }
 }
 
-function printPackingListHTML(ordersInput) {
+// Compares what a set of orders needs against the TWO stock tiers the ERP
+// actually tracks per product (see Inventory.jsx / Dispatch.jsx / Production.jsx):
+//   - packed_units: already-packed retail packs, ready to ship as-is
+//   - freezer_units: baked units sitting in the freezer, NOT yet packed
+// (units = freezer_units + packed_units * pack size, kept in sync elsewhere)
+// Retail-pack items are checked against packed_units first, then against
+// freezer_units (converted to packs) for anything still short — that portion
+// just needs PACKING, not baking. Whatever's left after that needs MANUFACTURING.
+// Bulk items have no separate "packed" tier — they're sold straight from
+// freezer_units — so they're only ever short by an amount that needs manufacturing.
+async function stockCheckPackingList(ordersInput) {
   const { packs, bulk } = buildPackingList(ordersInput)
-  const storeNames = [...new Set(ordersInput.map(o => o.customer_name))]
-
-  function renderTable(rows, unitLabel) {
-    if (!rows.length) return ''
-    const trs = rows.map(r =>
-      '<tr><td class="chk"><input type="checkbox" /></td><td>' + escapeHtmlPL(r.name) + ' <span class="code">(' + escapeHtmlPL(r.code) + ')</span></td>' +
-      '<td class="qty">' + r.qty + ' ' + unitLabel + '</td></tr>'
-    ).join('')
-    return '<table><thead><tr><th class="chk"></th><th>Product</th><th class="qty">Qty</th></tr></thead><tbody>' + trs + '</tbody></table>'
+  const codes = [...packs.map(r => r.code), ...bulk.map(r => r.code)]
+  let stockMap = {}
+  if (codes.length) {
+    const { data, error } = await supabase.from('products').select('code, units, freezer_units, packed_units').in('code', codes)
+    if (!error && data) data.forEach(p => { stockMap[p.code] = p })
   }
+  const packsWithStock = packs.map(r => {
+    const ps = UNITS_PER_PACK_MAP[r.code] || 1
+    const prod = stockMap[r.code] || {}
+    const packedStock = prod.packed_units || 0
+    const freezerUnits = prod.freezer_units || 0
+    const ready = Math.min(r.qty, packedStock)               // already packed, ready to ship as-is
+    const shortAfterPacked = Math.max(0, r.qty - packedStock)
+    const freezerPacks = Math.floor(freezerUnits / ps)
+    const toPack = Math.min(shortAfterPacked, freezerPacks)   // in the freezer — just needs packing
+    const toManufacture = Math.max(0, shortAfterPacked - freezerPacks) // needs baking from scratch
+    return { ...r, ready, toPack, toManufacture }
+  })
+  const bulkWithStock = bulk.map(r => {
+    const prod = stockMap[r.code] || {}
+    const freezerUnits = prod.freezer_units || 0
+    const ready = Math.min(r.qty, freezerUnits)
+    const toManufacture = Math.max(0, r.qty - freezerUnits)
+    return { ...r, ready, toPack: 0, toManufacture }
+  })
+  return { packs: packsWithStock, bulk: bulkWithStock }
+}
+
+async function printPackingListHTML(ordersInput) {
+  // Open the tab synchronously (inside the click handler) so pop-up blockers
+  // don't kill it while we await the stock lookup — fill it with the real
+  // content once that comes back.
+  const w = window.open('', '_blank')
+  if (!w) { alert('Please allow pop-ups to view the packing list.'); return }
+  w.document.open(); w.document.write('<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;padding:40px;color:#223824;background:#E3DDD1">Checking packed &amp; freezer stock&hellip;</body></html>'); w.document.close()
+
+  const { packs, bulk } = await stockCheckPackingList(ordersInput)
+  const storeNames = [...new Set(ordersInput.map(o => o.customer_name))]
+  const needsAction = [...packs, ...bulk].filter(r => r.toPack > 0 || r.toManufacture > 0)
+  const needsManufacture = [...packs, ...bulk].filter(r => r.toManufacture > 0)
+
+  function renderTable(rows, unitLabel, isBulk) {
+    if (!rows.length) return ''
+    const trs = rows.map(r => {
+      let statusHtml
+      if (r.toManufacture > 0 && r.toPack > 0) statusHtml = '<span class="status bad">❌ Pack ' + r.toPack + ' + Manufacture ' + r.toManufacture + '</span>'
+      else if (r.toManufacture > 0) statusHtml = '<span class="status bad">❌ Manufacture ' + r.toManufacture + '</span>'
+      else if (r.toPack > 0) statusHtml = '<span class="status warn">📦 Pack ' + r.toPack + ' from freezer</span>'
+      else statusHtml = '<span class="status ok">✅ Ready to ship</span>'
+      const rowClass = r.toManufacture > 0 ? ' class="short"' : (r.toPack > 0 ? ' class="topack"' : '')
+      return '<tr' + rowClass + '><td class="chk"><input type="checkbox" /></td><td>' + escapeHtmlPL(r.name) + ' <span class="code">(' + escapeHtmlPL(r.code) + ')</span></td>' +
+        '<td class="qty">' + r.qty + ' ' + unitLabel + '</td>' +
+        '<td class="qty">' + r.ready + ' ' + unitLabel + '</td>' +
+        '<td class="qty">' + (isBulk ? '&mdash;' : (r.toPack > 0 ? r.toPack + ' ' + unitLabel : '&mdash;')) + '</td>' +
+        '<td class="qty">' + (r.toManufacture > 0 ? r.toManufacture + ' ' + unitLabel : '&mdash;') + '</td>' +
+        '<td>' + statusHtml + '</td></tr>'
+    }).join('')
+    return '<table><thead><tr><th class="chk"></th><th>Product</th><th class="qty">Needed</th><th class="qty">Ready</th><th class="qty">To Pack</th><th class="qty">To Manufacture</th><th>Status</th></tr></thead><tbody>' + trs + '</tbody></table>'
+  }
+
+  const banner = needsManufacture.length
+    ? '<div class="banner bad">❌ ' + needsManufacture.length + ' item' + (needsManufacture.length === 1 ? '' : 's') + ' need' + (needsManufacture.length === 1 ? 's' : '') + ' to be manufactured before this order can be fully packed.</div>'
+    : needsAction.length
+    ? '<div class="banner warn">📦 ' + needsAction.length + ' item' + (needsAction.length === 1 ? '' : 's') + ' need packing from the freezer &mdash; nothing needs to be baked.</div>'
+    : (packs.length || bulk.length) ? '<div class="banner ok">✅ Everything needed is already packed and ready to ship.</div>' : ''
 
   const html = '<!DOCTYPE html><html><head><meta charset="utf-8" /><title>KK Packing List</title><style>' + [
     'body { font-family: Arial, sans-serif; background: #E3DDD1; color: #223824; margin: 0; padding: 24px; }',
@@ -620,25 +685,35 @@ function printPackingListHTML(ordersInput) {
     '.stores { font-size: 11px; color: #666; margin-bottom: 16px; }',
     '.print-bar { margin-bottom: 16px; }',
     '.print-bar button { background: #223824; color: #E3DDD1; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; }',
-    'table { border-collapse: collapse; width: 100%; max-width: 640px; background: #fff; margin-bottom: 8px; }',
+    '.banner { padding: 10px 14px; border-radius: 6px; font-size: 13px; font-weight: 700; margin-bottom: 16px; max-width: 820px; }',
+    '.banner.bad { background: #FDECEA; color: #B71C1C; border: 1px solid #F5C6C2; }',
+    '.banner.warn { background: #FFF3E0; color: #E65100; border: 1px solid #FFCC80; }',
+    '.banner.ok { background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9; }',
+    'table { border-collapse: collapse; width: 100%; max-width: 820px; background: #fff; margin-bottom: 8px; }',
     'th, td { border: 1px solid #ccc; padding: 6px 10px; font-size: 13px; text-align: left; }',
     'th { background: #E79B81; color: #223824; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }',
     'th.chk, td.chk { width: 30px; text-align: center; }',
-    'th.qty, td.qty { width: 90px; text-align: center; font-weight: 700; }',
+    'th.qty, td.qty { width: 76px; text-align: center; font-weight: 700; }',
     '.code { color: #888; font-weight: 400; font-size: 11px; }',
+    'tr.short td { background: #FDECEA; }',
+    'tr.topack td { background: #FFF8E1; }',
+    '.status { font-weight: 700; font-size: 12px; white-space: nowrap; }',
+    '.status.ok { color: #1B5E20; }',
+    '.status.warn { color: #E65100; }',
+    '.status.bad { color: #B71C1C; }',
     '@media print { .print-bar { display: none; } body { background: #fff; padding: 0; } }',
   ].join('\n') + '</style></head><body>' +
     '<div class="print-bar"><button onclick="window.print()">🖨️ Print / Save as PDF</button></div>' +
     '<h1>Konscious Kitchen — Packing List</h1>' +
     '<div class="meta">' + new Date().toLocaleDateString('en-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + ' &middot; ' + ordersInput.length + ' order' + (ordersInput.length === 1 ? '' : 's') + '</div>' +
     '<div class="stores">Stores: ' + storeNames.map(escapeHtmlPL).join(', ') + '</div>' +
-    (packs.length ? '<h2>Packs to Pack</h2>' + renderTable(packs, 'packs') : '') +
-    (bulk.length ? '<h2>Bulk to Pack</h2>' + renderTable(bulk, 'units') : '') +
+    banner +
+    (packs.length ? '<h2>Packs to Pack</h2>' + renderTable(packs, 'packs', false) : '') +
+    (bulk.length ? '<h2>Bulk to Pack</h2>' + renderTable(bulk, 'units', true) : '') +
     (!packs.length && !bulk.length ? '<div style="padding:20px;color:#888">No items found in the selected orders.</div>' : '') +
     '</body></html>'
 
-  const w = window.open('', '_blank')
-  if (!w) { alert('Please allow pop-ups to view the packing list.'); return }
+  if (w.closed) return
   w.document.open(); w.document.write(html); w.document.close()
 }
 
@@ -1371,7 +1446,7 @@ export default function Orders() {
     else setSelectedOrders(prev => { const next = new Set(prev); allIds.forEach(id => next.add(id)); return next })
   }
   function printSelected() { const toPrint = orders.filter(o => selectedOrders.has(o.id)); if (!toPrint.length) { alert('No orders selected.'); return }; printDispatchSlip(toPrint) }
-  function showPackingList() { const toPack = orders.filter(o => selectedOrders.has(o.id)); if (!toPack.length) { alert('Select the orders you\'re packing first.'); return }; printPackingListHTML(toPack) }
+  function showPackingList() { const toPack = orders.filter(o => selectedOrders.has(o.id)); if (!toPack.length) { alert('Select the orders you\'re packing first.'); return }; printPackingListHTML(toPack) /* async internally; opens the tab immediately, fills it in once stock loads */ }
 
   const activeOrders = orders.filter(o => o.status !== 'archived')
   const archivedOrders = orders.filter(o => o.status === 'archived')

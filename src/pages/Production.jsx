@@ -193,6 +193,9 @@ export default function Production() {
     if (inputType === 'logs') return Math.round(q * 10)
     if (inputType === 'cakes' && CAKE_YIELD[code]) return Math.round(q * CAKE_YIELD[code])
     if (inputType === '6inch' || inputType === '9inch') return Math.round(q)
+    // 'grams' is a straight 1:1 passthrough — used for WIP products (frosting,
+    // ganache, jam, etc.) tracked by weight rather than by piece count.
+    if (inputType === 'grams') return Math.round(q)
     return Math.round(q)
   }
 
@@ -776,6 +779,7 @@ export default function Production() {
                     <label>Input Type</label>
                     <select style={selectStyle} value={form.inputType} onChange={e => { setForm(f=>({...f,inputType:e.target.value})); handleQtyChange(form.inputQty) }}>
                       <option value="units">Units</option>
+                      <option value="grams">Grams (g)</option>
                       <option value="trays">Trays</option>
                       <option value="loaves">Loaves</option>
                       <option value="logs">Logs (Biscotti)</option>
@@ -1209,6 +1213,7 @@ export default function Production() {
                 <select style={selectStyle} value={schedForm.input_type} onChange={e => setSchedForm(f=>({...f,input_type:e.target.value}))}>
                   <option value="trays">Trays</option>
                   <option value="units">Units</option>
+                  <option value="grams">Grams (g)</option>
                   <option value="loaves">Loaves</option>
                   <option value="logs">Logs (Biscotti)</option>
                   <option value="cakes">Cakes (9 inch)</option>
@@ -1265,6 +1270,7 @@ export default function Production() {
                 <select style={selectStyle} value={editForm.input_type} onChange={e => setEditForm(f=>({...f,input_type:e.target.value}))}>
                   <option value="trays">Trays</option>
                   <option value="units">Units</option>
+                  <option value="grams">Grams (g)</option>
                   <option value="loaves">Loaves</option>
                   <option value="logs">Logs (Biscotti)</option>
                   <option value="cakes">Cakes (9 inch)</option>

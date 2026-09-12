@@ -78,7 +78,7 @@ export default function LabourVsProduction() {
       // ── 2. Production value ──
       const { data: prods } = await supabase
         .from('productions')
-        .select('product_code, output_units, date')
+        .select('product_code, output_units, date, value_override')
         .gte('date', start)
         .lte('date', end)
 
@@ -90,8 +90,15 @@ export default function LabourVsProduction() {
         ;(products || []).forEach(p => { priceMap[p.code] = p.production_value != null ? parseFloat(p.production_value) : (parseFloat(p.price_per_pack) || 0) })
         prods.forEach(p => {
           totalUnits += p.output_units || 0
-          const packs = sellableQty(p.product_code, p.output_units)
-          prodValue += packs * (priceMap[p.product_code] || 0)
+          // Custom Cake's price varies by size/layers — its real per-batch value is
+          // stored directly on the entry (value_override) rather than a single
+          // fixed price on the product row. Prefer it whenever it's set.
+          if (p.value_override != null) {
+            prodValue += parseFloat(p.value_override) || 0
+          } else {
+            const packs = sellableQty(p.product_code, p.output_units)
+            prodValue += packs * (priceMap[p.product_code] || 0)
+          }
         })
       }
 

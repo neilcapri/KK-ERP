@@ -4,6 +4,63 @@ import { useAuth } from '../context/AuthContext'
 
 const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPCo:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCo:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,PRMC:1,CMC:1,LMC:1,TMC:1,PCrt:1 }
 
+// Some codes a customer's dispatch line shows don't carry their own separate
+// freezer stock — dispatching them actually has to move a DIFFERENT product's
+// stock:
+//  - "...Bu" bulk variants (VPCANBu, PBBBu, PCCBu, KLRBu, KABBu, KWALBu,
+//    HPCoBu, PVHCBu, VPBBu, PNFBu, KABISBu, KSCDBu) are the exact same
+//    product sold loose instead of packed — 1:1 with the base retail product.
+//  - PVBBSL / PVBBSLF (Banana Bread Slices, no-frosting and frosted) are cut
+//    from PVBB loaves at 3 slices per loaf.
+const STOCK_ALIAS = {
+  PBBBu:   { base: 'PBB',   unitsPerBase: 1 },
+  PCCBu:   { base: 'PCC',   unitsPerBase: 1 },
+  KLRBu:   { base: 'KLR',   unitsPerBase: 1 },
+  KABBu:   { base: 'KAB',   unitsPerBase: 1 },
+  KWALBu:  { base: 'KWAL',  unitsPerBase: 1 },
+  HPCoBu:  { base: 'HPCo',  unitsPerBase: 1 },
+  PVHCBu:  { base: 'PVHC',  unitsPerBase: 1 },
+  VPCANBu: { base: 'VPCAN', unitsPerBase: 1 },
+  VPBBu:   { base: 'VPB',   unitsPerBase: 1 },
+  PNFBu:   { base: 'PNF',   unitsPerBase: 1 },
+  KABISBu: { base: 'KABIS', unitsPerBase: 1 },
+  KSCDBu:  { base: 'KSCD',  unitsPerBase: 1 },
+  PVBBSL:  { base: 'PVBB',  unitsPerBase: 3 },
+  PVBBSLF: { base: 'PVBB',  unitsPerBase: 3 },
+}
+
+// Given a dispatch line's own code and its own units_dispatched, returns the
+// product code whose stock actually moves and how many of THAT product's
+// units the dispatch consumes (e.g. 6 banana bread slices -> 2 PVBB loaves).
+// Codes with no alias pass through unchanged.
+function resolveStockTarget(code, unitsDispatched) {
+  const alias = STOCK_ALIAS[code]
+  if (!alias) return { code, units: unitsDispatched }
+  return { code: alias.base, units: unitsDispatched / alias.unitsPerBase }
+}
+
+// Deducts a dispatched (non-pack) quantity from freezer stock, resolving
+// through STOCK_ALIAS first so bulk/slice codes hit the right product.
+async function deductFromFreezerAliased(code, unitsDispatched) {
+  const target = resolveStockTarget(code, unitsDispatched)
+  const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', target.code).single()
+  if (!prod) return
+  const ps = prod.packed_units > 0 ? Math.round((prod.units - (prod.freezer_units || 0)) / prod.packed_units) || 1 : 1
+  const newFreezer = Math.max(0, (prod.freezer_units || prod.units || 0) - target.units)
+  const newTotal = newFreezer + ((prod.packed_units || 0) * ps)
+  await supabase.from('products').update({ units: Math.max(0, newTotal), freezer_units: newFreezer }).eq('code', target.code)
+}
+
+// Reverses a dispatched quantity back onto freezer stock (delete/edit), same
+// alias resolution as the deduction path.
+async function restoreToFreezerAliased(code, unitsDispatched) {
+  const target = resolveStockTarget(code, unitsDispatched)
+  const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', target.code).single()
+  if (!prod) return
+  const newFreezer = (prod.freezer_units || 0) + target.units
+  await supabase.from('products').update({ units: (prod.units || 0) + target.units, freezer_units: newFreezer }).eq('code', target.code)
+}
+
 const AI_PROMPT = `You are reading Konscious Kitchen packing slips. Each slip is a printed form with labeled rows.
 
 The form has these labeled fields at the top:
@@ -15,12 +72,14 @@ Below is a table with columns: Product Name | Cs/Units | Prod. Date
 - The Cs/Units column shows "X/Y" where X = cases and Y = units (e.g. "1/6" = 1 case, 6 units). Extract qty as the UNITS number (Y).
 - The Prod. Date column has the PRODUCTION DATE — capture it exactly as written.
 
-Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC.
+Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC, PVBBSL, PVBBSLF.
 Also: HPC/HPCO = HPCo, PCRT = skip.
 
 Rules:
 - (BULK) written after code or qty = type "bulk"; no label = "pack"
-- PVBBS or "PVBB Slice" = type "slice"
+- Banana Bread Slice, no frosting (PVBBS, "PVBB Slice", "Banana Bread Slice") = code PVBBSL, type "slice"
+- Banana Bread Slice, frosted ("PVBB Slice Frosted", "Banana Bread Slice Frosted", PVBBSLF) = code PVBBSLF, type "slice"
+- If a banana bread slice line doesn't specify frosted vs. not, default to PVBBSL (no frosting) and add a flag noting the assumption
 - Crossed out items = skip entirely (do not include)
 - Arrow pointing down = same slip continues below
 - Multiple separate slips = extract each separately
@@ -35,7 +94,6 @@ The following items are ALWAYS bulk (single units) for Natures Emporium — mark
 - Notella / No'tella Fudge → PNF, bulk
 - Almond Butter Cookie / KAB → KAB, bulk
 - Walnut Cookie / KWAL → KWAL, bulk
-- Banana Bread Slice Frosted / PVBBSLF → PVBBSLF, slice
 The following are ALWAYS pack for Natures Emporium (in 6s):
 - Keto Cups (CKTC, CKTV, CKLR, CKAC, CKHH) → pack
 
@@ -183,7 +241,10 @@ export default function Dispatch() {
   }
 
   function calcUnits(code, qty, type) {
-    if (type === 'slice') return Math.round(qty / 3)
+    // 'slice' now reports the real slice count dispatched (matches what's on
+    // the packing slip) — the 3-slices-per-loaf conversion happens only when
+    // stock actually gets deducted, via STOCK_ALIAS/resolveStockTarget.
+    if (type === 'slice') return qty
     if (type === 'bulk') return qty
     return qty * (PACK_SIZE[code] || 1)
   }
@@ -354,13 +415,7 @@ export default function Dispatch() {
         if (item.type === 'pack' && packs) {
           await deductFromPacked(item.code, packs)
         } else {
-          const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', item.code).single()
-          if (prod) {
-            const ps = prod.packed_units > 0 ? Math.round((prod.units - (prod.freezer_units || 0)) / prod.packed_units) || 1 : 1
-            const newFreezer = Math.max(0, (prod.freezer_units || prod.units || 0) - units)
-            const newTotal = newFreezer + ((prod.packed_units || 0) * ps)
-            await supabase.from('products').update({ units: Math.max(0, newTotal), freezer_units: newFreezer }).eq('code', item.code)
-          }
+          await deductFromFreezerAliased(item.code, units)
         }
 
         savedLines++
@@ -415,13 +470,7 @@ export default function Dispatch() {
       if (line.type === 'pack' && packs) {
         await deductFromPacked(line.code, packs)
       } else {
-        const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', line.code).single()
-        if (prod) {
-          const ps = prod.packed_units > 0 ? Math.round((prod.units - (prod.freezer_units || 0)) / prod.packed_units) || 1 : 1
-          const newFreezer = Math.max(0, (prod.freezer_units || prod.units || 0) - units)
-          const newTotal = newFreezer + ((prod.packed_units || 0) * ps)
-          await supabase.from('products').update({ units: Math.max(0, newTotal), freezer_units: newFreezer }).eq('code', line.code)
-        }
+        await deductFromFreezerAliased(line.code, units)
       }
     }
 
@@ -438,11 +487,7 @@ export default function Dispatch() {
     setDeletingId(dispatch.id)
     try {
       for (const item of dispatch.dispatch_items || []) {
-        const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', item.product_code).single()
-        if (prod) {
-          const newFreezer = (prod.freezer_units || 0) + item.units_dispatched
-          await supabase.from('products').update({ units: prod.units + item.units_dispatched, freezer_units: newFreezer }).eq('code', item.product_code)
-        }
+        await restoreToFreezerAliased(item.product_code, item.units_dispatched)
       }
       await supabase.from('dispatch_items').delete().eq('dispatch_id', dispatch.id)
       await supabase.from('dispatches').delete().eq('id', dispatch.id)
@@ -496,11 +541,7 @@ export default function Dispatch() {
     setEditSaving(true)
     try {
       for (const item of editingDispatch.dispatch_items || []) {
-        const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', item.product_code).single()
-        if (prod) {
-          const newFreezer = (prod.freezer_units || 0) + item.units_dispatched
-          await supabase.from('products').update({ units: prod.units + item.units_dispatched, freezer_units: newFreezer }).eq('code', item.product_code)
-        }
+        await restoreToFreezerAliased(item.product_code, item.units_dispatched)
       }
       await supabase.from('dispatches').update({ date: editForm.date, customer_name: editForm.customer_name, invoice_number: editForm.invoice_number }).eq('id', editingDispatch.id)
       await supabase.from('dispatch_items').delete().eq('dispatch_id', editingDispatch.id)
@@ -513,11 +554,7 @@ export default function Dispatch() {
           qty: parseFloat(item.qty) || 0, dispatch_type: item.dispatch_type, units_dispatched: units,
           production_date: item.production_date || null, production_verified: item.production_verified || null,
         })
-        const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', item.product_code).single()
-        if (prod) {
-          const newFreezer = Math.max(0, (prod.freezer_units || 0) - units)
-          await supabase.from('products').update({ units: Math.max(0, prod.units - units), freezer_units: newFreezer }).eq('code', item.product_code)
-        }
+        await deductFromFreezerAliased(item.product_code, units)
       }
       await supabase.from('activity').insert({ type: 'dispatch', title: `Dispatch Updated: ${editForm.customer_name}`, description: `Inv #${editForm.invoice_number || '—'} — edited`, created_by_name: profile?.name || 'admin' })
       setEditingDispatch(null); setEditItems([]); loadData()

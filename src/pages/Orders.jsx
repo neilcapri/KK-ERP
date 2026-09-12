@@ -1553,7 +1553,16 @@ export default function Orders() {
                 <option value="current">This Week ({getWeekLabel(0)})</option>
                 <option value="next">Next Week ({getWeekLabel(1)})</option>
               </select>
-              <span style={{ fontSize:11, color:'var(--ink3)' }}>{orders.filter(o => o.status !== 'archived' && isWeekOrder(o, exportWeek === 'next' ? 1 : 0)).length} orders</span>
+              {(() => {
+                const weekNum = exportWeek === 'next' ? 1 : 0
+                const weekOrders = orders.filter(o => o.status !== 'archived' && isWeekOrder(o, weekNum))
+                const weekValue = weekOrders.reduce((s, o) => s + (o.total_value || 0), 0)
+                return (
+                  <span style={{ fontSize:11, color:'var(--ink3)' }}>
+                    {weekOrders.length} orders{isAdmin && <> · <strong style={{ color:'var(--kk-green)' }}>${weekValue.toFixed(2)}</strong></>}
+                  </span>
+                )
+              })()}
             </div>
             <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center' }}>
               <button className="btn btn-green" onClick={() => exportOrderSheet(true)} disabled={exportLoading} style={{ display: isAdmin ? 'inline-flex' : 'none' }}>{exportLoading ? '⏳ Generating...' : '📥 Export Full (with pricing)'}</button>

@@ -109,7 +109,7 @@ export default function Inventory() {
   const [selectedWIP, setSelectedWIP] = useState(null)
   const [wipHistory, setWIPHistory] = useState({ productions: [], usedIn: [] })
   const [dateRange, setDateRange] = useState(90)
-  const [productHistory, setProductHistory] = useState({ productions: [], dispatches: [] })
+  const [productHistory, setProductHistory] = useState({ productions: [], dispatches: [], packed: [] })
   const [rmHistory, setRMHistory] = useState({ sourcing: [], used: [] })
   const [historyLoading, setHistoryLoading] = useState(false)
 
@@ -167,12 +167,17 @@ export default function Inventory() {
     setHistoryLoading(true)
     const since = new Date(); since.setDate(since.getDate() - days)
     const sinceStr = since.toISOString().split('T')[0]
-    const [prod, disp] = await Promise.all([
+    const [prod, disp, packed] = await Promise.all([
       supabase.from('productions').select('*').eq('product_code', code).gte('date', sinceStr).order('date', { ascending: false }),
-      supabase.from('dispatch_items').select('*, dispatches(date, customer_name, invoice_number)').eq('product_code', code).order('created_at', { ascending: false }),
+      supabase.from('dispatch_items').select('*, dispatches(date, customer_name, invoice_number)').eq('product_code', code),
+      supabase.from('packing_runs').select('*').eq('product_code', code).gte('date', sinceStr).order('date', { ascending: false }),
     ])
     const filteredDisp = (disp.data || []).filter(d => d.dispatches?.date >= sinceStr)
-    setProductHistory({ productions: prod.data || [], dispatches: filteredDisp })
+    // Sort by the actual dispatch date (not row insert time) so the list reads
+    // latest-date-on-top like Productions does — a slip entered late (e.g. from
+    // a backlog of packing slips) used to jump to the top out of date order.
+    filteredDisp.sort((a, b) => (b.dispatches?.date || '').localeCompare(a.dispatches?.date || ''))
+    setProductHistory({ productions: prod.data || [], dispatches: filteredDisp, packed: packed.data || [] })
     setHistoryLoading(false)
   }
 
@@ -598,7 +603,7 @@ export default function Inventory() {
                         </div>
                       </div>
                       {historyLoading ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--ink3)' }}>Loading...</div> : (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, overflow: 'hidden', flex: 1 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, overflow: 'hidden', flex: 1 }}>
                           <div>
                             <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>🏭 Productions</div>
                             <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 380px)', paddingRight: 4 }}>
@@ -609,6 +614,25 @@ export default function Inventory() {
                                     <div style={{ fontWeight: 600, color: 'var(--green)' }}>+{p.output_units} units</div>
                                     <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.date} · {p.input_qty} {p.input_type}</div>
                                     {p.notes && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{p.notes}</div>}
+                                  </div>
+                                ))
+                              }
+                            </div>
+                          </div>
+                          <div>
+                            {/* Packing runs — lets you see at a glance whether freezer stock
+                                actually got packed (e.g. auto-pack during a dispatch can silently
+                                skip if there wasn't enough freezer stock to cover it) vs. just
+                                assumed. "Auto-packed for dispatch" entries come from Dispatch;
+                                anything else was packed manually here in Inventory. */}
+                            <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>📦 Packed</div>
+                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 380px)', paddingRight: 4 }}>
+                              {productHistory.packed.length === 0
+                                ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
+                                : productHistory.packed.map((r, i) => (
+                                  <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                    <div style={{ fontWeight: 600, color: 'var(--blue)' }}>{r.packs_produced} packs ({r.units_packed} units)</div>
+                                    <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{r.date}{r.notes ? ' · ' + r.notes : ''}</div>
                                   </div>
                                 ))
                               }

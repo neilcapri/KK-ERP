@@ -438,7 +438,9 @@ export default function Production() {
         if (!need.code) { missedWip.push(need.label); continue }
         const wip = wipCodes.find(w => w.code === need.code)
         if (!wip) { missedWip.push(need.label + ' (code ' + need.code + ' not found)'); continue }
-        await supabase.from('products').update({ units: Math.max(0, (wip.units || 0) - need.qty) }).eq('code', need.code)
+        // No floor at 0 — if stock is insufficient, this goes negative on purpose
+        // so shortages are visible instead of silently hidden.
+        await supabase.from('products').update({ units: (wip.units || 0) - need.qty }).eq('code', need.code)
         wipCount++
       }
       addLog('✓ ' + wipCount + ' WIP component(s) deducted for ' + totalOutput + ' custom cake(s) — ' + cakeConfig.slab + ' ' + cakeConfig.size + '" · ' + cakeConfig.layers + ' layers · ' + cakeConfig.frosting + ' frosting', 'ok')
@@ -461,7 +463,8 @@ export default function Production() {
             const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
             if (wip) {
               const deductQty = item.qty_per_unit * totalOutput
-              await supabase.from('products').update({ units: Math.max(0, (wip.units || 0) - deductQty) }).eq('code', wipCode)
+              // No floor at 0 — a shortage should show as a negative balance, not vanish.
+              await supabase.from('products').update({ units: (wip.units || 0) - deductQty }).eq('code', wipCode)
               wipCount++
             }
           } else {
@@ -472,7 +475,8 @@ export default function Production() {
               unitMismatchRM.push(item.rm_name + ' (recipe: ' + (item.unit || '?') + ' vs stock: ' + (rm.unit || '?') + ')')
               continue
             }
-            await supabase.from('raw_materials').update({ stock: Math.max(0, rm.stock - deductQty) }).eq('name', rm.name)
+            // No floor at 0 — a shortage should show as a negative balance, not vanish.
+            await supabase.from('raw_materials').update({ stock: rm.stock - deductQty }).eq('name', rm.name)
             rmCount++
           }
         }

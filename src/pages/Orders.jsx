@@ -104,6 +104,49 @@ const BULK_MAP = {
   KSCD: 'KSCDBu', VPCAN: 'VPCANBu', VPB: 'VPBBu', PNF: 'PNFBu',
 }
 
+// ── Custom Cake configurator ─────────────────────────────────
+// "Custom Cake" is a single $60 product in the catalog (code CSTCK) — no
+// fixed recipe/BOM of its own. When it's picked as an order item these extra
+// dropdowns appear so the kitchen knows what to actually bake; the choices
+// get folded into that line item's own `notes` field (no schema change
+// needed) rather than stored as separate columns.
+const CUSTOM_CAKE_CODE = 'CSTCK'
+const CAKE_SLAB_OPTIONS = ['Chocolate', 'Vanilla']
+const CAKE_SIZE_OPTIONS = ['6', '9']
+const CAKE_LAYER_OPTIONS = ['2', '3', '4']
+const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla', 'Cream Cheese']
+// Price depends on size + layers only (not slab/frosting) — kept in sync with
+// the same table in Production.jsx (CAKE_PRICE / priceForCake).
+const CAKE_PRICE = { '6-2': 60, '6-3': 75, '6-4': 90, '9-2': 75, '9-3': 90, '9-4': 105 }
+function priceForCake(size, layers) {
+  return CAKE_PRICE[size + '-' + layers] ?? (size === '9' ? 75 : 60)
+}
+
+function buildCakeNotes(item) {
+  const parts = []
+  if (item.cake_slab) parts.push(item.cake_slab + ' slab')
+  if (item.cake_size) parts.push(item.cake_size + '" size')
+  if (item.cake_layers) parts.push(item.cake_layers + ' layers')
+  if (item.cake_frosting) parts.push(item.cake_frosting + ' frosting')
+  const spec = parts.length ? 'Custom Cake — ' + parts.join(', ') : ''
+  if (!item.cake_extra) return spec
+  return spec ? spec + ' | ' + item.cake_extra : item.cake_extra
+}
+
+// Sets one cake-option field on the item, rebuilds its `notes` string from the
+// merged selections, and — when size or layers changed — reprices the line
+// item to match (price_per_pack is what order totals/value actually use).
+// Used by both the New Order and Edit Order modals (they pass their own
+// updateItem/updateEditItem as updateFn).
+function applyCakeOption(item, idx, field, val, updateFn) {
+  const merged = { ...item, [field]: val }
+  updateFn(idx, field, val)
+  updateFn(idx, 'notes', buildCakeNotes(merged))
+  if ((field === 'cake_size' || field === 'cake_layers') && merged.cake_size && merged.cake_layers) {
+    updateFn(idx, 'price_per_pack', priceForCake(merged.cake_size, merged.cake_layers))
+  }
+}
+
 const S = {
   KK_GREEN: '223824', KK_CREAM: 'E3DDD1', KK_PEACH: 'E79B81', CAT_GREEN: '2D4A35',
   TOTAL_BG: 'C8E6C9', TOTAL_FG: '1B5E20', GRAND_BG: '223824', GRAND_FG: 'E3DDD1',
@@ -1669,6 +1712,27 @@ export default function Orders() {
                           {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
                         </select>
                       </div>
+                      {item.product_code === CUSTOM_CAKE_CODE && (
+                        <div style={{ display:'flex', gap:6, flexWrap:'wrap', width:'100%', marginTop:2, background:'#fff', border:'1px dashed var(--kk-peach)', borderRadius:6, padding:8 }}>
+                          <select style={{ ...sel, width:'auto', padding:'6px 8px', fontSize:11 }} value={item.cake_slab || ''} onChange={e => applyCakeOption(item, idx, 'cake_slab', e.target.value, updateItem)}>
+                            <option value="">Slab...</option>
+                            {CAKE_SLAB_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                          <select style={{ ...sel, width:'auto', padding:'6px 8px', fontSize:11 }} value={item.cake_size || ''} onChange={e => applyCakeOption(item, idx, 'cake_size', e.target.value, updateItem)}>
+                            <option value="">Size...</option>
+                            {CAKE_SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
+                          </select>
+                          <select style={{ ...sel, width:'auto', padding:'6px 8px', fontSize:11 }} value={item.cake_layers || ''} onChange={e => applyCakeOption(item, idx, 'cake_layers', e.target.value, updateItem)}>
+                            <option value="">Layers...</option>
+                            {CAKE_LAYER_OPTIONS.map(o => <option key={o} value={o}>{o} layers</option>)}
+                          </select>
+                          <select style={{ ...sel, width:'auto', padding:'6px 8px', fontSize:11 }} value={item.cake_frosting || ''} onChange={e => applyCakeOption(item, idx, 'cake_frosting', e.target.value, updateItem)}>
+                            <option value="">Frosting...</option>
+                            {CAKE_FROSTING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                          <input type="text" placeholder="Anything else (message, decoration)..." value={item.cake_extra || ''} onChange={e => applyCakeOption(item, idx, 'cake_extra', e.target.value, updateItem)} style={{ ...sel, flex:1, minWidth:160, padding:'6px 8px', fontSize:11 }} />
+                        </div>
+                      )}
 
                       <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                         {isBulk
@@ -1833,6 +1897,27 @@ export default function Orders() {
                       {products.map(p => <option key={p.code} value={p.code}>{p.code} — {p.name}</option>)}
                     </select>
                   </div>
+                  {item.product_code === CUSTOM_CAKE_CODE && (
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap', width:'100%', marginTop:2, background:'#fff', border:'1px dashed var(--kk-peach)', borderRadius:6, padding:8 }}>
+                      <select style={{ ...sel, width:'auto', padding:'6px 8px', fontSize:11 }} value={item.cake_slab || ''} onChange={e => applyCakeOption(item, idx, 'cake_slab', e.target.value, updateEditItem)}>
+                        <option value="">Slab...</option>
+                        {CAKE_SLAB_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      <select style={{ ...sel, width:'auto', padding:'6px 8px', fontSize:11 }} value={item.cake_size || ''} onChange={e => applyCakeOption(item, idx, 'cake_size', e.target.value, updateEditItem)}>
+                        <option value="">Size...</option>
+                        {CAKE_SIZE_OPTIONS.map(o => <option key={o} value={o}>{o}"</option>)}
+                      </select>
+                      <select style={{ ...sel, width:'auto', padding:'6px 8px', fontSize:11 }} value={item.cake_layers || ''} onChange={e => applyCakeOption(item, idx, 'cake_layers', e.target.value, updateEditItem)}>
+                        <option value="">Layers...</option>
+                        {CAKE_LAYER_OPTIONS.map(o => <option key={o} value={o}>{o} layers</option>)}
+                      </select>
+                      <select style={{ ...sel, width:'auto', padding:'6px 8px', fontSize:11 }} value={item.cake_frosting || ''} onChange={e => applyCakeOption(item, idx, 'cake_frosting', e.target.value, updateEditItem)}>
+                        <option value="">Frosting...</option>
+                        {CAKE_FROSTING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      <input type="text" placeholder="Anything else (message, decoration)..." value={item.cake_extra || ''} onChange={e => applyCakeOption(item, idx, 'cake_extra', e.target.value, updateEditItem)} style={{ ...sel, flex:1, minWidth:160, padding:'6px 8px', fontSize:11 }} />
+                    </div>
+                  )}
                   <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                     {isBulk
                       ? <span style={{ fontSize:10, color:'#E79B81', fontFamily:'var(--display)', letterSpacing:1, padding:'4px 8px', background:'#fff3ee', borderRadius:4 }}>UNITS</span>

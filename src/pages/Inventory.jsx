@@ -56,6 +56,7 @@ const BULK_FG_EXCLUDE = new Set([
   'VPCANBu','VPBBu','PNFBu','KABISBu','KSCDBu',
   'PVBBSL','PVBBSLF',
   'CKAC','CKHH',
+  'CUPFROST', // Cupcake Frosting — a $1/cupcake labour log, not real stock
 ])
 
 // Conversion map: rm name (lowercase) → { divisor, unit, label }

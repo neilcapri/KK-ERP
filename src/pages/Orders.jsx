@@ -143,9 +143,9 @@ const CAKE_LAYER_OPTIONS = ['2', '3', '4']
 const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla', 'Cream Cheese']
 // Price depends on size + layers only (not slab/frosting) — kept in sync with
 // the same table in Production.jsx (CAKE_PRICE / priceForCake).
-const CAKE_PRICE = { '6-2': 60, '6-3': 75, '6-4': 90, '9-2': 75, '9-3': 90, '9-4': 105 }
+const CAKE_PRICE = { '6-2': 15, '6-3': 20, '6-4': 30, '9-2': 20, '9-3': 30, '9-4': 40 }
 function priceForCake(size, layers) {
-  return CAKE_PRICE[size + '-' + layers] ?? (size === '9' ? 75 : 60)
+  return CAKE_PRICE[size + '-' + layers] ?? (size === '9' ? 20 : 15)
 }
 
 function buildCakeNotes(item) {

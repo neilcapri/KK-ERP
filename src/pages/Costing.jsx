@@ -103,7 +103,7 @@ export default function Costing() {
   }
 
   // Split products into FG and WIP
-  const fgProducts = useMemo(() => products.filter(p => p.category !== 'WIP' && !BULK_CODES.has(p.code) && p.code !== 'CSCC'), [products])
+  const fgProducts = useMemo(() => products.filter(p => p.category !== 'WIP' && !BULK_CODES.has(p.code) && p.code !== 'CSCC' && p.code !== 'CUPFROST'), [products])
   const bulkProducts = useMemo(() => products.filter(p => BULK_CODES.has(p.code)), [products])
   const wipProducts = useMemo(() => products.filter(p => p.category === 'WIP'), [products])
 

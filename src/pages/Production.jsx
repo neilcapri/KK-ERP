@@ -127,9 +127,9 @@ function productionValueFor(prod) {
 // production entry itself (productions.value_override, set in saveProduction)
 // and preferred here over the generic products-table lookup everywhere a
 // production entry's dollar value is displayed.
-const CAKE_PRICE = { '6-2': 60, '6-3': 75, '6-4': 90, '9-2': 75, '9-3': 90, '9-4': 105 }
+const CAKE_PRICE = { '6-2': 15, '6-3': 20, '6-4': 30, '9-2': 20, '9-3': 30, '9-4': 40 }
 function priceForCake(size, layers) {
-  return CAKE_PRICE[size + '-' + layers] ?? (size === '9' ? 75 : 60)
+  return CAKE_PRICE[size + '-' + layers] ?? (size === '9' ? 20 : 15)
 }
 function valueForEntry(h, prod) {
   if (h.value_override != null) return parseFloat(h.value_override) || 0

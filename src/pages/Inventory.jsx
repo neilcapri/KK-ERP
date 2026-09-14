@@ -43,7 +43,7 @@ const RM_GROUPS = [
   { label: 'Other',              match: (r) => true },
 ]
 
-const TRAY_SIZE = { VPB:64, VPCAN:36, PNF:40, PVBRG:36, PVBR:12, VSCS:48, NALCOB:21, NBFB:21, HRCS:84, CMC:24, LMC:24, PRMC:24, TMC:24 }
+const TRAY_SIZE = { VPB:64, VPCAN:36, PNF:40, PVBRG:36, PVBR:12, VSCS:48, NALCOB:21, NBFB:21, HRCS:84, CMC:24, LMC:24, PRMC:24, TMC:24, CCB:17 }
 const DATE_RANGES = [
   { label: '3 Months', days: 90 },
   { label: '6 Months', days: 180 },

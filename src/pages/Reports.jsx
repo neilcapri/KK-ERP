@@ -11,15 +11,21 @@ function currentMonth() {
   const last = new Date(y, m, 0).getDate()
   return { start: `${y}-${String(m).padStart(2,'0')}-01`, end: `${y}-${String(m).padStart(2,'0')}-${last}` }
 }
+function monthToDate() {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth() + 1
+  const today = String(now.getDate()).padStart(2,'0')
+  return { start: `${y}-${String(m).padStart(2,'0')}-01`, end: `${y}-${String(m).padStart(2,'0')}-${today}` }
+}
 function thisYear() { const y = new Date().getFullYear(); return { start: `${y}-01-01`, end: `${y}-12-31` } }
 function fmt(n) { return n == null || isNaN(n) ? '—' : '$' + parseFloat(n).toFixed(2) }
 function fmtDate(d) { if (!d) return '—'; return new Date(d + 'T12:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) }
 
 function DateRangePicker({ value, onChange }) {
   const inp = { padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--surface)', color: 'var(--ink)' }
-  const presets = [{ key: '1m', label: 'Last Month' }, { key: '3m', label: '3 Months' }, { key: 'year', label: 'This Year' }, { key: 'custom', label: 'Custom' }]
+  const presets = [{ key: 'mtd', label: 'Month to Date' }, { key: '1m', label: 'Last Month' }, { key: '3m', label: '3 Months' }, { key: 'year', label: 'This Year' }, { key: 'custom', label: 'Custom' }]
   function apply(key) {
-    if (key === '1m') onChange({ preset: '1m', ...lastNMonths(1) })
+    if (key === 'mtd') onChange({ preset: 'mtd', ...monthToDate() })
+    else if (key === '1m') onChange({ preset: '1m', ...lastNMonths(1) })
     else if (key === '3m') onChange({ preset: '3m', ...lastNMonths(3) })
     else if (key === 'year') onChange({ preset: 'year', ...thisYear() })
     else onChange({ preset: 'custom', start: value.start || '', end: value.end || '' })
@@ -49,7 +55,7 @@ function DateRangePicker({ value, onChange }) {
 
 // ── Labour vs Production ──────────────────────────────────────────────────────
 function LabourReport({ products }) {
-  const [dateRange, setDateRange] = useState({ preset: '1m', ...lastNMonths(1) })
+  const [dateRange, setDateRange] = useState({ preset: 'mtd', ...monthToDate() })
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(false)
 
@@ -126,7 +132,7 @@ function LabourReport({ products }) {
 
 // ── Customer Performance ──────────────────────────────────────────────────────
 function CustomerReport() {
-  const [dateRange, setDateRange] = useState({ preset: '1m', ...currentMonth() })
+  const [dateRange, setDateRange] = useState({ preset: 'mtd', ...monthToDate() })
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [custFilter, setCustFilter] = useState('All Customers')
@@ -201,7 +207,7 @@ function CustomerReport() {
 
 // ── Product Performance ───────────────────────────────────────────────────────
 function ProductReport() {
-  const [dateRange, setDateRange] = useState({ preset: '1m', ...currentMonth() })
+  const [dateRange, setDateRange] = useState({ preset: 'mtd', ...monthToDate() })
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
   const [prodFilter, setProdFilter] = useState('All Products')

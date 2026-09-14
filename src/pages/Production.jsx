@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24 }
+const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24,CCB:17 }
 const CAKE_YIELD  = { TRFCS:8, PCrt:4 }
 const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 
@@ -27,6 +27,14 @@ const REJECTION_REASONS = ['Burnt', 'Undercooked', 'Damaged', 'Packaging Defect'
 // live products table on 2026-09-12) — the only line with both 6" and 9"
 // layer stock. Update these maps here if that ever changes.
 const CUSTOM_CAKE_CODE = 'CSTCK'
+// "Cupcake Frosting" (product code CUPFROST) — a simple flat-rate labour
+// product, $1/cupcake, logged just like any other batch. No BOM/RM check
+// needed (no bom rows exist for it) and no per-batch config like Custom
+// Cake — the flat rate lives on the product row itself (production_value =
+// 1) so the normal valueForEntry()/productionValueFor() lookup already
+// prices it correctly with zero extra code. This constant only drives the
+// friendly display label below.
+const CUPCAKE_FROSTING_CODE = 'CUPFROST'
 const CAKE_SLAB_OPTIONS = ['Chocolate', 'Vanilla']
 const CAKE_SIZE_OPTIONS = ['6', '9']
 const CAKE_LAYER_OPTIONS = ['2', '3', '4']
@@ -105,6 +113,7 @@ function convertBomQty(qty, bomUnit, rmUnit) {
 
 function packsDisplay(code, units) {
   if (code === CUSTOM_CAKE_CODE) return units + ' custom cake' + (units === 1 ? '' : 's')
+  if (code === CUPCAKE_FROSTING_CODE) return units + ' cupcake' + (units === 1 ? '' : 's') + ' frosted'
   const ps = PACK_SIZE[code]
   if (!ps || !units) return units + ' units'
   const packs = Math.round(units / ps)

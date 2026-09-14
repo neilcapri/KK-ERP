@@ -43,7 +43,13 @@ const RM_GROUPS = [
   { label: 'Other',              match: (r) => true },
 ]
 
-const TRAY_SIZE = { VPB:64, VPCAN:36, PNF:40, PVBRG:36, PVBR:12, VSCS:48, NALCOB:21, NBFB:21, HRCS:84, CMC:24, LMC:24, PRMC:24, TMC:24, CCB:17 }
+const TRAY_SIZE = {
+  VPB:64, VPCAN:36, PNF:40, PVBRG:36, PVBR:12, VSCS:48, NALCOB:21, NBFB:21, HRCS:84, CMC:24, LMC:24, PRMC:24, TMC:24, CCB:17,
+  // WIP cake-layer slabs — kept in sync with Production.jsx's TRAY_YIELD
+  WIPKVCKE6:270, WIPPVCKE6:270, WIPKCCKE6:270, WIPPCCKE6:270, WIPkVCKE6:270, WIPKLRCKE6:270,
+  WIPPVCKE9:550, WIPPCCKE9:550,
+  WIPKCCKETR:3000, WIPPCCKETR:3000, WIPPVCKETR:3000, WIPPCRTCKETR:3000,
+}
 const DATE_RANGES = [
   { label: '3 Months', days: 90 },
   { label: '6 Months', days: 180 },

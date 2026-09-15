@@ -44,18 +44,21 @@ const CUSTOM_CAKE_CODE = 'CSTCK'
 // prices it correctly with zero extra code. This constant only drives the
 // friendly display label below.
 const CUPCAKE_FROSTING_CODE = 'CUPFROST'
-const CAKE_SLAB_OPTIONS = ['Chocolate', 'Vanilla']
+const CAKE_SLAB_OPTIONS = ['Chocolate', 'Vanilla', 'KLR']
 const CAKE_SIZE_OPTIONS = ['6', '9']
 const CAKE_LAYER_OPTIONS = ['2', '3', '4']
-const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla', 'Cream Cheese']
+const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla Paleo', 'Vanilla Keto', 'Cream Cheese']
 const DEFAULT_CAKE_CONFIG = { slab: 'Chocolate', size: '6', layers: '2', frosting: 'Chocolate' }
 
 const CAKE_LAYER_WIP = {
   'Chocolate-6': 'WIPPCCKE6', 'Chocolate-9': 'WIPPCCKE9',
   'Vanilla-6': 'WIPPVCKE6', 'Vanilla-9': 'WIPPVCKE9',
+  // KLR only exists as a 6" layer WIP — no 9" code — so 'KLR-9' is deliberately
+  // left unmapped; the existing "no WIP code mapped" warning below covers it.
+  'KLR-6': 'WIPKLRCKE6',
 }
 const CAKE_FROSTING_WIP = {
-  Chocolate: 'Ganache', Vanilla: 'WIPPFROST', 'Cream Cheese': 'WIPCRECHEFR',
+  Chocolate: 'Ganache', 'Vanilla Paleo': 'WIPPFROST', 'Vanilla Keto': 'WIPKFROST', 'Cream Cheese': 'WIPCRECHEFR',
 }
 
 // 6": 250g for 2 layers, +125g per layer beyond that. 9": 500g for 2 layers, +250g/layer beyond.
@@ -74,8 +77,16 @@ function customCakeWipNeeds(cfg, qty) {
   const layerCode = CAKE_LAYER_WIP[cfg.slab + '-' + cfg.size]
   const frostingCode = CAKE_FROSTING_WIP[cfg.frosting]
   const needs = []
-  if (layerCode) needs.push({ code: layerCode, qty: layers * qty, unit: 'ea', label: cfg.slab + ' ' + cfg.size + '" Layer' })
-  else needs.push({ code: null, qty: 0, unit: 'ea', label: cfg.slab + ' ' + cfg.size + '" Layer (no WIP code mapped)' })
+  if (layerCode) {
+    // Layer WIPs (WIPPCCKE6/WIPPVCKE6/WIPPCCKE9/WIPPVCKE9/WIPKLRCKE6, etc.) are
+    // tracked in grams as of the 2026-09-15 slab-weight rescale (see TRAY_YIELD:
+    // 270g for a 6" slab, 550g for a 9" slab) — a "layer" here means that many
+    // grams of the WIP's stock, not 1 discrete "each".
+    const slabWeight = TRAY_YIELD[layerCode] || 1
+    needs.push({ code: layerCode, qty: layers * slabWeight * qty, unit: 'g', label: cfg.slab + ' ' + cfg.size + '" Layer' })
+  } else {
+    needs.push({ code: null, qty: 0, unit: 'g', label: cfg.slab + ' ' + cfg.size + '" Layer (no WIP code mapped)' })
+  }
   if (frostingCode) needs.push({ code: frostingCode, qty: frostingGramsFor(cfg.size, layers) * qty, unit: 'g', label: cfg.frosting + ' Frosting' })
   else needs.push({ code: null, qty: 0, unit: 'g', label: cfg.frosting + ' Frosting (no WIP code mapped)' })
   return needs

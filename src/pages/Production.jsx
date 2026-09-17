@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-
-const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24,CCB:17 }
-const CAKE_YIELD  = { TRFCS:8, PCrt:4 }
-const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
-
 // WIP cake-layer "slabs" — inventory (products.units/freezer_units) for these
 // is tracked in SLABS (whole count, wip_unit stays 'ea'), same as Custom Cake's
 // layer WIPs. The BOM for each is stored per-gram-of-finished-slab (see the
@@ -13,11 +8,13 @@ const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 // figuring out how much raw material one batch actually used — never for what
 // gets added to stock. Quantity entered in Log Batch = number of slabs/trays
 // made, full stop; this map is consulted only inside the RM-deduction math.
-const SLAB_WEIGHT_G = {
-  WIPKVCKE6:270, WIPPVCKE6:270, WIPKCCKE6:270, WIPPCCKE6:270, WIPkVCKE6:270, WIPKLRCKE6:270, // 6" slab = 270g
-  WIPPVCKE9:550, WIPPCCKE9:550, // 9" slab = 550g
-  WIPKCCKETR:3000, WIPPCCKETR:3000, WIPPVCKETR:3000, WIPPCRTCKETR:3000, // tray cake slab = 3000g
-}
+// Single shared copy — see lib/wipCosting.js — so Production, Inventory, and
+// Costing can never drift out of sync on these weights again.
+import { SLAB_WEIGHT_G } from '../lib/wipCosting'
+
+const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24,CCB:17 }
+const CAKE_YIELD  = { TRFCS:8, PCrt:4 }
+const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 
 const PACK_SIZE = {
   VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,

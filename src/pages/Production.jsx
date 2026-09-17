@@ -575,6 +575,12 @@ export default function Production() {
         await supabase.from('products').update({ freezer_units: newFreezer, units: newTotal }).eq('code', h.product_code)
       }
       const totalForRM = (h.output_units || 0) + (h.rejected_units || 0)
+      // Mirror saveProduction's rmMultiplier exactly — for the 12 slab/tray WIP
+      // codes, totalForRM is a slab COUNT but the BOM is stored per gram, so the
+      // restore has to scale up by the slab weight the same way the original
+      // deduction did. Without this, deleting a production entry for one of
+      // these codes restores only a tiny fraction of what was actually taken.
+      const rmMultiplier = SLAB_WEIGHT_G[h.product_code] ? totalForRM * SLAB_WEIGHT_G[h.product_code] : totalForRM
       if (h.product_code === CUSTOM_CAKE_CODE) {
         // No static bom rows for Custom Cake — recover the config from the
         // [CAKE:...] tag saveProduction wrote into notes, and restore the
@@ -603,7 +609,7 @@ export default function Production() {
             if (wipCode) {
               const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
               if (wip) {
-                const restoreQty = item.qty_per_unit * totalForRM
+                const restoreQty = item.qty_per_unit * rmMultiplier
                 await supabase.from('products').update({ units: (wip.units || 0) + restoreQty }).eq('code', wipCode)
               }
             } else {
@@ -611,7 +617,7 @@ export default function Production() {
               if (!rm) continue
               // Mirror saveProduction's convertBomQty — if the original deduction couldn't
               // convert the units, nothing was deducted, so there's nothing to restore here either.
-              const restoreQty = convertBomQty(item.qty_per_unit * totalForRM, item.unit, rm.unit)
+              const restoreQty = convertBomQty(item.qty_per_unit * rmMultiplier, item.unit, rm.unit)
               if (restoreQty != null) await supabase.from('raw_materials').update({ stock: rm.stock + restoreQty }).eq('name', rm.name)
             }
           }

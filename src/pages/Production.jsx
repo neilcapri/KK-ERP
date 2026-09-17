@@ -2,18 +2,22 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const TRAY_YIELD = {
-  VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24,CCB:17,
-  // WIP cake-layer "slabs" — Log Batch input is "number of slabs/trays produced";
-  // BOM for these is now stored per-gram-of-finished-slab (see products.wip_unit
-  // = 'gms'), so this converts the slab count the kitchen actually counts into
-  // the correct total grams for both RM deduction and WIP stock tracking.
+const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24,CCB:17 }
+const CAKE_YIELD  = { TRFCS:8, PCrt:4 }
+const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
+
+// WIP cake-layer "slabs" — inventory (products.units/freezer_units) for these
+// is tracked in SLABS (whole count, wip_unit stays 'ea'), same as Custom Cake's
+// layer WIPs. The BOM for each is stored per-gram-of-finished-slab (see the
+// 2026-09-15 rescale), so grams only enter the picture as a multiplier when
+// figuring out how much raw material one batch actually used — never for what
+// gets added to stock. Quantity entered in Log Batch = number of slabs/trays
+// made, full stop; this map is consulted only inside the RM-deduction math.
+const SLAB_WEIGHT_G = {
   WIPKVCKE6:270, WIPPVCKE6:270, WIPKCCKE6:270, WIPPCCKE6:270, WIPkVCKE6:270, WIPKLRCKE6:270, // 6" slab = 270g
   WIPPVCKE9:550, WIPPCCKE9:550, // 9" slab = 550g
   WIPKCCKETR:3000, WIPPCCKETR:3000, WIPPVCKETR:3000, WIPPCRTCKETR:3000, // tray cake slab = 3000g
 }
-const CAKE_YIELD  = { TRFCS:8, PCrt:4 }
-const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
 
 const PACK_SIZE = {
   VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,
@@ -77,16 +81,11 @@ function customCakeWipNeeds(cfg, qty) {
   const layerCode = CAKE_LAYER_WIP[cfg.slab + '-' + cfg.size]
   const frostingCode = CAKE_FROSTING_WIP[cfg.frosting]
   const needs = []
-  if (layerCode) {
-    // Layer WIPs (WIPPCCKE6/WIPPVCKE6/WIPPCCKE9/WIPPVCKE9/WIPKLRCKE6, etc.) are
-    // tracked in grams as of the 2026-09-15 slab-weight rescale (see TRAY_YIELD:
-    // 270g for a 6" slab, 550g for a 9" slab) — a "layer" here means that many
-    // grams of the WIP's stock, not 1 discrete "each".
-    const slabWeight = TRAY_YIELD[layerCode] || 1
-    needs.push({ code: layerCode, qty: layers * slabWeight * qty, unit: 'g', label: cfg.slab + ' ' + cfg.size + '" Layer' })
-  } else {
-    needs.push({ code: null, qty: 0, unit: 'g', label: cfg.slab + ' ' + cfg.size + '" Layer (no WIP code mapped)' })
-  }
+  // Layer WIP stock is tracked in whole slabs (wip_unit 'ea') — a cake needs
+  // `layers` discrete slabs of that code, deducted 1:1 regardless of the
+  // slab's gram weight (grams only matter inside that WIP's own RM recipe).
+  if (layerCode) needs.push({ code: layerCode, qty: layers * qty, unit: 'ea', label: cfg.slab + ' ' + cfg.size + '" Layer' })
+  else needs.push({ code: null, qty: 0, unit: 'ea', label: cfg.slab + ' ' + cfg.size + '" Layer (no WIP code mapped)' })
   if (frostingCode) needs.push({ code: frostingCode, qty: frostingGramsFor(cfg.size, layers) * qty, unit: 'g', label: cfg.frosting + ' Frosting' })
   else needs.push({ code: null, qty: 0, unit: 'g', label: cfg.frosting + ' Frosting (no WIP code mapped)' })
   return needs
@@ -203,7 +202,7 @@ export default function Production() {
   async function loadData() {
     setLoading(true)
     const [p, s, h, rm] = await Promise.all([
-      supabase.from('products').select('code,name,category,price_per_pack,production_value').order('code'),
+      supabase.from('products').select('code,name,category,price_per_pack,production_value,active').order('code'),
       supabase.from('production_schedule').select('*').order('scheduled_date').limit(50),
       supabase.from('productions').select('*').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(100),
       supabase.from('raw_materials').select('name,stock,unit').order('name'),
@@ -295,6 +294,11 @@ export default function Production() {
       return warns
     }
     const wipCodes = await getWIPCodes()
+    // These 12 WIP "slab" codes have quantity entered = number of slabs/trays,
+    // but their own BOM is stored per-gram-of-finished-slab — so raw-material
+    // math needs grams (qty × slab weight), even though outputUnits itself
+    // (used further down for stock) stays as the plain slab count.
+    const rmMultiplier = SLAB_WEIGHT_G[code] ? outputUnits * SLAB_WEIGHT_G[code] : outputUnits
     const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
     if (!bom?.length) return []
     const warns = []
@@ -304,7 +308,7 @@ export default function Production() {
       if (wipProduct || item.component_type === 'wip') {
         const wip = wipProduct || wipCodes.find(w => w.code === item.wip_code)
         if (!wip) continue
-        const needed = item.qty_per_unit * outputUnits
+        const needed = item.qty_per_unit * rmMultiplier
         const have = wip.units || 0
         const unitLabel = item.unit === 'ea' ? ' ea' : 'g'
         if (have < needed) {
@@ -312,7 +316,7 @@ export default function Production() {
         }
       }
     }
-    const rmNeeds = await flattenToRM(code, outputUnits, wipCodes)
+    const rmNeeds = await flattenToRM(code, rmMultiplier, wipCodes)
     const rmNames = Object.keys(rmNeeds)
     if (rmNames.length > 0) {
       const { data: stocks } = await supabase.from('raw_materials').select('name,stock,unit')
@@ -478,6 +482,11 @@ export default function Production() {
       addLog('✓ ' + wipCount + ' WIP component(s) deducted for ' + totalOutput + ' custom cake(s) — ' + cakeConfig.slab + ' ' + cakeConfig.size + '" · ' + cakeConfig.layers + ' layers · ' + cakeConfig.frosting + ' frosting', 'ok')
       if (missedWip.length) addLog('⚠️ Could not deduct: ' + missedWip.join(', ') + ' — check CAKE_LAYER_WIP/CAKE_FROSTING_WIP against the products table.', 'warn')
     } else {
+      // Same grams-for-RM-only split as checkRM above: these 12 slab codes get
+      // their raw-material deduction scaled by slab weight, but the stock
+      // update above (freezer_units/units) already used totalOutput as the
+      // plain slab count, which is correct and untouched.
+      const rmMultiplier = SLAB_WEIGHT_G[code] ? totalOutput * SLAB_WEIGHT_G[code] : totalOutput
       const { data: bom } = await supabase.from('bom').select('rm_name,qty_per_unit,component_type,wip_code,unit').eq('product_code', code)
       if (bom?.length) {
         const { data: wipProds } = await supabase.from('products').select('code,name,units').eq('category', 'WIP')
@@ -494,7 +503,7 @@ export default function Production() {
           if (wipCode) {
             const wip = wipProduct || (wipProds || []).find(w => w.code === wipCode)
             if (wip) {
-              const deductQty = item.qty_per_unit * totalOutput
+              const deductQty = item.qty_per_unit * rmMultiplier
               // No floor at 0 — a shortage should show as a negative balance, not vanish.
               await supabase.from('products').update({ units: (wip.units || 0) - deductQty }).eq('code', wipCode)
               wipCount++
@@ -502,7 +511,7 @@ export default function Production() {
           } else {
             const rm = findRM(allRMs, item.rm_name)
             if (!rm) { missedRM.push(item.rm_name); continue }
-            const deductQty = convertBomQty(item.qty_per_unit * totalOutput, item.unit, rm.unit)
+            const deductQty = convertBomQty(item.qty_per_unit * rmMultiplier, item.unit, rm.unit)
             if (deductQty == null) {
               unitMismatchRM.push(item.rm_name + ' (recipe: ' + (item.unit || '?') + ' vs stock: ' + (rm.unit || '?') + ')')
               continue
@@ -751,7 +760,7 @@ export default function Production() {
                 <label>Product</label>
                 <select style={selectStyle} value={form.code} onChange={e => handleCodeChange(e.target.value)}>
                   <option value="">Select product...</option>
-                  {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
+                  {products.filter(p => p.active !== false).map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
                 </select>
               </div>
               {form.code === CUSTOM_CAKE_CODE ? (
@@ -1071,7 +1080,7 @@ export default function Production() {
               <div style={{ flex: '0 0 320px' }}>
                 <select style={selectStyle} value={historySearchCode} onChange={e => searchProductHistory(e.target.value)}>
                   <option value="">🔍 Search a product's history...</option>
-                  {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
+                  {products.filter(p => p.active !== false).map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
                 </select>
               </div>
               {historySearchCode && (
@@ -1233,7 +1242,7 @@ export default function Production() {
               <label>Product</label>
               <select style={selectStyle} value={schedForm.product_code} onChange={e => handleSchedProductChange(e.target.value)}>
                 <option value="">Select...</option>
-                {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
+                {products.filter(p => p.active !== false).map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
               </select>
             </div>
             <div className="field-row">
@@ -1290,7 +1299,7 @@ export default function Production() {
               <label>Product</label>
               <select style={selectStyle} value={editForm.product_code} onChange={e => handleEditProductChange(e.target.value)}>
                 <option value="">Select...</option>
-                {products.map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
+                {products.filter(p => p.active !== false).map(p => <option key={p.code} value={p.code}>{p.category==='WIP' ? '🧁 ' : ''}{p.code} — {p.name}</option>)}
               </select>
             </div>
             <div className="field-row">

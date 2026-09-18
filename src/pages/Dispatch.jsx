@@ -48,7 +48,12 @@ async function deductFromFreezerAliased(code, unitsDispatched) {
   const target = resolveStockTarget(code, unitsDispatched)
   const { data: prod } = await supabase.from('products').select('units,freezer_units,packed_units').eq('code', target.code).single()
   if (!prod) return
-  const ps = prod.packed_units > 0 ? Math.round((prod.units - (prod.freezer_units || 0)) / prod.packed_units) || 1 : 1
+  // Use the known PACK_SIZE constant directly instead of reverse-engineering
+  // it from (units - freezer_units) / packed_units — that derivation quietly
+  // returns a wrong pack size the moment those three stock fields drift out
+  // of sync with each other (as happened once already with TRFCS), and there
+  // is no reason to guess at a number that's already known.
+  const ps = PACK_SIZE[target.code] || 1
   const newFreezer = Math.max(0, (prod.freezer_units || prod.units || 0) - target.units)
   const newTotal = newFreezer + ((prod.packed_units || 0) * ps)
   await supabase.from('products').update({ units: Math.max(0, newTotal), freezer_units: newFreezer }).eq('code', target.code)
@@ -266,36 +271,74 @@ export default function Dispatch() {
     })
   }
 
+  // Phone camera photos of packing slips often come in at 3000-4000px wide —
+  // far more resolution than the model needs to read printed text, but every
+  // extra pixel still has to be base64-encoded, uploaded, and processed.
+  // Downscaling to 1600px on the long edge before sending cuts payload size
+  // (and upload + processing time) substantially with no loss in read
+  // accuracy. PDFs skip this and go through fileToB64 unchanged.
+  async function resizeImageB64(file, maxDim = 1600, quality = 0.85) {
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader()
+      r.onload = () => res(r.result)
+      r.onerror = rej
+      r.readAsDataURL(file)
+    })
+    const img = await new Promise((res, rej) => {
+      const im = new Image()
+      im.onload = () => res(im)
+      im.onerror = rej
+      im.src = dataUrl
+    })
+    if (img.width <= maxDim && img.height <= maxDim) return dataUrl.split(',')[1]
+    const scale = maxDim / Math.max(img.width, img.height)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(img.width * scale)
+    canvas.height = Math.round(img.height * scale)
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', quality).split(',')[1]
+  }
+
   async function verifyProductionDates(slips) {
     const verified = {}
-    for (const slip of slips) {
-      for (const item of slip.items || []) {
-        if (!item.production_date) continue
-        const dateStr = parseSlipDate(item.production_date)
-        const key = `${item.code}_${dateStr}`
-        const { data } = await supabase.from('productions')
-          .select('id').eq('product_code', item.code).eq('date', dateStr).limit(1)
-        verified[key] = data && data.length > 0
-      }
-    }
+    // One query covering every (code, date) needed instead of one query per
+    // line item — a slip batch with 40 line items used to mean 40 sequential
+    // round-trips here alone.
+    const items = []
+    slips.forEach(slip => (slip.items || []).forEach(item => {
+      if (!item.production_date) return
+      items.push({ code: item.code, dateStr: parseSlipDate(item.production_date) })
+    }))
+    if (!items.length) return verified
+    const codes = [...new Set(items.map(i => i.code))]
+    const dates = [...new Set(items.map(i => i.dateStr))]
+    const { data } = await supabase.from('productions')
+      .select('product_code,date').in('product_code', codes).in('date', dates)
+    const found = new Set((data || []).map(r => `${r.product_code}_${r.date}`))
+    items.forEach(({ code, dateStr }) => { verified[`${code}_${dateStr}`] = found.has(`${code}_${dateStr}`) })
     return verified
   }
 
   // ── Check each extracted slip against existing dispatches for duplicate invoice numbers ──
   async function checkDuplicateInvoices(slips) {
     const flags = {}
-    for (let i = 0; i < slips.length; i++) {
-      const slip = slips[i]
-      if (!slip.invoice) continue
-      const { data: existing } = await supabase
-        .from('dispatches')
-        .select('id, date, customer_name, invoice_number')
-        .eq('invoice_number', slip.invoice)
-        .limit(1)
-      if (existing?.length) {
-        flags[i] = existing[0]
-      }
-    }
+    // One query for every invoice number instead of one query per slip.
+    const invoices = [...new Set(slips.map(s => s.invoice).filter(Boolean))]
+    if (!invoices.length) return flags
+    const { data: existingRows } = await supabase
+      .from('dispatches')
+      .select('id, date, customer_name, invoice_number')
+      .in('invoice_number', invoices)
+    const byInvoice = {}
+    ;(existingRows || []).forEach(r => {
+      if (!byInvoice[r.invoice_number]) byInvoice[r.invoice_number] = []
+      byInvoice[r.invoice_number].push(r)
+    })
+    slips.forEach((slip, i) => {
+      if (!slip.invoice) return
+      const existing = byInvoice[slip.invoice]
+      if (existing?.length) flags[i] = existing[0]
+    })
     return flags
   }
 
@@ -303,17 +346,22 @@ export default function Dispatch() {
     if (!files.length) return
     setProcessing(true); setLog([]); setExtracted([]); setVerifiedItems({}); setDuplicateFlags({})
     addLog(`Processing ${files.length} file(s)...`)
-    const allSlips = []
-    for (let i = 0; i < files.length; i += 4) {
-      const batch = files.slice(i, i + 4)
+    const batches = []
+    for (let i = 0; i < files.length; i += 4) batches.push(files.slice(i, i + 4))
+    if (batches.length > 1) addLog(`Running ${batches.length} batches in parallel...`)
+    // Batches used to run one at a time (await inside the loop) — each batch
+    // is its own independent Claude API call, so there's no reason the 2nd
+    // batch has to wait for the 1st to finish before it even starts. Running
+    // them together cuts total wait time roughly by the number of batches.
+    const results = await Promise.all(batches.map(async (batch) => {
       try {
         const content = []
         for (const f of batch) {
-          const b64 = await fileToB64(f)
           const isPDF = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+          const b64 = isPDF ? await fileToB64(f) : await resizeImageB64(f)
           content.push(isPDF
             ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
-            : { type: 'image', source: { type: 'base64', media_type: f.type || 'image/jpeg', data: b64 } }
+            : { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }
           )
         }
         content.push({ type: 'text', text: 'Extract all packing slip data. Capture the Date column for each line item as production_date. Return JSON only.' })
@@ -328,16 +376,20 @@ export default function Dispatch() {
           body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 4000, system: AI_PROMPT, messages: [{ role: 'user', content }] })
         })
         const data = await res.json()
-        if (data.error) { addLog(`Error: ${data.error.message}`, 'err'); continue }
+        if (data.error) return { error: data.error.message }
         const raw = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim()
-        const parsed = JSON.parse(raw)
-        ;(parsed.slips || []).forEach(slip => {
-          allSlips.push(slip)
-          addLog(`✓ ${slip.customer} — Inv #${slip.invoice || '?'} — ${slip.items?.length || 0} lines`, 'ok')
-          ;(slip.flags || []).forEach(f => addLog(`⚠ ${f}`, 'warn'))
-        })
-      } catch (err) { addLog(`Error: ${err.message}`, 'err') }
-    }
+        return { slips: JSON.parse(raw).slips || [] }
+      } catch (err) { return { error: err.message } }
+    }))
+    const allSlips = []
+    results.forEach(r => {
+      if (r.error) { addLog(`Error: ${r.error}`, 'err'); return }
+      r.slips.forEach(slip => {
+        allSlips.push(slip)
+        addLog(`✓ ${slip.customer} — Inv #${slip.invoice || '?'} — ${slip.items?.length || 0} lines`, 'ok')
+        ;(slip.flags || []).forEach(f => addLog(`⚠ ${f}`, 'warn'))
+      })
+    })
     setExtracted(allSlips)
     if (allSlips.length > 0) {
       addLog('Verifying production dates...', '')

@@ -140,7 +140,7 @@ const CUSTOM_CAKE_CODE = 'CSTCK'
 const CAKE_SLAB_OPTIONS = ['Chocolate', 'Vanilla', 'KLR']
 const CAKE_SIZE_OPTIONS = ['6', '9']
 const CAKE_LAYER_OPTIONS = ['2', '3', '4']
-const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla Paleo', 'Vanilla Keto', 'Cream Cheese']
+const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla Paleo', 'Vanilla Keto', 'Cream Cheese', 'Truffle Cream']
 // Price depends on size + layers only (not slab/frosting) — kept in sync with
 // the same table in Production.jsx (CAKE_PRICE / priceForCake).
 const CAKE_PRICE = { '6-2': 15, '6-3': 20, '6-4': 30, '9-2': 20, '9-3': 30, '9-4': 40 }

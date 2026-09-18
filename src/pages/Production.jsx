@@ -48,7 +48,7 @@ const CUPCAKE_FROSTING_CODE = 'CUPFROST'
 const CAKE_SLAB_OPTIONS = ['Chocolate', 'Vanilla', 'KLR']
 const CAKE_SIZE_OPTIONS = ['6', '9']
 const CAKE_LAYER_OPTIONS = ['2', '3', '4']
-const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla Paleo', 'Vanilla Keto', 'Cream Cheese']
+const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla Paleo', 'Vanilla Keto', 'Cream Cheese', 'Truffle Cream']
 const DEFAULT_CAKE_CONFIG = { slab: 'Chocolate', size: '6', layers: '2', frosting: 'Chocolate' }
 
 const CAKE_LAYER_WIP = {
@@ -59,7 +59,7 @@ const CAKE_LAYER_WIP = {
   'KLR-6': 'WIPKLRCKE6',
 }
 const CAKE_FROSTING_WIP = {
-  Chocolate: 'Ganache', 'Vanilla Paleo': 'WIPPFROST', 'Vanilla Keto': 'WIPKFROST', 'Cream Cheese': 'WIPCRECHEFR',
+  Chocolate: 'Ganache', 'Vanilla Paleo': 'WIPPFROST', 'Vanilla Keto': 'WIPKFROST', 'Cream Cheese': 'WIPCRECHEFR', 'Truffle Cream': 'WIPTRCR',
 }
 
 // 6": 250g for 2 layers, +125g per layer beyond that. 9": 500g for 2 layers, +250g/layer beyond.

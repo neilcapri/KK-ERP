@@ -6,12 +6,19 @@
 // costed against) that real raw material's stock, not a stray same-named
 // row that never gets restocked or priced.
 //
-// "Hazelnut Flour" is the first case: it's ground in-house from whole
-// Hazelnuts, not purchased/stocked on its own. The "Hazelnut Flour" row in
-// raw_materials sits at 0 stock / $0 price — so before this alias, PNF's
-// 5g of "Hazelnut Flour" per unit was silently costing $0 and never
-// deducting anything real. This maps it to "Hazelnuts" (the actual
-// 30kg+ tracked stock) instead.
+// "Hazelnut Flour" and plain "Hazelnut" are both cases of this: neither is
+// purchased/stocked on its own — they're ground in-house from whole
+// Hazelnuts. Both rows in raw_materials sit at 0 stock / $0 price — so
+// before this alias, PNF's "Hazelnut Flour" (5g) and PNF/HPCo's "Hazelnut"
+// (6g/0.9g) lines were silently costing $0 and never deducting anything
+// real. This maps both to "Hazelnuts" (the actual 30kg+ tracked stock)
+// instead.
+//
+// Deliberately NOT included: "Hazelnut Butter" (used in KHD, PNF, HRCS,
+// WIPNotella) is a genuinely different, separately-priced ingredient
+// ($29.25/kg) — aliasing it to whole Hazelnuts ($19.83/kg) would apply the
+// wrong price and misrepresent those recipes, even though it also happens
+// to sit at 0 stock right now.
 //
 // Add more entries here — never re-duplicate this map into another file —
 // whenever the same situation comes up again. Keys are matched
@@ -19,6 +26,7 @@
 // to resolve to.
 export const RM_ALIAS = {
   'hazelnut flour': 'Hazelnuts',
+  'hazelnut': 'Hazelnuts',
 }
 
 export function resolveRMName(name) {

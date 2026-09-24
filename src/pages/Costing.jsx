@@ -9,6 +9,11 @@ import { useAuth } from '../context/AuthContext'
 // otherwise rmCostFor() reads the WIP's own per-gram batch cost as if it were
 // the cost of one whole slab, understating RM cost ~270-3000x for that line.
 import { SLAB_WEIGHT_G } from '../lib/wipCosting'
+// Raw-material name aliases — e.g. "Hazelnut Flour" isn't its own stocked
+// item, it's ground in-house from "Hazelnuts", so its cost should come from
+// that real raw material's price, not a stray $0 row. Single shared copy —
+// see lib/rawMaterialAlias.js — kept in sync with Production.jsx.
+import { resolveRMName } from '../lib/rawMaterialAlias'
 
 const MARGIN_THRESHOLD = 30 // %
 const BULK_CODES = new Set([
@@ -91,7 +96,7 @@ export default function Costing() {
           cost = costPerGm * item.qty_per_unit
         }
       } else {
-        const rm = rmPriceMap[item.rm_name] || { price: 0, unit: 'kg' }
+        const rm = rmPriceMap[resolveRMName(item.rm_name)] || { price: 0, unit: 'kg' }
         const price = rm.price
         if (item.unit === 'ea') {
           cost = price * item.qty_per_unit
@@ -424,7 +429,7 @@ export default function Costing() {
                           if (wipYield > 0) cost = (wipTotal / wipYield) * b.qty_per_unit
                         }
                       } else {
-                        const rm = rmPriceMap[b.rm_name] || { price: 0, unit: 'kg' }
+                        const rm = rmPriceMap[resolveRMName(b.rm_name)] || { price: 0, unit: 'kg' }
                         if (b.unit === 'ea') cost = rm.price * b.qty_per_unit
                         else if (rm.unit === 'batch') cost = (b.qty_per_unit / 6000) * rm.price
                         else cost = (b.qty_per_unit / 1000) * rm.price

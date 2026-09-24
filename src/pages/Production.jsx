@@ -11,6 +11,11 @@ import { useAuth } from '../context/AuthContext'
 // Single shared copy — see lib/wipCosting.js — so Production, Inventory, and
 // Costing can never drift out of sync on these weights again.
 import { SLAB_WEIGHT_G } from '../lib/wipCosting'
+// Raw-material name aliases — e.g. "Hazelnut Flour" isn't its own stocked
+// item, it's ground in-house from "Hazelnuts", so lookups here need to
+// resolve to the real tracked stock. Single shared copy — see
+// lib/rawMaterialAlias.js — so Production and Costing never drift apart.
+import { resolveRMName } from '../lib/rawMaterialAlias'
 
 const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24,CCB:17 }
 const CAKE_YIELD  = { TRFCS:8, PCrt:4 }
@@ -102,7 +107,10 @@ function parseCakeTag(notes) {
 // `.eq('name', ...)` matches silently miss and skip the deduction entirely.
 function findRM(rmRows, name) {
   if (!name) return null
-  const key = name.trim().toLowerCase()
+  // Resolve aliased ingredient names (e.g. "Hazelnut Flour" → "Hazelnuts")
+  // before matching, so every deduction/restore/availability-check call
+  // site below picks up the real tracked raw material automatically.
+  const key = resolveRMName(name).trim().toLowerCase()
   return (rmRows || []).find(r => (r.name || '').trim().toLowerCase() === key) || null
 }
 

@@ -652,7 +652,7 @@ export default function Inventory() {
                               {weekSummary.producedRows.length === 0
                                 ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None yet</div>
                                 : (
-                                  <div style={{ maxHeight: 120, overflowY: 'auto', paddingRight: 4 }}>
+                                  <div style={{ maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
                                     {weekSummary.producedRows.map((p, i) => (
                                       <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
                                         <span style={{ color: 'var(--kk-green)', fontWeight: 600 }}>+{p.output_units}</span> units · {p.date}
@@ -667,7 +667,7 @@ export default function Inventory() {
                               {weekSummary.dispatchRows.length === 0
                                 ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None yet</div>
                                 : (
-                                  <div style={{ maxHeight: 120, overflowY: 'auto', paddingRight: 4 }}>
+                                  <div style={{ maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
                                     {weekSummary.dispatchRows.map((d, i) => (
                                       <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
                                         <span style={{ color: 'var(--red)', fontWeight: 600 }}>−{d.units_dispatched}</span> units · {d.dispatches?.customer_name || '—'} · {d.dispatches?.date}
@@ -684,7 +684,7 @@ export default function Inventory() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, overflow: 'hidden', flex: 1 }}>
                           <div>
                             <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>🏭 Productions</div>
-                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 380px)', paddingRight: 4 }}>
+                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 520px)', paddingRight: 4 }}>
                               {productHistory.productions.length === 0
                                 ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
                                 : productHistory.productions.map((p, i) => (
@@ -704,7 +704,7 @@ export default function Inventory() {
                                 assumed. "Auto-packed for dispatch" entries come from Dispatch;
                                 anything else was packed manually here in Inventory. */}
                             <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>📦 Packed</div>
-                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 380px)', paddingRight: 4 }}>
+                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 520px)', paddingRight: 4 }}>
                               {productHistory.packed.length === 0
                                 ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
                                 : productHistory.packed.map((r, i) => (
@@ -718,7 +718,7 @@ export default function Inventory() {
                           </div>
                           <div>
                             <div style={{ fontSize: 10, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', marginBottom: 8, fontFamily: 'var(--mono)' }}>📋 Dispatches</div>
-                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 380px)', paddingRight: 4 }}>
+                            <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 520px)', paddingRight: 4 }}>
                               {productHistory.dispatches.length === 0
                                 ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None in period</div>
                                 : productHistory.dispatches.map((d, i) => (

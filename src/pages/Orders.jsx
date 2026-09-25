@@ -631,7 +631,7 @@ function printDispatchSlip(ordersInput) {
     return '<div class="order-block">' +
       '<div class="order-header">' +
         '<strong>' + (order.customer_name || '') + '</strong>' +
-        '<div class="order-meta">' + (order.slip_number || '') + ' &middot; ' + (order.dispatch_date || order.delivery_day || '&mdash;') + '</div>' +
+        '<div class="order-meta">' + (order.dispatch_date || order.delivery_day || '&mdash;') + '</div>' +
         '<div class="order-inv">Inv #: __________________________</div>' +
       '</div>' +
       '<div class="table-wrap"><table class="' + scaleClass + '">' +
@@ -647,7 +647,7 @@ function printDispatchSlip(ordersInput) {
 
   function renderPage(pageOrders, pageNum, total) {
     return '<div class="page">' +
-      '<div class="page-header"><span class="logo">KONSCIOUS KITCHEN</span><span style="font-size:10px;color:#555">DISPATCH &middot; Page ' + pageNum + '/' + total + ' &middot; ' + new Date().toLocaleDateString('en-CA') + '</span></div>' +
+      '<div class="page-header"><span class="logo">KONSCIOUS KITCHEN</span></div>' +
       '<div class="slips-grid">' + pageOrders.map(renderOrder).join('') + '</div>' +
     '</div>'
   }

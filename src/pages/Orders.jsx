@@ -595,7 +595,8 @@ function printDispatchSlip(ordersInput) {
     return '<div class="order-block">' +
       '<div class="order-header">' +
         '<strong>' + (order.customer_name || '') + '</strong>' +
-        '<div class="order-meta">' + (order.slip_number || '') + ' &middot; <b>Inv #: ______________</b> &middot; ' + (order.dispatch_date || order.delivery_day || '&mdash;') + '</div>' +
+        '<div class="order-meta">' + (order.slip_number || '') + ' &middot; ' + (order.dispatch_date || order.delivery_day || '&mdash;') + '</div>' +
+        '<div class="order-inv">Inv #: __________________________</div>' +
       '</div>' +
       '<div class="table-wrap"><table>' +
         '<thead><tr>' +
@@ -621,20 +622,25 @@ function printDispatchSlip(ordersInput) {
     '.page { width: 210mm; min-height: 297mm; padding: 8mm; display: flex; flex-direction: column; page-break-after: always; }',
     '.page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 8px; flex-shrink: 0; }',
     '.logo { font-size: 13px; font-weight: 900; letter-spacing: 2px; }',
-    // Two slips side by side. Each slip box is given a fixed min-height in
-    // mm (tied to the physical page, same units as .page below) so it fills
-    // roughly 80% of the page — big, but a fixed physical length instead of
-    // a relative % height, which is what caused the earlier page-3 overflow
-    // bug (table height:100% + align-items:stretch inside an otherwise
-    // auto-height print layout). The extra room inside each row still comes
-    // from the taller td padding, not from stretching the table itself.
+    // Two slips side by side. Each slip box gets a fixed min-height in mm
+    // (tied to the physical page, same units as .page below) so it fills
+    // roughly 80% of the page — a fixed physical length rather than a
+    // relative % height. The earlier page-3 overflow bug came from
+    // table height:100% combined with align-items:stretch, where the
+    // grid was stretching order-block to match an indeterminate sibling
+    // height — a feedback loop with no fixed anchor. Here order-block's
+    // height is anchored to the fixed 220mm min-height instead, so it's
+    // now safe to let table-wrap and the table itself fill that same
+    // fixed space (align-items stays "start" — nothing about the grid
+    // itself is stretching).
     '.slips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; flex: 1; }',
     '.order-block { border: 1.5px solid #000; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; min-height: 220mm; }',
     '.order-header { border-bottom: 1.5px solid #000; padding: 6px 9px; background: #f0f0f0; flex-shrink: 0; }',
     '.order-header strong { font-size: 17px; font-weight: 900; display: block; line-height: 1.3; }',
     '.order-meta { font-size: 12px; font-weight: 600; color: #333; margin-top: 2px; }',
-    '.table-wrap { flex: 1; }',
-    'table { width: 100%; border-collapse: collapse; }',
+    '.order-inv { font-size: 14px; font-weight: 700; margin-top: 5px; }',
+    '.table-wrap { flex: 1; display: flex; flex-direction: column; }',
+    'table { width: 100%; height: 100%; border-collapse: collapse; }',
     'th { background: #e0e0e0; padding: 5px 8px; font-size: 10px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }',
     'td { padding: 16px 8px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: middle; word-break: break-word; }',
     'tr:last-child td { border-bottom: none; }',

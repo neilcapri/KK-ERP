@@ -20,11 +20,13 @@ const BULK_CODES = new Set([
   'PBBBu','PCCBu','KLRBu','KABBu','KWALBu','HPCoBu','PVHCBu',
   'VPCANBu','VPBBu','PNFBu','KABISBu','KSCDBu',
 ])
-// VPB2P / PNF2P / VPCAN2P are NOT bulk — they're ordinary retail packs (see
-// Orders.jsx/Dispatch.jsx STOCK_ALIAS), so they stay in fgProducts below and
-// get costed normally: their BOM is a straight copy of the base bar's BOM at
-// 2x qty_per_unit (2 bars' worth of ingredients), plus their own
-// packaging_cost_per_unit for the bag.
+// VPB2P / PNF2P / VPCAN2P ("2 pack" bundles) are excluded from this sheet
+// entirely — it's meant for individual products, and these are just an
+// existing bar (VPB/PNF/VPCAN, already listed here) sold 2-to-a-bag. Their
+// BOM (a copy of the base bar's at 2x qty_per_unit) and packaging_cost_per_unit
+// still live in the database for Orders.jsx/Dispatch.jsx pricing and stock
+// purposes — they just don't get their own row in this UI.
+const PACK_BUNDLE_EXCLUDE = new Set(['VPB2P', 'PNF2P', 'VPCAN2P'])
 const LABOUR_PCT_OF_PRICE = 0.22
 
 function fmt(n) {
@@ -130,7 +132,7 @@ export default function Costing() {
   }
 
   // Split products into FG and WIP
-  const fgProducts = useMemo(() => products.filter(p => p.category !== 'WIP' && !BULK_CODES.has(p.code) && p.code !== 'CSCC' && p.code !== 'CUPFROST'), [products])
+  const fgProducts = useMemo(() => products.filter(p => p.category !== 'WIP' && !BULK_CODES.has(p.code) && p.code !== 'CSCC' && p.code !== 'CUPFROST' && !PACK_BUNDLE_EXCLUDE.has(p.code)), [products])
   const bulkProducts = useMemo(() => products.filter(p => BULK_CODES.has(p.code)), [products])
   const wipProducts = useMemo(() => products.filter(p => p.category === 'WIP'), [products])
 

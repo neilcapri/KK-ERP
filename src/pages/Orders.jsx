@@ -572,8 +572,44 @@ function printDispatchSlip(ordersInput) {
   const pages = []
   for (let i = 0; i < ordersInput.length; i += 2) pages.push(ordersInput.slice(i, i + 2))
 
+  // Row size scales from a 1x baseline (16px/8px padding, 14px font) up to
+  // a 1.75x cap (28px/14px, 24.5px) — but an order with enough line items
+  // to blow past the ~220mm slip box at 1.75x gets scaled back down just
+  // enough to still fit on one page, instead of spilling onto a 3rd page.
+  // AVAILABLE_ROWS_PX is an ESTIMATE of the table body's usable height in
+  // px (slip box height minus the header block and table header row, at
+  // ~3.78px/mm) with a safety margin built in — not an exact measurement,
+  // since actual browser print rendering varies slightly.
+  const BASE_PAD_V = 16, BASE_PAD_H = 8, BASE_FONT = 14
+  const MAX_SCALE = 1.75, MIN_SCALE = 0.6
+  const AVAILABLE_ROWS_PX = 700
+  const usedScales = new Map() // 'sc175' -> { padV, padH, font }
+
+  function computeScale(numItems) {
+    if (numItems <= 0) return MAX_SCALE
+    const perRowBorder = 1
+    const perRowScaledPart = BASE_PAD_V * 2 + BASE_FONT * 1.3 // padding top+bottom + line-height
+    const raw = (AVAILABLE_ROWS_PX - numItems * perRowBorder) / (numItems * perRowScaledPart)
+    return Math.max(MIN_SCALE, Math.min(MAX_SCALE, raw))
+  }
+
+  function scaleClassFor(numItems) {
+    const scale = computeScale(numItems)
+    const key = 'sc' + Math.round(scale * 100)
+    if (!usedScales.has(key)) {
+      usedScales.set(key, {
+        padV: (BASE_PAD_V * scale).toFixed(1),
+        padH: (BASE_PAD_H * scale).toFixed(1),
+        font: (BASE_FONT * scale).toFixed(1),
+      })
+    }
+    return key
+  }
+
   function renderOrder(order) {
-    const itemRows = (order.order_items || []).map(function(item) {
+    const items = order.order_items || []
+    const scaleClass = scaleClassFor(items.length)
+    const itemRows = items.map(function(item) {
       const isBulk = item.item_type === 'bulk' || (item.product_code && (item.product_code.endsWith('Bu') || BULK_CODES.has(item.product_code)))
       let displayQty
       if (isBulk) {
@@ -598,7 +634,7 @@ function printDispatchSlip(ordersInput) {
         '<div class="order-meta">' + (order.slip_number || '') + ' &middot; ' + (order.dispatch_date || order.delivery_day || '&mdash;') + '</div>' +
         '<div class="order-inv">Inv #: __________________________</div>' +
       '</div>' +
-      '<div class="table-wrap"><table>' +
+      '<div class="table-wrap"><table class="' + scaleClass + '">' +
         '<thead><tr>' +
           '<th>Product</th>' +
           '<th style="width:70px;text-align:center">Packs / Units</th>' +
@@ -615,6 +651,16 @@ function printDispatchSlip(ordersInput) {
       '<div class="slips-grid">' + pageOrders.map(renderOrder).join('') + '</div>' +
     '</div>'
   }
+
+  // Render the body FIRST — renderOrder populates usedScales as a side
+  // effect, and the per-scale CSS rules below need that map filled in
+  // before the stylesheet is assembled.
+  const bodyHtml = pages.map(function(pg, i) { return renderPage(pg, i + 1, pages.length) }).join('')
+
+  const scaleRules = Array.from(usedScales.entries()).map(function(entry) {
+    const key = entry[0], v = entry[1]
+    return '.' + key + ' td { padding: ' + v.padV + 'px ' + v.padH + 'px; font-size: ' + v.font + 'px; }'
+  }).join('\n')
 
   const css = [
     '* { box-sizing: border-box; margin: 0; padding: 0; }',
@@ -642,13 +688,17 @@ function printDispatchSlip(ordersInput) {
     '.table-wrap { flex: 1; display: flex; flex-direction: column; }',
     'table { width: 100%; height: 100%; border-collapse: collapse; }',
     'th { background: #e0e0e0; padding: 5px 8px; font-size: 10px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }',
-    'td { padding: 16px 8px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: middle; word-break: break-word; }',
+    // Base td rule carries everything EXCEPT padding/font-size, which come
+    // from the per-order scale class below (defaults to the 1.75x cap via
+    // the scale-175 rule if, for some reason, a table has no scale class).
+    'td { border-bottom: 1px solid #ddd; vertical-align: middle; word-break: break-word; }',
     'tr:last-child td { border-bottom: none; }',
+    scaleRules,
     '@media print { body { margin: 0; } .page { page-break-after: always; } }',
   ].join('\n')
 
   const html = '<!DOCTYPE html><html><head><title>KK Dispatch Slips</title><style>' + css + '</style></head><body>' +
-    pages.map(function(pg, i) { return renderPage(pg, i + 1, pages.length) }).join('') + '</body></html>'
+    bodyHtml + '</body></html>'
   const w = window.open('', '_blank'); w.document.write(html); w.document.close(); w.print()
 }
 

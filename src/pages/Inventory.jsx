@@ -43,13 +43,7 @@ const RM_GROUPS = [
   { label: 'Other',              match: (r) => true },
 ]
 
-const TRAY_SIZE = {
-  VPB:64, VPCAN:36, PNF:40, PVBRG:36, PVBR:12, VSCS:48, NALCOB:21, NBFB:21, HRCS:84, CMC:24, LMC:24, PRMC:24, TMC:24, CCB:17,
-  // WIP cake-layer slabs — kept in sync with Production.jsx's TRAY_YIELD
-  WIPKVCKE6:270, WIPPVCKE6:270, WIPKCCKE6:270, WIPPCCKE6:270, WIPkVCKE6:270, WIPKLRCKE6:270,
-  WIPPVCKE9:550, WIPPCCKE9:550,
-  WIPKCCKETR:3000, WIPPCCKETR:3000, WIPPVCKETR:3000, WIPPCRTCKETR:3000,
-}
+const TRAY_SIZE = { VPB:64, VPCAN:36, PNF:40, PVBRG:36, PVBR:12, VSCS:48, NALCOB:21, NBFB:21, HRCS:84, CMC:24, LMC:24, PRMC:24, TMC:24, CCB:17 }
 const DATE_RANGES = [
   { label: '3 Months', days: 90 },
   { label: '6 Months', days: 180 },
@@ -95,6 +89,20 @@ function convertToRMUnit(qty, bomUnit, rmUnit) {
   if (bu in MASS && ru in MASS) return qty * MASS[bu] / MASS[ru]
   if (bu in VOL && ru in VOL) return qty * VOL[bu] / VOL[ru]
   return null
+}
+
+// The most recent Monday (or today, if today IS Monday) as an ISO date
+// string — the anchor for the "This Week" summary below. That summary works
+// backward from today's live stock (current − produced-since-Monday +
+// dispatched-since-Monday) rather than from a stored snapshot, so it stays
+// correct no matter when anyone actually opens the app.
+function getMondayISO(d = new Date()) {
+  const day = d.getDay() // 0=Sun, 1=Mon, ... 6=Sat
+  const diff = (day === 0 ? -6 : 1) - day
+  const monday = new Date(d)
+  monday.setDate(d.getDate() + diff)
+  monday.setHours(0, 0, 0, 0)
+  return monday.toISOString().split('T')[0]
 }
 
 export default function Inventory() {
@@ -355,6 +363,25 @@ export default function Inventory() {
   const selectedProductData = selectedProduct ? products.find(p => p.code === selectedProduct) : null
   const selectedRMData = selectedRM ? rms.find(r => r.name === selectedRM) : null
 
+  // "This Week" summary: works backward from the CURRENT live stock number —
+  // Monday's opening balance = current − (produced since Monday) + (dispatched
+  // since Monday). This is deliberately not a stored snapshot: a snapshot's
+  // value depends on whoever happens to open the app first that week, which
+  // Neil didn't want. Computing it backward from whatever `units` is showing
+  // right now means it's always consistent no matter when it's viewed, and
+  // needs no new table. Also carries the actual per-entry rows (with customer
+  // names on dispatches) so the week can be broken down, not just totalled.
+  const weekMonday = getMondayISO()
+  const weekSummary = selectedProduct ? (() => {
+    const current = selectedProductData?.units ?? 0
+    const producedRows = productHistory.productions.filter(p => (p.date || '') >= weekMonday)
+    const dispatchRows = productHistory.dispatches.filter(d => (d.dispatches?.date || '') >= weekMonday)
+    const produced = producedRows.reduce((s, p) => s + (parseFloat(p.output_units) || 0), 0)
+    const dispatched = dispatchRows.reduce((s, d) => s + (parseFloat(d.units_dispatched) || 0), 0)
+    const opening = current - produced + dispatched
+    return { monday: weekMonday, opening, produced, dispatched, current, producedRows, dispatchRows }
+  })() : null
+
   return (
     <>
       <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;800&display=swap" rel="stylesheet" />
@@ -554,12 +581,13 @@ export default function Inventory() {
                               const isSelected = selectedProduct === p.code
                               const frozenUnits = p.freezer_units ?? p.units
                               const packedPacks = p.packed_units ?? 0
+                              const packSize = PACK_SIZE[p.code] || 1
                               return (
                                 <tr key={p.code} onClick={() => setSelectedProduct(isSelected ? null : p.code)}
                                   style={{ cursor: 'pointer', background: isSelected ? 'var(--surface2)' : '' }}>
                                   <td><span className="code-tag">{p.code}</span></td>
                                   <td style={{ fontWeight: 500 }}>{p.name}</td>
-                                  <td style={{ color: 'var(--blue)', fontWeight: 600 }}>{packedPacks} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>packs</span></td>
+                                  <td style={{ color: 'var(--blue)', fontWeight: 600 }}>{packedPacks} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>packs of {packSize} ({packedPacks * packSize} units)</span></td>
                                   <td style={{ color: 'var(--kk-green)', fontWeight: 600 }}>
                                     {TRAY_SIZE[p.code]
                                       ? <>{(frozenUnits / TRAY_SIZE[p.code]).toFixed(1)} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>trays</span></>
@@ -587,7 +615,7 @@ export default function Inventory() {
                               <div>
                                 <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Packed</div>
                                 <div style={{ fontSize: 24, fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--blue)', lineHeight: 1 }}>{selectedProductData.packed_units ?? 0}</div>
-                                <div style={{ fontSize: 10, color: 'var(--ink3)' }}>packs</div>
+                                <div style={{ fontSize: 10, color: 'var(--ink3)' }}>packs of {PACK_SIZE[selectedProduct] || 1}</div>
                               </div>
                               <div>
                                 <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Frozen</div>
@@ -609,6 +637,49 @@ export default function Inventory() {
                           <button onClick={() => setSelectedProduct(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--ink3)' }}>×</button>
                         </div>
                       </div>
+                      {weekSummary && (
+                        <div style={{ background: 'var(--surface2)', borderRadius: 6, padding: '10px 14px', marginBottom: 12, flexShrink: 0 }}>
+                          <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 6 }}>This Week (since Mon {weekSummary.monday})</div>
+                          <div style={{ fontSize: 12, color: 'var(--ink2)', marginBottom: 8 }}>
+                            Started Monday with <strong>{weekSummary.opening}</strong> units
+                            {' · '}<span style={{ color: 'var(--kk-green)' }}>+{weekSummary.produced} manufactured</span>
+                            {' · '}<span style={{ color: 'var(--red)' }}>−{weekSummary.dispatched} dispatched</span>
+                            {' · '}now <strong>{weekSummary.current}</strong>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--ink3)', marginBottom: 4 }}>🏭 Manufacturing runs this week</div>
+                              {weekSummary.producedRows.length === 0
+                                ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None yet</div>
+                                : (
+                                  <div style={{ maxHeight: 120, overflowY: 'auto', paddingRight: 4 }}>
+                                    {weekSummary.producedRows.map((p, i) => (
+                                      <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                                        <span style={{ color: 'var(--kk-green)', fontWeight: 600 }}>+{p.output_units}</span> units · {p.date}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              }
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--ink3)', marginBottom: 4 }}>📋 Dispatches this week</div>
+                              {weekSummary.dispatchRows.length === 0
+                                ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None yet</div>
+                                : (
+                                  <div style={{ maxHeight: 120, overflowY: 'auto', paddingRight: 4 }}>
+                                    {weekSummary.dispatchRows.map((d, i) => (
+                                      <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                                        <span style={{ color: 'var(--red)', fontWeight: 600 }}>−{d.units_dispatched}</span> units · {d.dispatches?.customer_name || '—'} · {d.dispatches?.date}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              }
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {historyLoading ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--ink3)' }}>Loading...</div> : (
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, overflow: 'hidden', flex: 1 }}>
                           <div>

@@ -587,22 +587,24 @@ function printDispatchSlip(ordersInput) {
   for (let i = 0; i < ordersInput.length; i += 2) pages.push(ordersInput.slice(i, i + 2))
 
   // Row size scales from a 1x baseline (16px/8px padding, 14px font) up to
-  // a 1.75x cap (28px/14px, 24.5px) — but an order with enough line items
-  // to blow past the ~220mm slip box at 1.75x gets scaled back down just
-  // enough to still fit on one page, instead of spilling onto a 3rd page.
-  // AVAILABLE_ROWS_PX is an ESTIMATE of the table body's usable height in
-  // px (slip box height minus the header block and table header row, at
-  // ~3.78px/mm) with a safety margin built in — not an exact measurement,
-  // since actual browser print rendering varies slightly.
+  // a 1.3x cap — an order with enough line items to blow past the slip box
+  // at 1.3x gets scaled back down just enough to still fit on one page.
+  // 2026-09-25: lowered the cap from 1.75x and added a bigger safety margin
+  // (1.6x line-height instead of 1.3x) after slips started spilling to
+  // pages 3-4 — 1.75x left too little room once a longer product name (e.g.
+  // the new 2-pack products) wrapped to 2 lines in the Product column,
+  // which this estimate can't see coming since it only knows item COUNT,
+  // not rendered text width. Smaller cap + bigger margin per row = more
+  // slack to absorb a wrapped line without pushing past one page.
   const BASE_PAD_V = 16, BASE_PAD_H = 8, BASE_FONT = 14
-  const MAX_SCALE = 1.75, MIN_SCALE = 0.6
+  const MAX_SCALE = 1.3, MIN_SCALE = 0.5
   const AVAILABLE_ROWS_PX = 700
-  const usedScales = new Map() // 'sc175' -> { padV, padH, font }
+  const usedScales = new Map() // 'sc130' -> { padV, padH, font }
 
   function computeScale(numItems) {
     if (numItems <= 0) return MAX_SCALE
     const perRowBorder = 1
-    const perRowScaledPart = BASE_PAD_V * 2 + BASE_FONT * 1.3 // padding top+bottom + line-height
+    const perRowScaledPart = BASE_PAD_V * 2 + BASE_FONT * 1.6 // padding top+bottom + line-height (+ wrap margin)
     const raw = (AVAILABLE_ROWS_PX - numItems * perRowBorder) / (numItems * perRowScaledPart)
     return Math.max(MIN_SCALE, Math.min(MAX_SCALE, raw))
   }
@@ -682,25 +684,23 @@ function printDispatchSlip(ordersInput) {
     '.page { width: 210mm; min-height: 297mm; padding: 8mm; display: flex; flex-direction: column; page-break-after: always; }',
     '.page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 8px; flex-shrink: 0; }',
     '.logo { font-size: 13px; font-weight: 900; letter-spacing: 2px; }',
-    // Two slips side by side. Each slip box gets a fixed min-height in mm
-    // (tied to the physical page, same units as .page below) so it fills
-    // roughly 80% of the page — a fixed physical length rather than a
-    // relative % height. The earlier page-3 overflow bug came from
-    // table height:100% combined with align-items:stretch, where the
-    // grid was stretching order-block to match an indeterminate sibling
-    // height — a feedback loop with no fixed anchor. Here order-block's
-    // height is anchored to the fixed 220mm min-height instead, so it's
-    // now safe to let table-wrap and the table itself fill that same
-    // fixed space (align-items stays "start" — nothing about the grid
-    // itself is stretching).
+    // Two slips side by side. 2026-09-25: removed the table-stretch chain
+    // (table height:100% + table-wrap flex:1) that filled the order-block's
+    // fixed min-height — that's the same "stretch against an ambiguous
+    // parent height" shape that caused the original page-3 bug, and it
+    // came back as a page-3/4 bug again once row sizes changed. The table
+    // now just takes its natural content height; order-block keeps a small
+    // min-height purely so a short order doesn't look like a tiny box, not
+    // to force anything to stretch into it. Less "fills the page" polish,
+    // but it can't blow past one page from a stretch feedback loop anymore.
     '.slips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; flex: 1; }',
-    '.order-block { border: 1.5px solid #000; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; min-height: 220mm; }',
+    '.order-block { border: 1.5px solid #000; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; min-height: 150mm; }',
     '.order-header { border-bottom: 1.5px solid #000; padding: 6px 9px; background: #f0f0f0; flex-shrink: 0; }',
     '.order-header strong { font-size: 17px; font-weight: 900; display: block; line-height: 1.3; }',
     '.order-meta { font-size: 12px; font-weight: 600; color: #333; margin-top: 2px; }',
     '.order-inv { font-size: 14px; font-weight: 700; margin-top: 5px; }',
-    '.table-wrap { flex: 1; display: flex; flex-direction: column; }',
-    'table { width: 100%; height: 100%; border-collapse: collapse; }',
+    '.table-wrap { }',
+    'table { width: 100%; border-collapse: collapse; }',
     'th { background: #e0e0e0; padding: 5px 8px; font-size: 10px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }',
     // Base td rule carries everything EXCEPT padding/font-size, which come
     // from the per-order scale class below (defaults to the 1.75x cap via

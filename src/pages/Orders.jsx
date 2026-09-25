@@ -565,6 +565,10 @@ const TRAY_YIELD_MAP = {
 
 // ── Dispatch slip — packs only for pack items, units for bulk ──
 function printDispatchSlip(ordersInput) {
+  // Back to two slips per page, side by side — but with much taller rows
+  // (via generous td padding + the table stretching to fill the page) so
+  // there's room to hand-write more than one production date per product
+  // line, plus a longer blank for the invoice number.
   const pages = []
   for (let i = 0; i < ordersInput.length; i += 2) pages.push(ordersInput.slice(i, i + 2))
 
@@ -591,13 +595,13 @@ function printDispatchSlip(ordersInput) {
     return '<div class="order-block">' +
       '<div class="order-header">' +
         '<strong>' + (order.customer_name || '') + '</strong>' +
-        '<div class="order-meta">' + (order.slip_number || '') + ' &middot; <b>Inv #: ___________</b> &middot; ' + (order.dispatch_date || order.delivery_day || '&mdash;') + '</div>' +
+        '<div class="order-meta">' + (order.slip_number || '') + ' &middot; <b>Inv #: ______________</b> &middot; ' + (order.dispatch_date || order.delivery_day || '&mdash;') + '</div>' +
       '</div>' +
       '<div class="table-wrap"><table>' +
         '<thead><tr>' +
           '<th>Product</th>' +
-          '<th style="width:90px;text-align:center">Packs / Units</th>' +
-          '<th style="width:80px;background:#fffde7">Prod. Date</th>' +
+          '<th style="width:70px;text-align:center">Packs / Units</th>' +
+          '<th style="width:120px;background:#fffde7">Prod. Date(s)</th>' +
         '</tr></thead>' +
         '<tbody>' + itemRows + '</tbody>' +
       '</table></div>' +
@@ -614,18 +618,23 @@ function printDispatchSlip(ordersInput) {
   const css = [
     '* { box-sizing: border-box; margin: 0; padding: 0; }',
     'body { font-family: Arial, sans-serif; background: #fff; color: #000; }',
-    '.page { width: 210mm; min-height: 297mm; padding: 6mm 6mm 4mm 6mm; display: flex; flex-direction: column; page-break-after: always; }',
-    '.page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 3px; margin-bottom: 6px; flex-shrink: 0; }',
-    '.logo { font-size: 12px; font-weight: 900; letter-spacing: 2px; }',
-    '.slips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; flex: 1; }',
+    '.page { width: 210mm; min-height: 297mm; padding: 8mm; display: flex; flex-direction: column; page-break-after: always; }',
+    '.page-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 8px; flex-shrink: 0; }',
+    '.logo { font-size: 13px; font-weight: 900; letter-spacing: 2px; }',
+    // Two slips side by side, each stretched to fill the full page height —
+    // "table { height: 100% }" below lets the rows themselves expand to
+    // fill that height, which is what actually creates the extra room to
+    // write multiple production dates per line, rather than just growing
+    // the page.
+    '.slips-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: stretch; flex: 1; }',
     '.order-block { border: 1.5px solid #000; display: flex; flex-direction: column; break-inside: avoid; page-break-inside: avoid; }',
-    '.order-header { border-bottom: 1.5px solid #000; padding: 4px 7px; background: #f0f0f0; flex-shrink: 0; }',
-    '.order-header strong { font-size: 15px; font-weight: 900; display: block; line-height: 1.3; }',
-    '.order-meta { font-size: 11px; font-weight: 600; color: #333; margin-top: 1px; }',
+    '.order-header { border-bottom: 1.5px solid #000; padding: 6px 9px; background: #f0f0f0; flex-shrink: 0; }',
+    '.order-header strong { font-size: 17px; font-weight: 900; display: block; line-height: 1.3; }',
+    '.order-meta { font-size: 12px; font-weight: 600; color: #333; margin-top: 2px; }',
     '.table-wrap { flex: 1; }',
-    'table { width: 100%; border-collapse: collapse; }',
-    'th { background: #e0e0e0; padding: 3px 6px; font-size: 10px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }',
-    'td { padding: 5px 7px; border-bottom: 1px solid #ddd; font-size: 13px; vertical-align: middle; word-break: break-word; }',
+    'table { width: 100%; height: 100%; border-collapse: collapse; }',
+    'th { background: #e0e0e0; padding: 5px 8px; font-size: 10px; text-transform: uppercase; font-weight: 700; border-bottom: 1.5px solid #000; text-align: left; }',
+    'td { padding: 16px 8px; border-bottom: 1px solid #ddd; font-size: 14px; vertical-align: middle; word-break: break-word; }',
     'tr:last-child td { border-bottom: none; }',
     '@media print { body { margin: 0; } .page { page-break-after: always; } }',
   ].join('\n')

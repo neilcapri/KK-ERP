@@ -20,6 +20,11 @@ const BULK_CODES = new Set([
   'PBBBu','PCCBu','KLRBu','KABBu','KWALBu','HPCoBu','PVHCBu',
   'VPCANBu','VPBBu','PNFBu','KABISBu','KSCDBu',
 ])
+// VPB2P / PNF2P / VPCAN2P are NOT bulk — they're ordinary retail packs (see
+// Orders.jsx/Dispatch.jsx STOCK_ALIAS), so they stay in fgProducts below and
+// get costed normally: their BOM is a straight copy of the base bar's BOM at
+// 2x qty_per_unit (2 bars' worth of ingredients), plus their own
+// packaging_cost_per_unit for the bag.
 const LABOUR_PCT_OF_PRICE = 0.22
 
 function fmt(n) {

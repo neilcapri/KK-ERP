@@ -14,6 +14,14 @@ const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,
 //    from PVBB loaves at 3 slices per loaf.
 //  - KLRCup (KLR Cupcake) is made from KLR muffin batter, 1:1 — it has no
 //    stock of its own, dispatching a cupcake deducts a KLR muffin.
+//  - VPB2P / PNF2P / VPCAN2P ("2 pack" bundles) are ordinary retail packs —
+//    NOT bulk, dispatched with no "(BULK)" label like any other pack product
+//    — they just have no bake/pack run or freezer stock of their own: each
+//    one is 2 loose bars pulled from the base bar's freezer stock and bagged
+//    together at dispatch time. unitsPerBase is 0.5 (the inverse of the
+//    usual 1) because each 2-pack SOLD consumes 2 base units, not 1 — see
+//    resolveStockTarget below: units = unitsDispatched / unitsPerBase, so 1
+//    two-pack dispatched -> 1 / 0.5 = 2 base bars deducted.
 const STOCK_ALIAS = {
   PBBBu:   { base: 'PBB',   unitsPerBase: 1 },
   PCCBu:   { base: 'PCC',   unitsPerBase: 1 },
@@ -30,6 +38,9 @@ const STOCK_ALIAS = {
   PVBBSL:  { base: 'PVBB',  unitsPerBase: 3 },
   PVBBSLF: { base: 'PVBB',  unitsPerBase: 3 },
   KLRCup:  { base: 'KLR',   unitsPerBase: 1 },
+  VPB2P:   { base: 'VPB',   unitsPerBase: 0.5 },
+  PNF2P:   { base: 'PNF',   unitsPerBase: 0.5 },
+  VPCAN2P: { base: 'VPCAN', unitsPerBase: 0.5 },
 }
 
 // Given a dispatch line's own code and its own units_dispatched, returns the
@@ -80,8 +91,11 @@ Below is a table with columns: Product Name | Cs/Units | Prod. Date
 - The Cs/Units column shows "X/Y" where X = cases and Y = units (e.g. "1/6" = 1 case, 6 units). Extract qty as the UNITS number (Y).
 - The Prod. Date column has the PRODUCTION DATE — capture it exactly as written.
 
-Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC, PVBBSL, PVBBSLF, KLRCup.
+Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC, PVBBSL, PVBBSLF, KLRCup, VPB2P, PNF2P, VPCAN2P.
 Also: HPC/HPCO = HPCo, PCRT = skip.
+- "Pistachio 2 pack" / "Pistachio 2-Pack" = VPB2P (regular pack product, not bulk)
+- "No'tella Fudge 2 pack" / "Notella 2 pack" = PNF2P (regular pack product, not bulk)
+- "Pecan Pie 2 pack" / "Pecan 2 pack" = VPCAN2P (regular pack product, not bulk)
 
 Rules:
 - (BULK) written after code or qty = type "bulk"; no label = "pack"

@@ -72,6 +72,10 @@ const RETAIL_COLS = [
   { code: 'TCKCU', name: 'Truffle Cake Cup' }, { code: 'KSCKCU', name: 'Keto Strawberry Cheesecake' }, { code: 'LCKCU', name: 'Lemon Cake Cup' }, { code: 'CCKCU', name: 'Carrot Cake Cup' },
   // HOLIDAY EDITION (5)
   { code: 'CCB', name: 'Chocolate Cinnamon Bark' }, { code: 'WSBIS', name: 'Peppermint Brownies - 2 pack' }, { code: 'COBIS', name: 'Choc Orange Biscotti' }, { code: 'SFNL', name: 'Spiced Fruit & Nut Loaf' }, { code: 'CCBS', name: 'Chocolate Coconut Bliss Squares' },
+  // 2-PACKS (3) — ordinary retail packs, just pulled from an existing bar's
+  // freezer stock and bagged 2 at a time instead of having their own bake/pack
+  // run (see STOCK_ALIAS below)
+  { code: 'VPB2P', name: 'Pistachio 2 Pack' }, { code: 'PNF2P', name: "No'tella Fudge 2 Pack" }, { code: 'VPCAN2P', name: 'Pecan Pie 2 Pack' },
 ]
 
 const BULK_COLS = [
@@ -112,6 +116,13 @@ const BULK_MAP = {
 //  - "...Bu" bulk variants = the base retail product sold loose, 1:1.
 //  - PVBBSL / PVBBSLF (Banana Bread Slices) = cut from PVBB loaves, 3 per loaf.
 //  - KLRCup (KLR Cupcake) = made from KLR muffin batter, 1:1.
+//  - VPB2P / PNF2P / VPCAN2P ("2 pack" bundles) are ordinary retail packs
+//    (in RETAIL_COLS, ordered/priced/costed like any other pack product) —
+//    they just have no bake/pack run or freezer stock of their own: each one
+//    is 2 loose bars pulled from the base bar's freezer stock and bagged
+//    together at pack time. Not in UNITS_PER_PACK_MAP (defaults to 1) since
+//    the "pack" unit here already IS the 2-pack — unitsPerBase is 0.5 since
+//    each 2-pack sold consumes 2 base bar units.
 const STOCK_ALIAS = {
   PBBBu:   { base: 'PBB',   unitsPerBase: 1 },
   PCCBu:   { base: 'PCC',   unitsPerBase: 1 },
@@ -128,6 +139,9 @@ const STOCK_ALIAS = {
   PVBBSL:  { base: 'PVBB',  unitsPerBase: 3 },
   PVBBSLF: { base: 'PVBB',  unitsPerBase: 3 },
   KLRCup:  { base: 'KLR',   unitsPerBase: 1 },
+  VPB2P:   { base: 'VPB',   unitsPerBase: 0.5 },
+  PNF2P:   { base: 'PNF',   unitsPerBase: 0.5 },
+  VPCAN2P: { base: 'VPCAN', unitsPerBase: 0.5 },
 }
 
 // ── Custom Cake configurator ─────────────────────────────────
@@ -1145,6 +1159,9 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
     + '- BLKKLRCUP / klr cupcake = KLRCup (is_bulk=true)\n'
     + '- BLKVPCAN / pecan bar = VPCANBu (is_bulk=true)\n'
     + '- BLKVPB / pistachio bar = VPBBu (is_bulk=true)\n'
+    + '- pistachio 2 pack / pistachio 2-pack = VPB2P (regular pack, not bulk)\n'
+    + "- no'tella fudge 2 pack / notella 2 pack = PNF2P (regular pack, not bulk)\n"
+    + '- pecan pie 2 pack / pecan 2 pack = VPCAN2P (regular pack, not bulk)\n'
     + '- KSCO = KSCo (same product, always use KSCo)\n'
     + '- collagen cookie = KCCo (KCOC)\n'
     + '- banana bread / banana loaf = PVBB\n'

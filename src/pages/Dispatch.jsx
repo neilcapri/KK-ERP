@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
-const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPCo:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCo:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,PRMC:1,CMC:1,LMC:1,TMC:1,PCrt:1 }
+const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPCo:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCo:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,PRMC:1,CMC:1,LMC:1,TMC:1,PCrt:1,PRMNTBG:2 }
 
 // Some codes a customer's dispatch line shows don't carry their own separate
 // freezer stock — dispatching them actually has to move a DIFFERENT product's
@@ -91,11 +91,12 @@ Below is a table with columns: Product Name | Cs/Units | Prod. Date
 - The Cs/Units column shows "X/Y" where X = cases and Y = units (e.g. "1/6" = 1 case, 6 units). Extract qty as the UNITS number (Y).
 - The Prod. Date column has the PRODUCTION DATE — capture it exactly as written.
 
-Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC, PVBBSL, PVBBSLF, KLRCup, VPB2P, PNF2P, VPCAN2P.
+Product codes: VPB, VPCAN, PNF, PVBRG, PVBR, PBB, PCC, KLR, KSCD, VPBD, KHD, HPCo, KABIS, KAB, KWAL, PVHC, POS, PGCo, KCOC, KSCO, PVBB, GBL, KPL, CCL, BAGL, Focaccia, TRFCS, HRCS, VSCS, NALCOB, NBFB, PRMC, CMC, LMC, TMC, PVBBSL, PVBBSLF, KLRCup, VPB2P, PNF2P, VPCAN2P, PRMNTBG.
 Also: HPC/HPCO = HPCo, PCRT = skip.
 - "Pistachio 2 pack" / "Pistachio 2-Pack" = VPB2P (regular pack product, not bulk)
 - "No'tella Fudge 2 pack" / "Notella 2 pack" = PNF2P (regular pack product, not bulk)
 - "Pecan Pie 2 pack" / "Pecan 2 pack" = VPCAN2P (regular pack product, not bulk)
+- "Peppermint Brownie Ganache" / "Peppermint Ganache Pouch" = PRMNTBG (do NOT confuse with WSBIS, "Peppermint Brownies - 2 pack" — different product)
 
 Rules:
 - (BULK) written after code or qty = type "bulk"; no label = "pack"

@@ -24,6 +24,7 @@ const PACK_SIZE = {
   KCC:1, KVC:1, KLRCup:1, KCCKE:1, KVCKE:1, KLRCKE:1,
   TRFC:1, PCrt:1, TMC:1, PRMC:1, CMC:1, LMC:1,
   TCKCU:1, KSCKCU:1, LCKCU:1, CCKCU:1, SFNL:1,
+  PRMNTBG:2, // Peppermint Brownie Ganache Pouch — PVBRG's recipe + peppermint extract, 2/pack
 }
 
 function sellableQty(code, units) {

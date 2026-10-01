@@ -70,8 +70,8 @@ const RETAIL_COLS = [
   { code: 'TMC', name: 'Truffle Mini Cake' }, { code: 'PRMC', name: 'Pistachio Raspberry Mini Cake' }, { code: 'CMC', name: 'Carrot Mini Cake' }, { code: 'LMC', name: 'Lemon Mini Cake' },
   // CAKE CUPS (4)
   { code: 'TCKCU', name: 'Truffle Cake Cup' }, { code: 'KSCKCU', name: 'Keto Strawberry Cheesecake' }, { code: 'LCKCU', name: 'Lemon Cake Cup' }, { code: 'CCKCU', name: 'Carrot Cake Cup' },
-  // HOLIDAY EDITION (5)
-  { code: 'CCB', name: 'Chocolate Cinnamon Bark' }, { code: 'WSBIS', name: 'Peppermint Brownies - 2 pack' }, { code: 'COBIS', name: 'Choc Orange Biscotti' }, { code: 'SFNL', name: 'Spiced Fruit & Nut Loaf' }, { code: 'CCBS', name: 'Chocolate Coconut Bliss Squares' },
+  // HOLIDAY EDITION (6)
+  { code: 'CCB', name: 'Chocolate Cinnamon Bark' }, { code: 'WSBIS', name: 'Peppermint Brownies - 2 pack' }, { code: 'COBIS', name: 'Choc Orange Biscotti' }, { code: 'SFNL', name: 'Spiced Fruit & Nut Loaf' }, { code: 'CCBS', name: 'Chocolate Coconut Bliss Squares' }, { code: 'PRMNTBG', name: 'Peppermint Brownie Ganache Pouch' },
   // 2-PACKS (3) — ordinary retail packs, just pulled from an existing bar's
   // freezer stock and bagged 2 at a time instead of having their own bake/pack
   // run (see STOCK_ALIAS below)
@@ -569,12 +569,15 @@ const UNITS_PER_PACK_MAP = {
   CMC: 1, LMC: 1, PRMC: 1, TMC: 1,
   KCC: 1, KVC: 1, KLRCup: 1, KCCKE: 1, KVCKE: 1, KLRCKE: 1,
   NALCOB: 1, NBFB: 1,
+  PRMNTBG: 2, // Peppermint Brownie Ganache Pouch — same base recipe as PVBRG
+  // (+ peppermint extract), but sold 2 units per pack, not 1 like PVBRG.
 }
 
 // Tray yield per product (units per tray) — only products with known tray yields
 const TRAY_YIELD_MAP = {
   PNF: 40, PVBR: 36, PVBRG: 36,
   VPB: 64, VPCAN: 36, VSCS: 54,
+  PRMNTBG: 36, // same tray yield as PVBRG — it's PVBRG's recipe + peppermint extract
 }
 
 // ── Dispatch slip — packs only for pack items, units for bulk ──
@@ -1162,6 +1165,7 @@ async function readOrderWithAI(content, products, customerName = '', isImage = f
     + '- pistachio 2 pack / pistachio 2-pack = VPB2P (regular pack, not bulk)\n'
     + "- no'tella fudge 2 pack / notella 2 pack = PNF2P (regular pack, not bulk)\n"
     + '- pecan pie 2 pack / pecan 2 pack = VPCAN2P (regular pack, not bulk)\n'
+    + '- peppermint brownie ganache / peppermint ganache pouch = PRMNTBG (NOT WSBIS — WSBIS is a different holiday item, "Peppermint Brownies - 2 pack")\n'
     + '- KSCO = KSCo (same product, always use KSCo)\n'
     + '- collagen cookie = KCCo (KCOC)\n'
     + '- banana bread / banana loaf = PVBB\n'

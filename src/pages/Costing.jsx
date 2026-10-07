@@ -27,7 +27,10 @@ const BULK_CODES = new Set([
 // still live in the database for Orders.jsx/Dispatch.jsx pricing and stock
 // purposes — they just don't get their own row in this UI.
 const PACK_BUNDLE_EXCLUDE = new Set(['VPB2P', 'PNF2P', 'VPCAN2P'])
-const LABOUR_PCT_OF_PRICE = 0.22
+// 2026-10-07: labour changed from 22% to 20% of list price. This one constant
+// drives the Finished Goods tab, the Bulk tab, the column headers, the page
+// subtitle and the detail modal, so nothing else needs touching.
+const LABOUR_PCT_OF_PRICE = 0.20
 
 function fmt(n) {
   if (n === null || n === undefined || isNaN(n)) return '—'

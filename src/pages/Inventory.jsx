@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { PACK_SIZE, loadProductConfig } from '../lib/productConfig'
 
-const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPCo:5,KABIS:5,WSBIS:5,COBIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCo:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:4,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1 }
 // ── Finished Goods groupings ──────────────────────────────
 const FG_GROUPS = [
   { label: 'Muffins',       codes: ['PBB','PCC','KLR','KLRCup','KCC','KVC'] },
-  { label: 'Loaves',        codes: ['PVBB','GBL','KPL','CCL','BAGL','Focaccia'] },
+  { label: 'Loaves',        codes: ['PVBB','GBL','KPL','CCL','BAGL','PVFB'] },
   { label: 'Donuts',        codes: ['KSCD','KHD','VPBD'] },
   { label: 'Paleo Cookies', codes: ['HPCo','HPC','POS','PGCo','PVHC','PVHCBu'] },
   { label: 'Keto Cookies',  codes: ['KAB','KWAL','KABIS','KCOC','KSCo','KSCO'] },
@@ -55,6 +55,7 @@ const BULK_FG_EXCLUDE = new Set([
   'PBBBu','PCCBu','KLRBu','KABBu','KWALBu','HPCoBu','PVHCBu',
   'VPCANBu','VPBBu','PNFBu','KABISBu','KSCDBu',
   'PVBBSL','PVBBSLF',
+  'VPB2P','PNF2P','VPCAN2P', // 2-packs — bagged from loose bars at pack time, no stock of their own
   'CKAC','CKHH',
   'CUPFROST', // Cupcake Frosting — a $1/cupcake labour log, not real stock
 ])
@@ -164,6 +165,7 @@ export default function Inventory() {
 
   async function loadData() {
     setLoading(true)
+    await loadProductConfig()
     const [p, r] = await Promise.all([
       supabase.from('products').select('*').order('category').order('code'),
       supabase.from('raw_materials').select('*').order('category').order('name'),

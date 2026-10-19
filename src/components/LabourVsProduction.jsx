@@ -1,31 +1,15 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { PACK_SIZE, loadProductConfig } from '../lib/productConfig'
 
-// Kept in sync with the canonical PACK_SIZE map in Production.jsx — this map was
-// missing POS, PGCo, KSCo, WSBIS, COBIS, CCL, BAGL, Focaccia, TRFCS, HRCS and VSCS,
-// so sellableQty() silently skipped dividing those products' units by their pack
-// size, inflating Production Value/Dispatch Value on the Dashboard's Operations
-// Summary vs. the (correct) per-day value shown in Production > History.
-// 2026-09-25: found more of the same drift while chasing a Dashboard bug —
-// 'Focaccia' was never a real product code (the actual code is PVFB) so it did
-// nothing; and RETAIL_COLS has since grown TRFC, PCrt, TMC, PRMC, CMC, LMC, the
-// 4 cake cups (TCKCU/KSCKCU/LCKCU/CCKCU) and SFNL with no entry here at all.
-// None of these happen to change today's numbers (their real pack size is 1,
-// same as the silent default), but they're filled in now so a future non-1
-// pack size for any of them doesn't silently break this widget again.
+// Pack sizes used to be a hand-kept copy of the PACK_SIZE map in Production.jsx here,
+// which kept drifting (missing POS/PGCo/KSCo/WSBIS/COBIS/BAGL/PRMNTBG... each time one
+// was added elsewhere, inflating Production/Dispatch Value on the Dashboard vs the
+// per-day value in Production > History). They now come from the products table
+// (units_per_pack) via lib/productConfig.js — the same single source every page uses.
 // Still unverified — ask before assuming these are 1: NALCO-S, NALCO-D (private
 // label "Single"/"Double" — pack size unclear), CCB (Chocolate Cinnamon Bark),
 // CCBS (Chocolate Coconut Bliss Squares).
-const PACK_SIZE = {
-  VPB:3, VPCAN:3, PNF:3, PVBRG:1, PVBR:1, PBB:2, PCC:2, KLR:2, KSCD:4, VPBD:2, KHD:2,
-  HPCo:5, KABIS:5, WSBIS:5, COBIS:5, KAB:5, KWAL:5, PVHC:5, POS:5, PGCo:5,
-  KCOC:1, KSCo:5, PVBB:1, GBL:1, KPL:1, CCL:1, BAGL:4, PVFB:1,
-  TRFCS:1, HRCS:1, VSCS:1, NALCOB:1, NBFB:1,
-  KCC:1, KVC:1, KLRCup:1, KCCKE:1, KVCKE:1, KLRCKE:1,
-  TRFC:1, PCrt:1, TMC:1, PRMC:1, CMC:1, LMC:1,
-  TCKCU:1, KSCKCU:1, LCKCU:1, CCKCU:1, SFNL:1,
-  PRMNTBG:2, // Peppermint Brownie Ganache Pouch — PVBRG's recipe + peppermint extract, 2/pack
-}
 
 function sellableQty(code, units) {
   const ps = PACK_SIZE[code]
@@ -66,6 +50,7 @@ export default function LabourVsProduction() {
   async function load(p, cd) {
     setLoading(true)
     try {
+      await loadProductConfig()
       const { start, end } = getRange(p, cd || null)
 
       // ── 1. Labour cost ──

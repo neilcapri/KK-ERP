@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
+import { PACK_SIZE, TRAY_YIELD, STOCK_ALIAS, loadProductConfig } from '../lib/productConfig'
 
 const STATUS_COLORS = { order_sheet: 'green', archived: 'purple' }
 const STATUS_LABELS = { order_sheet: 'Active', archived: 'Archived' }
@@ -109,40 +110,10 @@ const BULK_MAP = {
 }
 
 // Some SKUs on the order sheet don't carry their own stock — they're made on
-// demand from a different (base) product, exactly like the deduction logic in
-// Dispatch.jsx's STOCK_ALIAS. Keep this in sync with that map: it's what lets
-// the Packing List's Ready/To Manufacture check the product whose stock will
-// actually move when these get dispatched, instead of always reading zero.
-//  - "...Bu" bulk variants = the base retail product sold loose, 1:1.
-//  - PVBBSL / PVBBSLF (Banana Bread Slices) = cut from PVBB loaves, 3 per loaf.
-//  - KLRCup (KLR Cupcake) = made from KLR muffin batter, 1:1.
-//  - VPB2P / PNF2P / VPCAN2P ("2 pack" bundles) are ordinary retail packs
-//    (in RETAIL_COLS, ordered/priced/costed like any other pack product) —
-//    they just have no bake/pack run or freezer stock of their own: each one
-//    is 2 loose bars pulled from the base bar's freezer stock and bagged
-//    together at pack time. Not in UNITS_PER_PACK_MAP (defaults to 1) since
-//    the "pack" unit here already IS the 2-pack — unitsPerBase is 0.5 since
-//    each 2-pack sold consumes 2 base bar units.
-const STOCK_ALIAS = {
-  PBBBu:   { base: 'PBB',   unitsPerBase: 1 },
-  PCCBu:   { base: 'PCC',   unitsPerBase: 1 },
-  KLRBu:   { base: 'KLR',   unitsPerBase: 1 },
-  KABBu:   { base: 'KAB',   unitsPerBase: 1 },
-  KWALBu:  { base: 'KWAL',  unitsPerBase: 1 },
-  HPCoBu:  { base: 'HPCo',  unitsPerBase: 1 },
-  PVHCBu:  { base: 'PVHC',  unitsPerBase: 1 },
-  VPCANBu: { base: 'VPCAN', unitsPerBase: 1 },
-  VPBBu:   { base: 'VPB',   unitsPerBase: 1 },
-  PNFBu:   { base: 'PNF',   unitsPerBase: 1 },
-  KABISBu: { base: 'KABIS', unitsPerBase: 1 },
-  KSCDBu:  { base: 'KSCD',  unitsPerBase: 1 },
-  PVBBSL:  { base: 'PVBB',  unitsPerBase: 3 },
-  PVBBSLF: { base: 'PVBB',  unitsPerBase: 3 },
-  KLRCup:  { base: 'KLR',   unitsPerBase: 1 },
-  VPB2P:   { base: 'VPB',   unitsPerBase: 0.5 },
-  PNF2P:   { base: 'PNF',   unitsPerBase: 0.5 },
-  VPCAN2P: { base: 'VPCAN', unitsPerBase: 0.5 },
-}
+// demand from a different (base) product (bulk "...Bu" variants, banana bread
+// slices, KLR cupcake, the VPB/PNF/VPCAN 2-packs). That link now lives in the
+// products table (stock_base_code / stock_units_per_base) — see lib/productConfig.js —
+// the same single copy Dispatch.jsx reads, so the two can't drift apart.
 
 // ── Custom Cake configurator ─────────────────────────────────
 // "Custom Cake" is a single $60 product in the catalog (code CSTCK) — no
@@ -560,25 +531,11 @@ function isWeekOrder(order, offset = 0) {
   const d = new Date(order.dispatch_date + 'T00:00:00'); return d >= monday && d <= sunday
 }
 
-const UNITS_PER_PACK_MAP = {
-  PBB: 2, PCC: 2, KLR: 2,
-  KAB: 5, KWAL: 5, HPCo: 5, PVHC: 5, KABIS: 5,
-  VPCAN: 3, VPB: 3, PNF: 3,
-  KSCD: 4, KHD: 2, VPBD: 2,
-  PVBRG: 1, KCOC: 1, PVBR: 1,
-  CMC: 1, LMC: 1, PRMC: 1, TMC: 1,
-  KCC: 1, KVC: 1, KLRCup: 1, KCCKE: 1, KVCKE: 1, KLRCKE: 1,
-  NALCOB: 1, NBFB: 1,
-  PRMNTBG: 2, // Peppermint Brownie Ganache Pouch — same base recipe as PVBRG
-  // (+ peppermint extract), but sold 2 units per pack, not 1 like PVBRG.
-}
-
-// Tray yield per product (units per tray) — only products with known tray yields
-const TRAY_YIELD_MAP = {
-  PNF: 40, PVBR: 36, PVBRG: 36,
-  VPB: 64, VPCAN: 36, VSCS: 54,
-  PRMNTBG: 36, // same tray yield as PVBRG — it's PVBRG's recipe + peppermint extract
-}
+// Pack size (UNITS_PER_PACK_MAP) and tray yield (TRAY_YIELD_MAP) used to be hard-coded
+// here; they now come from the products table via lib/productConfig.js. The two names
+// below are kept as aliases so the lookups further down didn't have to change.
+const UNITS_PER_PACK_MAP = PACK_SIZE
+const TRAY_YIELD_MAP = TRAY_YIELD
 
 // ── Dispatch slip — packs only for pack items, units for bulk ──
 function printDispatchSlip(ordersInput) {
@@ -1279,6 +1236,7 @@ export default function Orders() {
 
   async function loadData() {
     setLoading(true)
+    await loadProductConfig()
     const [o, c, p] = await Promise.all([
       supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false }).limit(200),
       supabase.from('customers').select('*').order('name'),

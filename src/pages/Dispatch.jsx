@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { PACK_SIZE, STOCK_ALIAS, loadProductConfig } from '../lib/productConfig'
 
-const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,HPCo:5,KABIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,KCOC:1,KSCo:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:2,Focaccia:1,TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,PRMC:1,CMC:1,LMC:1,TMC:1,PCrt:1,PRMNTBG:2 }
-
-// Some codes a customer's dispatch line shows don't carry their own separate
-// freezer stock — dispatching them actually has to move a DIFFERENT product's
-// stock:
+// Pack sizes (PACK_SIZE) and the "made from another product's stock" links
+// (STOCK_ALIAS) used to be hard-coded here and kept manually in sync with Orders.jsx.
+// They now come from the products table (units_per_pack, stock_base_code,
+// stock_units_per_base) via lib/productConfig.js — one copy for every page.
+//
+// What STOCK_ALIAS means: some codes a customer's dispatch line shows don't carry
+// their own separate freezer stock — dispatching them actually has to move a
+// DIFFERENT product's stock:
 //  - "...Bu" bulk variants (VPCANBu, PBBBu, PCCBu, KLRBu, KABBu, KWALBu,
 //    HPCoBu, PVHCBu, VPBBu, PNFBu, KABISBu, KSCDBu) are the exact same
 //    product sold loose instead of packed — 1:1 with the base retail product.
@@ -22,26 +26,6 @@ const PACK_SIZE = { VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,
 //    usual 1) because each 2-pack SOLD consumes 2 base units, not 1 — see
 //    resolveStockTarget below: units = unitsDispatched / unitsPerBase, so 1
 //    two-pack dispatched -> 1 / 0.5 = 2 base bars deducted.
-const STOCK_ALIAS = {
-  PBBBu:   { base: 'PBB',   unitsPerBase: 1 },
-  PCCBu:   { base: 'PCC',   unitsPerBase: 1 },
-  KLRBu:   { base: 'KLR',   unitsPerBase: 1 },
-  KABBu:   { base: 'KAB',   unitsPerBase: 1 },
-  KWALBu:  { base: 'KWAL',  unitsPerBase: 1 },
-  HPCoBu:  { base: 'HPCo',  unitsPerBase: 1 },
-  PVHCBu:  { base: 'PVHC',  unitsPerBase: 1 },
-  VPCANBu: { base: 'VPCAN', unitsPerBase: 1 },
-  VPBBu:   { base: 'VPB',   unitsPerBase: 1 },
-  PNFBu:   { base: 'PNF',   unitsPerBase: 1 },
-  KABISBu: { base: 'KABIS', unitsPerBase: 1 },
-  KSCDBu:  { base: 'KSCD',  unitsPerBase: 1 },
-  PVBBSL:  { base: 'PVBB',  unitsPerBase: 3 },
-  PVBBSLF: { base: 'PVBB',  unitsPerBase: 3 },
-  KLRCup:  { base: 'KLR',   unitsPerBase: 1 },
-  VPB2P:   { base: 'VPB',   unitsPerBase: 0.5 },
-  PNF2P:   { base: 'PNF',   unitsPerBase: 0.5 },
-  VPCAN2P: { base: 'VPCAN', unitsPerBase: 0.5 },
-}
 
 // Given a dispatch line's own code and its own units_dispatched, returns the
 // product code whose stock actually moves and how many of THAT product's
@@ -256,6 +240,7 @@ export default function Dispatch() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
+    await loadProductConfig()
     const [p, d] = await Promise.all([
       supabase.from('products').select('code,name').order('code'),
       supabase.from('dispatches').select('*,dispatch_items(*)').order('created_at', { ascending: false }).limit(100),

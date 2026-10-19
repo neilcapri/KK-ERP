@@ -16,28 +16,10 @@ import { SLAB_WEIGHT_G } from '../lib/wipCosting'
 // resolve to the real tracked stock. Single shared copy — see
 // lib/rawMaterialAlias.js — so Production and Costing never drift apart.
 import { resolveRMName } from '../lib/rawMaterialAlias'
+import { PACK_SIZE, TRAY_YIELD, LOG_YIELD, CAKE_YIELD, loadProductConfig } from '../lib/productConfig'
 
-const TRAY_YIELD = { VPB:64,VPCAN:36,PNF:40,PVBRG:36,PVBR:12,VSCS:48,NALCOB:21,NBFB:21,HRCS:84,CMC:24,LMC:24,PRMC:24,TMC:24,CCB:17,PRMNTBG:36 }
-const CAKE_YIELD  = { TRFCS:8, PCrt:4 }
-const LOG_YIELD  = { KABIS:11, WSBIS:10, COBIS:10 }
-
-// 2026-09-25: 'Focaccia' was never a real product code (the actual code is
-// PVFB) so that entry did nothing; also added TRFC, PCrt, TMC, PRMC, CMC, LMC,
-// the 4 cake cups and SFNL, which RETAIL_COLS has had for a while with no
-// entry here (harmless today since their real pack size is 1, same as the
-// silent default, but worth closing so a future change doesn't go unnoticed).
-// Still unverified — pack size unclear, don't assume 1: NALCO-S, NALCO-D, CCB
-// (Chocolate Cinnamon Bark), CCBS (Chocolate Coconut Bliss Squares).
-const PACK_SIZE = {
-  VPB:3,VPCAN:3,PNF:3,PVBRG:1,PVBR:1,PBB:2,PCC:2,KLR:2,KSCD:4,VPBD:2,KHD:2,
-  HPCo:5,KABIS:5,WSBIS:5,COBIS:5,KAB:5,KWAL:5,PVHC:5,POS:5,PGCo:5,
-  KCOC:1,KSCo:5,PVBB:1,GBL:1,KPL:1,CCL:1,BAGL:4,PVFB:1,
-  TRFCS:1,HRCS:1,VSCS:1,NALCOB:1,NBFB:1,
-  KCC:1,KVC:1,KLRCup:1,KCCKE:1,KVCKE:1,KLRCKE:1,
-  TRFC:1,PCrt:1,TMC:1,PRMC:1,CMC:1,LMC:1,
-  TCKCU:1,KSCKCU:1,LCKCU:1,CCKCU:1,SFNL:1,
-  PRMNTBG:2, // Peppermint Brownie Ganache Pouch — PVBRG's recipe + peppermint extract, 2/pack
-}
+// Tray / log / cake yields and pack sizes now live in the products table (units_per_pack,
+// tray_yield, log_yield, cake_yield) — see lib/productConfig.js. Edit them there, not here.
 
 const REJECTION_REASONS = ['Burnt', 'Undercooked', 'Damaged', 'Packaging Defect', 'Failed QC', 'Other']
 
@@ -216,6 +198,7 @@ export default function Production() {
 
   async function loadData() {
     setLoading(true)
+    await loadProductConfig()
     const [p, s, h, rm] = await Promise.all([
       supabase.from('products').select('code,name,category,price_per_pack,production_value,active').order('code'),
       supabase.from('production_schedule').select('*').order('scheduled_date').limit(50),

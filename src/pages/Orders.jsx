@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import * as XLSX from 'xlsx-js-style'
@@ -1584,6 +1584,32 @@ export default function Orders() {
   const activeOrders = orders.filter(o => o.status !== 'archived')
   const archivedOrders = orders.filter(o => o.status === 'archived')
   const filteredByStatus = filterStatus === 'archived' ? archivedOrders : activeOrders
+
+  // Orders list is grouped by the day they're dispatched: soonest day first for
+  // active orders (what's going out next is at the top), most recent first for
+  // the archive. Orders with no dispatch date yet sit together at the end.
+  const orderDayGroups = (() => {
+    const byDay = {}
+    filteredByStatus.forEach(o => {
+      const key = o.dispatch_date || 'none'
+      if (!byDay[key]) byDay[key] = []
+      byDay[key].push(o)
+    })
+    const dated = Object.keys(byDay).filter(k => k !== 'none').sort()
+    if (filterStatus === 'archived') dated.reverse()
+    const todayStr = new Date().toLocaleDateString('en-CA')
+    const groups = dated.map(k => {
+      const d = new Date(k + 'T00:00:00')
+      return {
+        key: k,
+        label: d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }),
+        isToday: k === todayStr,
+        orders: byDay[k].slice().sort((a, b) => String(a.customer_name || '').localeCompare(String(b.customer_name || ''))),
+      }
+    })
+    if (byDay.none) groups.push({ key: 'none', label: 'No dispatch date yet', isToday: false, orders: byDay.none.slice().sort((a, b) => String(a.customer_name || '').localeCompare(String(b.customer_name || ''))) })
+    return groups
+  })()
   const sel = { padding: '10px 14px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontFamily: 'var(--body)', fontSize: 13, background: 'var(--surface)', color: 'var(--ink)', width: '100%', outline: 'none' }
 
   return (
@@ -1679,7 +1705,17 @@ export default function Orders() {
                 </tr></thead>
                 <tbody>
                   {filteredByStatus.length === 0 && <tr><td colSpan={10} style={{ textAlign:'center', padding:32, color:'var(--ink3)' }}>No orders</td></tr>}
-                  {filteredByStatus.map(o => {
+                  {orderDayGroups.map(g => (
+                   <React.Fragment key={g.key}>
+                    <tr>
+                      <td colSpan={10} style={{ background: g.isToday ? 'var(--kk-green)' : 'var(--surface2)', color: g.isToday ? 'var(--kk-cream)' : 'var(--ink)', fontFamily:'var(--display)', fontSize:12, letterSpacing:1, textTransform:'uppercase', fontWeight:700, padding:'8px 12px', borderTop:'2px solid var(--border)' }}>
+                        {g.label}{g.isToday ? ' · Today' : ''}
+                        <span style={{ fontWeight:400, marginLeft:10, opacity:0.8 }}>
+                          {g.orders.length} order{g.orders.length === 1 ? '' : 's'}{isAdmin ? ' · $' + g.orders.reduce((s, x) => s + (x.total_value || 0), 0).toFixed(2) : ''}
+                        </span>
+                      </td>
+                    </tr>
+                  {g.orders.map(o => {
                     const isStale = o.status !== 'archived' && o.dispatch_date && !isWeekOrder(o, 0) && !isWeekOrder(o, 1)
                     return (
                       <tr key={o.id} style={{ background: selectedOrders.has(o.id) ? 'var(--green-l)' : isStale ? '#FFF8E1' : '' }}>
@@ -1701,6 +1737,8 @@ export default function Orders() {
                       </tr>
                     )
                   })}
+                   </React.Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>

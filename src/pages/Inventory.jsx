@@ -106,6 +106,17 @@ function getMondayISO(d = new Date()) {
   return monday.toISOString().split('T')[0]
 }
 
+// The most recent Friday (or today, if today IS Friday) as a local ISO date —
+// the anchor for the raw-material "This Week" box. Raw materials are counted on
+// Friday morning, so everything dated Friday or later counts as "since the count".
+function getFridayISO(d = new Date()) {
+  const diff = (d.getDay() - 5 + 7) % 7 // days since Friday
+  const fri = new Date(d)
+  fri.setDate(d.getDate() - diff)
+  fri.setHours(0, 0, 0, 0)
+  return fri.toLocaleDateString('en-CA')
+}
+
 export default function Inventory() {
   const { isAdmin, isKitchen } = useAuth()
   const [tab, setTab] = useState('fg')
@@ -126,7 +137,7 @@ export default function Inventory() {
   const [wipHistory, setWIPHistory] = useState({ productions: [], usedIn: [] })
   const [dateRange, setDateRange] = useState(90)
   const [productHistory, setProductHistory] = useState({ productions: [], dispatches: [], packed: [] })
-  const [rmHistory, setRMHistory] = useState({ sourcing: [], used: [] })
+  const [rmHistory, setRMHistory] = useState({ sourcing: [], used: [], adjustments: [] })
   const [historyLoading, setHistoryLoading] = useState(false)
 
   const [packForm, setPackForm] = useState({ product_code: '', packs: '', date: new Date().toISOString().split('T')[0], notes: '' })
@@ -202,9 +213,13 @@ export default function Inventory() {
     setHistoryLoading(true)
     const since = new Date(); since.setDate(since.getDate() - days)
     const sinceStr = since.toISOString().split('T')[0]
-    const [src, bom] = await Promise.all([
+    // Manual stock corrections since Friday morning (local midnight) — they move
+    // stock too, so the Friday-morning opening balance has to account for them.
+    const fridayStart = new Date(getFridayISO() + 'T00:00:00').toISOString()
+    const [src, bom, adj] = await Promise.all([
       supabase.from('sourcing').select('*').eq('rm_name', name).gte('date', sinceStr).order('date', { ascending: false }),
       supabase.from('bom').select('product_code,qty_per_unit,unit').eq('rm_name', name),
+      supabase.from('stock_adjustments').select('old_value,new_value,reason,created_at').eq('type', 'rm').eq('item_code', name).gte('created_at', fridayStart),
     ])
     let usedInProd = []
     if (bom.data?.length) {
@@ -223,7 +238,7 @@ export default function Inventory() {
         return { ...p, rmQty: converted != null ? converted : rawQty, rmUnit: converted != null ? rm.unit : (b.unit || '') }
       })
     }
-    setRMHistory({ sourcing: src.data || [], used: usedInProd })
+    setRMHistory({ sourcing: src.data || [], used: usedInProd, adjustments: adj.error ? [] : (adj.data || []) })
     setHistoryLoading(false)
   }
 
@@ -383,6 +398,29 @@ export default function Inventory() {
     const opening = current - produced + dispatched
     return { monday: weekMonday, opening, produced, dispatched, current, producedRows, dispatchRows }
   })() : null
+
+  // Raw-material "This Week" box, anchored on Friday morning. Same idea as the
+  // finished-goods box above: worked backward from live stock, not a stored
+  // snapshot — opening = current − received since Friday + used since Friday
+  // − net manual corrections since Friday.
+  const rmFriday = getFridayISO()
+  const rmWeekSummary = selectedRM && selectedRMData ? (() => {
+    const current = selectedRMData.stock ?? 0
+    const receivedRows = rmHistory.sourcing.filter(s => (s.date || '') >= rmFriday)
+    const usedRows = rmHistory.used.filter(p => (p.date || '') >= rmFriday)
+    const received = receivedRows.reduce((s, r) => s + (parseFloat(r.qty_received) || 0), 0)
+    const used = usedRows.reduce((s, p) => s + (p.rmQty != null ? p.rmQty : 0), 0)
+    const adjustments = rmHistory.adjustments || []
+    const adjNet = adjustments.reduce((s, a) => s + ((parseFloat(a.new_value) || 0) - (parseFloat(a.old_value) || 0)), 0)
+    const opening = current - received + used - adjNet
+    return { friday: rmFriday, opening, received, used, adjNet, adjCount: adjustments.length, current, receivedRows, usedRows }
+  })() : null
+  const showRMAmt = (v) => {
+    const disp = v ? displayStock(selectedRM, Math.abs(v)) : null
+    const sign = v < 0 ? '−' : ''
+    if (disp) return sign + disp.value + ' ' + disp.unit
+    return sign + Number(Math.abs(v).toFixed(2)).toLocaleString() + ' ' + (selectedRMData?.unit || '')
+  }
 
   return (
     <>
@@ -933,6 +971,50 @@ export default function Inventory() {
                           <button onClick={() => setSelectedRM(null)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--ink3)' }}>×</button>
                         </div>
                       </div>
+                      {rmWeekSummary && !historyLoading && (
+                        <div style={{ background: 'var(--surface2)', borderRadius: 6, padding: '10px 14px', marginBottom: 12, flexShrink: 0 }}>
+                          <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)', marginBottom: 6 }}>This Week (since Fri morning {rmWeekSummary.friday})</div>
+                          <div style={{ fontSize: 12, color: 'var(--ink2)', marginBottom: 8 }}>
+                            Friday morning: <strong>{showRMAmt(rmWeekSummary.opening)}</strong>
+                            {' · '}<span style={{ color: 'var(--kk-green)' }}>+{showRMAmt(rmWeekSummary.received)} received</span>
+                            {' · '}<span style={{ color: 'var(--red)' }}>−{showRMAmt(rmWeekSummary.used)} used</span>
+                            {rmWeekSummary.adjCount > 0 && <>{' · '}<span style={{ color: 'var(--amber)' }}>{rmWeekSummary.adjNet >= 0 ? '+' : ''}{showRMAmt(rmWeekSummary.adjNet)} corrections</span></>}
+                            {' · '}now <strong>{showRMAmt(rmWeekSummary.current)}</strong>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--ink3)', marginBottom: 4 }}>📥 Received this week</div>
+                              {rmWeekSummary.receivedRows.length === 0
+                                ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None yet</div>
+                                : (
+                                  <div style={{ maxHeight: 160, overflowY: 'auto', paddingRight: 4 }}>
+                                    {rmWeekSummary.receivedRows.map((s, i) => (
+                                      <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                                        <span style={{ color: 'var(--kk-green)', fontWeight: 600 }}>+{s.qty_received}</span> {s.unit} · {s.supplier || '—'} · {s.date}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              }
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 10, color: 'var(--ink3)', marginBottom: 4 }}>🏭 Used in production this week</div>
+                              {rmWeekSummary.usedRows.length === 0
+                                ? <div style={{ fontSize: 11, color: 'var(--ink3)' }}>None yet</div>
+                                : (
+                                  <div style={{ maxHeight: 160, overflowY: 'auto', paddingRight: 4 }}>
+                                    {rmWeekSummary.usedRows.map((p, i) => (
+                                      <div key={i} style={{ fontSize: 11, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                                        <span style={{ color: 'var(--red)', fontWeight: 600 }}>−{p.rmQty != null ? Number(p.rmQty.toFixed(2)) : '?'}</span> {p.rmUnit} · {p.product_code} · {p.date}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              }
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {historyLoading ? <div style={{ textAlign: 'center', padding: 24, color: 'var(--ink3)' }}>Loading...</div> : (
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, overflow: 'hidden', flex: 1 }}>
                           <div>

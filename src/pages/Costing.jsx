@@ -27,10 +27,34 @@ const BULK_CODES = new Set([
 // still live in the database for Orders.jsx/Dispatch.jsx pricing and stock
 // purposes — they just don't get their own row in this UI.
 const PACK_BUNDLE_EXCLUDE = new Set(['VPB2P', 'PNF2P', 'VPCAN2P'])
-// 2026-10-07: labour changed from 22% to 20% of list price. This one constant
+// 2026-10-07: labour changed from 22% to 20% of list price; 2026-10-23: now 18%. This one constant
 // drives the Finished Goods tab, the Bulk tab, the column headers, the page
 // subtitle and the detail modal, so nothing else needs touching.
-const LABOUR_PCT_OF_PRICE = 0.20
+const LABOUR_PCT_OF_PRICE = 0.18
+// Selling-side costs, both as a % of the list price per unit (2026-10-23).
+// Gross margin = list price - (product + packaging + labour).
+// Net margin   = gross margin - shipping - other costs.
+const SHIPPING_PCT_OF_PRICE = 0.05
+const OTHER_PCT_OF_PRICE = 0.10
+
+// Gross + net margin for one unit. totalCost = product + packaging + labour.
+function marginsFor(listPricePerUnit, totalCost) {
+  if (!(listPricePerUnit > 0)) {
+    return { marginDollar: null, marginPct: null, shippingCost: null, otherCost: null, netMarginDollar: null, netMarginPct: null }
+  }
+  const marginDollar = listPricePerUnit - totalCost
+  const shippingCost = listPricePerUnit * SHIPPING_PCT_OF_PRICE
+  const otherCost = listPricePerUnit * OTHER_PCT_OF_PRICE
+  const netMarginDollar = marginDollar - shippingCost - otherCost
+  return {
+    marginDollar,
+    marginPct: (marginDollar / listPricePerUnit) * 100,
+    shippingCost,
+    otherCost,
+    netMarginDollar,
+    netMarginPct: (netMarginDollar / listPricePerUnit) * 100,
+  }
+}
 
 function fmt(n) {
   if (n === null || n === undefined || isNaN(n)) return '—'
@@ -129,9 +153,8 @@ export default function Costing() {
     const listPricePerUnit = (p.price_per_pack || 0) / unitsPerPack
     const labourCost = listPricePerUnit > 0 ? listPricePerUnit * LABOUR_PCT_OF_PRICE : null
     const totalCost = rmCost + packagingCost + (labourCost || 0)
-    const marginDollar = listPricePerUnit > 0 ? listPricePerUnit - totalCost : null
-    const marginPct = listPricePerUnit > 0 ? (marginDollar / listPricePerUnit) * 100 : null
-    return { rmCost, packagingCost, unitsPerPack, listPricePerUnit, labourCost, totalCost, marginDollar, marginPct }
+    const m = marginsFor(listPricePerUnit, totalCost)
+    return { rmCost, packagingCost, unitsPerPack, listPricePerUnit, labourCost, totalCost, ...m }
   }
 
   // Split products into FG and WIP
@@ -210,6 +233,12 @@ export default function Costing() {
     return withPrice.reduce((s, r) => s + r.marginPct, 0) / withPrice.length
   }, [fgProducts, bomByProduct, rmPriceMap])
 
+  const avgNetMargin = useMemo(() => {
+    const withPrice = fgProducts.map(p => rowFor(p)).filter(r => r.netMarginPct !== null)
+    if (withPrice.length === 0) return null
+    return withPrice.reduce((s, r) => s + r.netMarginPct, 0) / withPrice.length
+  }, [fgProducts, bomByProduct, rmPriceMap])
+
   if (loading) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--ink3)' }}>Loading product costing...</div>
 
   return (
@@ -217,7 +246,7 @@ export default function Costing() {
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontFamily: 'var(--display)', fontSize: 20, letterSpacing: 1, margin: '0 0 4px' }}>Product Costing</h2>
         <p style={{ color: 'var(--ink3)', fontSize: 12, margin: 0 }}>
-          RM auto-calculated from BOM · Labour = {(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}% of list price
+          Product cost auto-calculated from BOM · Labour = {(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}% · Shipping = {(SHIPPING_PCT_OF_PRICE * 100).toFixed(0)}% · Other = {(OTHER_PCT_OF_PRICE * 100).toFixed(0)}% (all of list price)
         </p>
       </div>
 
@@ -233,17 +262,21 @@ export default function Costing() {
 
       {/* ── FINISHED GOODS TAB ── */}
       {tab === 'fg' && (<>
-        <div className="grid2" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 20 }}>
+        <div className="grid2" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 20 }}>
           <div className="stat">
             <div className="stat-label">Products Tracked</div>
             <div className="stat-value">{fgProducts.length}</div>
           </div>
           <div className="stat" style={{ borderTop: '3px solid ' + (avgMargin === null ? 'var(--border)' : avgMargin >= 50 ? 'var(--kk-green)' : avgMargin >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)') }}>
-            <div className="stat-label">Avg Margin (priced items)</div>
+            <div className="stat-label">Avg Gross Margin (priced items)</div>
             <div className="stat-value">{avgMargin === null ? '—' : avgMargin.toFixed(1) + '%'}</div>
           </div>
+          <div className="stat" style={{ borderTop: '3px solid ' + (avgNetMargin === null ? 'var(--border)' : avgNetMargin >= 0 ? 'var(--kk-green)' : 'var(--red)') }}>
+            <div className="stat-label">Avg Net Margin (priced items)</div>
+            <div className="stat-value" style={{ color: avgNetMargin !== null && avgNetMargin < 0 ? 'var(--red)' : 'inherit' }}>{avgNetMargin === null ? '—' : avgNetMargin.toFixed(1) + '%'}</div>
+          </div>
           <div className="stat" style={{ borderTop: '3px solid ' + (flaggedCount > 0 ? 'var(--red)' : 'var(--kk-green)') }}>
-            <div className="stat-label">Below {MARGIN_THRESHOLD}% Margin</div>
+            <div className="stat-label">Below {MARGIN_THRESHOLD}% Gross Margin</div>
             <div className="stat-value" style={{ color: flaggedCount > 0 ? 'var(--red)' : 'inherit' }}>{flaggedCount}</div>
             <div className="stat-sub">{flaggedCount > 0 ? '🔴 Needs review' : '🟢 All healthy'}</div>
           </div>
@@ -265,9 +298,12 @@ export default function Costing() {
             <table>
               <thead>
                 <tr>
-                  <th>Code</th><th>Product</th><th>RM Cost</th><th>Packaging /u</th>
+                  <th>Code</th><th>Product</th><th>Product Cost</th><th>Packaging /u</th>
                   <th>Labour /u ({(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}%)</th>
-                  <th>Total Cost</th><th>List Price /u</th><th>Margin %</th>
+                  <th>Total Cost</th><th>List Price /u</th>
+                  <th>Gross Margin $</th><th>Gross Margin %</th>
+                  <th>Shipping /u ({(SHIPPING_PCT_OF_PRICE * 100).toFixed(0)}%)</th><th>Other /u ({(OTHER_PCT_OF_PRICE * 100).toFixed(0)}%)</th>
+                  <th>Net Margin $</th><th>Net Margin %</th>
                 </tr>
               </thead>
               <tbody>
@@ -283,12 +319,22 @@ export default function Costing() {
                       <td style={{ color: 'var(--ink2)' }}>{r.labourCost === null ? '—' : fmt(r.labourCost)}</td>
                       <td style={{ fontFamily: 'var(--display)', fontSize: 13 }}>{fmt(r.totalCost)}</td>
                       <td>{isAdmin ? <input type="number" step="0.01" style={editInput} defaultValue={r.listPricePerUnit ? r.listPricePerUnit.toFixed(2) : ''} onBlur={e => saveListPricePerUnit(p, e.target.value)} /> : fmt(r.listPricePerUnit)}</td>
+                      <td>{r.marginDollar === null ? '—' : fmt(r.marginDollar)}</td>
                       <td>
                         {r.marginPct === null
                           ? <span style={{ color: 'var(--ink3)', fontSize: 11 }}>No price set</span>
                           : <span style={{ fontFamily: 'var(--display)', fontSize: 13, color: r.marginPct >= 50 ? 'var(--kk-green)' : r.marginPct >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)' }}>
                               {flagged && '🔴 '}{r.marginPct.toFixed(1)}%
                             </span>
+                        }
+                      </td>
+                      <td style={{ color: 'var(--ink2)' }}>{r.shippingCost === null ? '—' : fmt(r.shippingCost)}</td>
+                      <td style={{ color: 'var(--ink2)' }}>{r.otherCost === null ? '—' : fmt(r.otherCost)}</td>
+                      <td style={{ color: r.netMarginDollar !== null && r.netMarginDollar < 0 ? 'var(--red)' : 'inherit' }}>{r.netMarginDollar === null ? '—' : fmt(r.netMarginDollar)}</td>
+                      <td>
+                        {r.netMarginPct === null
+                          ? <span style={{ color: 'var(--ink3)', fontSize: 11 }}>—</span>
+                          : <span style={{ fontFamily: 'var(--display)', fontSize: 13, color: r.netMarginPct < 0 ? 'var(--red)' : 'inherit' }}>{r.netMarginPct.toFixed(1)}%</span>
                         }
                       </td>
                     </tr>
@@ -310,9 +356,12 @@ export default function Costing() {
             <table>
               <thead>
                 <tr>
-                  <th>Code</th><th>Product</th><th>RM Cost</th>
+                  <th>Code</th><th>Product</th><th>Product Cost</th>
                   <th>Labour /u ({(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}%)</th>
-                  <th>Total Cost</th><th>List Price /u</th><th>Margin %</th>
+                  <th>Total Cost</th><th>List Price /u</th>
+                  <th>Gross Margin $</th><th>Gross Margin %</th>
+                  <th>Shipping /u ({(SHIPPING_PCT_OF_PRICE * 100).toFixed(0)}%)</th><th>Other /u ({(OTHER_PCT_OF_PRICE * 100).toFixed(0)}%)</th>
+                  <th>Net Margin $</th><th>Net Margin %</th>
                 </tr>
               </thead>
               <tbody>
@@ -322,8 +371,7 @@ export default function Costing() {
                   const listPricePerUnit = (p.price_per_pack || 0) / unitsPerPack
                   const labourCost = listPricePerUnit > 0 ? listPricePerUnit * LABOUR_PCT_OF_PRICE : null
                   const totalCost = rmCost + (labourCost || 0) // no packaging for bulk
-                  const marginDollar = listPricePerUnit > 0 ? listPricePerUnit - totalCost : null
-                  const marginPct = listPricePerUnit > 0 ? (marginDollar / listPricePerUnit) * 100 : null
+                  const { marginDollar, marginPct, shippingCost, otherCost, netMarginDollar, netMarginPct } = marginsFor(listPricePerUnit, totalCost)
                   const flagged = marginPct !== null && marginPct < MARGIN_THRESHOLD
                   return (
                     <tr key={p.code} style={flagged ? { background: 'rgba(200,60,60,0.06)' } : {}}>
@@ -333,12 +381,22 @@ export default function Costing() {
                       <td style={{ color: 'var(--ink2)' }}>{labourCost === null ? '—' : fmt(labourCost)}</td>
                       <td style={{ fontFamily: 'var(--display)', fontSize: 13 }}>{fmt(totalCost)}</td>
                       <td>{isAdmin ? <input type="number" step="0.01" style={editInput} defaultValue={listPricePerUnit ? listPricePerUnit.toFixed(2) : ''} onBlur={e => saveListPricePerUnit(p, e.target.value)} /> : fmt(listPricePerUnit)}</td>
+                      <td>{marginDollar === null ? '—' : fmt(marginDollar)}</td>
                       <td>
                         {marginPct === null
                           ? <span style={{ color: 'var(--ink3)', fontSize: 11 }}>No price set</span>
                           : <span style={{ fontFamily: 'var(--display)', fontSize: 13, color: marginPct >= 50 ? 'var(--kk-green)' : marginPct >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)' }}>
                               {flagged && '🔴 '}{marginPct.toFixed(1)}%
                             </span>
+                        }
+                      </td>
+                      <td style={{ color: 'var(--ink2)' }}>{shippingCost === null ? '—' : fmt(shippingCost)}</td>
+                      <td style={{ color: 'var(--ink2)' }}>{otherCost === null ? '—' : fmt(otherCost)}</td>
+                      <td style={{ color: netMarginDollar !== null && netMarginDollar < 0 ? 'var(--red)' : 'inherit' }}>{netMarginDollar === null ? '—' : fmt(netMarginDollar)}</td>
+                      <td>
+                        {netMarginPct === null
+                          ? <span style={{ color: 'var(--ink3)', fontSize: 11 }}>—</span>
+                          : <span style={{ fontFamily: 'var(--display)', fontSize: 13, color: netMarginPct < 0 ? 'var(--red)' : 'inherit' }}>{netMarginPct.toFixed(1)}%</span>
                         }
                       </td>
                     </tr>
@@ -466,7 +524,7 @@ export default function Costing() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, marginBottom: 16 }}>
-                  <Row label="RM Cost" value={fmt(r.rmCost)} />
+                  <Row label="Product Cost" value={fmt(r.rmCost)} />
                   <Row label="Packaging Cost" value={fmt(r.packagingCost)} />
                   <Row label={`Labour Cost (${(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}% of list price)`} value={r.labourCost === null ? 'Set list price' : fmt(r.labourCost)} />
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--display)', fontSize: 15 }}>
@@ -475,9 +533,17 @@ export default function Costing() {
                   </div>
                   <Row label="List Price /u" value={fmt(r.listPricePerUnit)} sub={`= price_per_pack (${fmt(p.price_per_pack)}) ÷ ${r.unitsPerPack} unit(s)/pack`} />
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--display)', fontSize: 16 }}>
-                    <span>MARGIN</span>
+                    <span>GROSS MARGIN</span>
                     <span style={{ color: r.marginPct === null ? 'var(--ink3)' : r.marginPct >= 50 ? 'var(--kk-green)' : r.marginPct >= MARGIN_THRESHOLD ? 'var(--kk-peach)' : 'var(--red)' }}>
                       {r.marginPct === null ? '—' : `${fmt(r.marginDollar)} (${r.marginPct.toFixed(1)}%)`}
+                    </span>
+                  </div>
+                  <Row label={`Shipping (${(SHIPPING_PCT_OF_PRICE * 100).toFixed(0)}% of list price)`} value={r.shippingCost === null ? '—' : fmt(r.shippingCost)} />
+                  <Row label={`Other costs (${(OTHER_PCT_OF_PRICE * 100).toFixed(0)}% of list price)`} value={r.otherCost === null ? '—' : fmt(r.otherCost)} />
+                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--display)', fontSize: 16 }}>
+                    <span>NET MARGIN</span>
+                    <span style={{ color: r.netMarginPct === null ? 'var(--ink3)' : r.netMarginPct < 0 ? 'var(--red)' : 'inherit' }}>
+                      {r.netMarginPct === null ? '—' : `${fmt(r.netMarginDollar)} (${r.netMarginPct.toFixed(1)}%)`}
                     </span>
                   </div>
                 </div>

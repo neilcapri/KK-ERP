@@ -243,6 +243,12 @@ export default function Costing() {
 
   return (
     <div>
+      {/* Keep Code + Product pinned on the left while the table scrolls sideways */}
+      <style>{`
+        .costing-table th:nth-child(1), .costing-table td:nth-child(1) { position: sticky; left: 0; z-index: 2; background: var(--surface); width: 92px; min-width: 92px; max-width: 92px; }
+        .costing-table th:nth-child(2), .costing-table td:nth-child(2) { position: sticky; left: 92px; z-index: 2; background: var(--surface); min-width: 190px; box-shadow: 2px 0 4px -2px rgba(0,0,0,0.18); }
+        .costing-table th:nth-child(1), .costing-table th:nth-child(2) { z-index: 3; }
+      `}</style>
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontFamily: 'var(--display)', fontSize: 20, letterSpacing: 1, margin: '0 0 4px' }}>Product Costing</h2>
         <p style={{ color: 'var(--ink3)', fontSize: 12, margin: 0 }}>
@@ -295,7 +301,7 @@ export default function Costing() {
 
         <div className="card">
           <div className="table-wrap">
-            <table>
+            <table className="costing-table">
               <thead>
                 <tr>
                   <th>Code</th><th>Product</th><th>Product Cost</th><th>Packaging /u</th>
@@ -353,7 +359,7 @@ export default function Costing() {
         </div>
         <div className="card">
           <div className="table-wrap">
-            <table>
+            <table className="costing-table">
               <thead>
                 <tr>
                   <th>Code</th><th>Product</th><th>Product Cost</th>
@@ -420,7 +426,7 @@ export default function Costing() {
 
         <div className="card">
           <div className="table-wrap">
-            <table>
+            <table className="costing-table">
               <thead>
                 <tr>
                   <th>Code</th>

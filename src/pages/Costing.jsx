@@ -14,6 +14,7 @@ import { SLAB_WEIGHT_G } from '../lib/wipCosting'
 // that real raw material's price, not a stray $0 row. Single shared copy —
 // see lib/rawMaterialAlias.js — kept in sync with Production.jsx.
 import { resolveRMName } from '../lib/rawMaterialAlias'
+import { LABOUR_PCT_OF_PRICE, SHIPPING_PCT_OF_PRICE, OTHER_PCT_OF_PRICE } from '../lib/costingAssumptions'
 
 const MARGIN_THRESHOLD = 30 // %
 const BULK_CODES = new Set([
@@ -27,16 +28,8 @@ const BULK_CODES = new Set([
 // still live in the database for Orders.jsx/Dispatch.jsx pricing and stock
 // purposes — they just don't get their own row in this UI.
 const PACK_BUNDLE_EXCLUDE = new Set(['VPB2P', 'PNF2P', 'VPCAN2P'])
-// 2026-10-07: labour changed from 22% to 20% of list price; 2026-10-23: now 18%. This one constant
-// drives the Finished Goods tab, the Bulk tab, the column headers, the page
-// subtitle and the detail modal, so nothing else needs touching.
-const LABOUR_PCT_OF_PRICE = 0.18
-// Selling-side costs, both as a % of the list price per unit (2026-10-23).
-// Gross margin = list price - (product + packaging + labour).
-// Net margin   = gross margin - shipping - other costs.
-const SHIPPING_PCT_OF_PRICE = 0.05
-const OTHER_PCT_OF_PRICE = 0.10
-
+// Labour / shipping / other rates (% of list price) live in lib/costingAssumptions.js so the
+// Expenses > P&L tab can check them against real numbers. Change them there.
 // Gross + net margin for one unit. totalCost = product + packaging + labour.
 function marginsFor(listPricePerUnit, totalCost) {
   if (!(listPricePerUnit > 0)) {

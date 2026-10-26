@@ -21,7 +21,7 @@ const MONTHLY_SUGGESTIONS = [
   { name: 'Phone / Internet', category: 'Rent / Utilities' },
 ]
 
-const SOURCE_ICONS = { manual: '✏️', receipt_photo: '📷', gmail: '✉️', sourcing: '🧺', monthly: '📅' }
+const SOURCE_ICONS = { manual: '✏️', receipt_photo: '📷', sourcing: '🧺', monthly: '📅' }
 
 // Local dates (not UTC) so an evening entry never lands on "tomorrow".
 const localISO = (d) => d.toLocaleDateString('en-CA')
@@ -55,11 +55,10 @@ const fieldLabel = {
 }
 
 const TABS = [
-  { id: 'add', label: '➕ Add' },
-  { id: 'receipt', label: '📷 Receipts' },
+  { id: 'receipt', label: '📷 Upload Receipts' },
+  { id: 'add', label: '✏️ Type One In' },
   { id: 'payroll', label: '👥 Payroll' },
   { id: 'monthly', label: '📅 Monthly' },
-  { id: 'gmail', label: '✉️ Gmail Invoices' },
   { id: 'ledger', label: '📋 Ledger' },
   { id: 'pnl', label: '📊 P&L & Export' },
 ]
@@ -107,7 +106,7 @@ function computePL(txs, sales, payroll) {
 }
 
 export default function Expenses() {
-  const [activeTab, setActiveTab] = useState('add')
+  const [activeTab, setActiveTab] = useState('receipt')
   const [dateRange, setDateRange] = useState(30)
   const [transactions, setTransactions] = useState([])
   const [sourcing, setSourcing] = useState([])
@@ -122,7 +121,6 @@ export default function Expenses() {
   const [ledgerCat, setLedgerCat] = useState('all')
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [includeSourcing, setIncludeSourcing] = useState(true)
-  const [salesSource, setSalesSource] = useState('orders') // 'orders' | 'logged'
 
   const emptyForm = { date: today(), category: '', description: '', amount: '', vendor: '', notes: '' }
   const [form, setForm] = useState(emptyForm)
@@ -134,9 +132,6 @@ export default function Expenses() {
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef()
 
-  // Gmail
-  const [gmailLoading, setGmailLoading] = useState(false)
-  const [gmailResults, setGmailResults] = useState([])
 
   const months = DATE_RANGES.find(r => r.days === dateRange)?.months || 1
   const rangeStart = getStartDate(dateRange)
@@ -253,11 +248,10 @@ export default function Expenses() {
   const totalHours = payrollRows.reduce((s, r) => s + r.hours, 0)
 
   const totalExpenses = inRange.filter(t => t.type === 'expense').reduce((s, t) => s + num(t.amount), 0)
-  const loggedRevenue = inRange.filter(t => t.type === 'revenue').reduce((s, t) => s + num(t.amount), 0)
   const ordersSales = useMemo(() => orders
     .filter(o => o.dispatch_date && o.dispatch_date >= rangeStart && o.dispatch_date <= today())
     .reduce((s, o) => s + num(o.total_value), 0), [orders, rangeStart])
-  const sales = salesSource === 'orders' ? ordersSales : loggedRevenue
+  const sales = ordersSales
   const pl = useMemo(() => computePL(inRange, sales, totalPayroll), [inRange, sales, totalPayroll])
   const monthlyPerMonth = monthly.filter(m => m.active !== false).reduce((s, m) => s + num(m.amount), 0)
   const netResult = sales - totalExpenses - totalPayroll
@@ -326,75 +320,6 @@ export default function Expenses() {
     setSaving(false)
   }
 
-  // ── Gmail invoice scan (unchanged behaviour) ──
-  const handleGmailScan = async () => {
-    setGmailLoading(true)
-    setGmailResults([])
-    const since = getStartDate(dateRange)
-    try {
-      const apiKey = process.env.REACT_APP_ANTHROPIC_KEY
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'mcp-client-2025-04-04' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 4000,
-          mcp_servers: [{ type: 'url', url: 'https://gmailmcp.googleapis.com/mcp/v1', name: 'gmail-mcp' }],
-          messages: [{
-            role: 'user',
-            content: `You are processing financial emails for Konscious Kitchen (KK), a Toronto CPG food brand.
-
-Do TWO Gmail searches:
-
-SEARCH 1 — QuickBooks invoices KK sent to wholesale customers:
-Query: after:${since} invoice intuit
-Customers include: Natures Emporium, Big Carrot, Whole Foods, Loblaws, Fresh City, Fiddleheads, Summerhill Market, Sweat & Tonic, ONFC, Kupfert & Kim, Kimberton, Happier Grocery, Westerly, Mother's Market.
-
-SEARCH 2 — Payment confirmations received:
-Query: after:${since} (payment OR "e-transfer" OR "payment received" OR "paid") -in:sent
-
-For every email extract:
-{"date":"YYYY-MM-DD","invoice_number":"# if present","customer":"store name","description":"e.g. Invoice #1234 - Natures Emporium","amount":number,"status":"invoiced" or "received","category":"Wholesale Order" or "Distributor Payment" or "DTC / Shopify" or "Other Revenue","type":"revenue","notes":"any ref numbers"}
-
-Return ONLY a flat JSON array. No markdown.`
-          }]
-        })
-      })
-      const data = await resp.json()
-      let found = []
-      for (const block of (data.content || [])) {
-        if (block.type === 'text') {
-          try { const m = block.text.replace(/```json|```/g, '').match(/\[[\s\S]*\]/); if (m) { const a = JSON.parse(m[0]); if (Array.isArray(a)) found = a } } catch {}
-        }
-        if (block.type === 'mcp_tool_result') {
-          try { const m = (block.content?.[0]?.text || '').replace(/```json|```/g, '').match(/\[[\s\S]*\]/); if (m) { const a = JSON.parse(m[0]); if (Array.isArray(a)) found = a } } catch {}
-        }
-      }
-      const seen = new Set()
-      const deduped = found.filter(r => { const k = r.invoice_number || (r.customer + r.amount); if (seen.has(k)) return false; seen.add(k); return true })
-      setGmailResults(deduped)
-      if (!deduped.length) alert('No invoice emails found in this date range.')
-    } catch {
-      alert('Gmail scan failed — ensure Gmail is connected in Claude settings.')
-    }
-    setGmailLoading(false)
-  }
-
-  const importGmailRow = async (row) => {
-    const { error } = await supabase.from('financial_transactions').insert([{
-      date: row.date || today(), type: 'revenue',
-      category: row.category || 'Wholesale Order',
-      description: row.description || `Invoice — ${row.customer}`,
-      amount: parseFloat(row.amount) || 0,
-      vendor: row.customer || '',
-      notes: [row.invoice_number ? `Invoice #${row.invoice_number}` : '', '[Gmail]'].filter(Boolean).join(' · '),
-      source: 'gmail',
-    }])
-    if (error) return alert('Save failed: ' + error.message)
-    await loadAll()
-    setGmailResults(prev => prev.filter(r => r !== row))
-  }
-
   // ── Export ──
   const byCategory = useMemo(() => {
     const map = {}
@@ -424,7 +349,7 @@ Return ONLY a flat JSON array. No markdown.`
     }
     add('P&L', [
       [`Konscious Kitchen — Profit & Loss (${rangeStart} to ${today()})`],
-      [`Sales source: ${salesSource === 'orders' ? 'Orders dispatched' : 'Logged revenue'}`],
+      ['Sales source: Orders dispatched'],
       [],
       ['Line', 'Amount (CAD)', '% of sales'],
       ['Sales', pl.sales, 100],
@@ -503,7 +428,7 @@ Return ONLY a flat JSON array. No markdown.`
         <div className="stat green">
           <div className="stat-label">Sales</div>
           <div className="stat-value">{fmtCAD(sales)}</div>
-          <div className="stat-sub">{salesSource === 'orders' ? 'Orders dispatched' : 'Logged revenue'}</div>
+          <div className="stat-sub">Orders dispatched</div>
         </div>
         <div className="stat" style={{ borderTop: '3px solid ' + (netResult >= 0 ? 'var(--kk-green)' : 'var(--red)') }}>
           <div className="stat-label">Net Result</div>
@@ -733,77 +658,6 @@ Return ONLY a flat JSON array. No markdown.`
         </div>
       )}
 
-      {/* ── GMAIL INVOICES ── */}
-      {activeTab === 'gmail' && (
-        <div style={{ maxWidth: 800 }}>
-          <div className="card">
-            <div className="card-title">✉️ Gmail Invoice Scanner</div>
-            <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 6 }}>Scans Gmail for QuickBooks invoices sent to wholesale customers + incoming payment confirmations. Imports directly as Revenue.</div>
-            <div style={{ fontSize: 11, color: 'var(--ink3)', background: 'var(--bg)', borderRadius: 6, padding: '8px 12px', marginBottom: 16 }}>
-              📌 Scanning: last <strong>{dateRange} days</strong> · Looks for outgoing QBO invoices + e-transfer / payment received emails
-            </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 20 }}>
-              <button onClick={handleGmailScan} disabled={gmailLoading}
-                style={{ background: gmailLoading ? 'var(--border)' : 'var(--kk-green)', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 24px', fontFamily: 'var(--display)', letterSpacing: 2, fontSize: 10, cursor: gmailLoading ? 'not-allowed' : 'pointer' }}>
-                {gmailLoading ? '⏳ SCANNING…' : '🔍 SCAN GMAIL FOR INVOICES'}
-              </button>
-              {gmailResults.length > 0 && (
-                <button onClick={async () => { for (const row of gmailResults.filter(r => r.amount > 0)) await importGmailRow(row) }}
-                  style={{ background: 'var(--kk-peach)', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 18px', fontFamily: 'var(--display)', letterSpacing: 1, fontSize: 9, cursor: 'pointer' }}>
-                  + IMPORT ALL ({gmailResults.filter(r => r.amount > 0).length})
-                </button>
-              )}
-            </div>
-            {gmailResults.length > 0 && (
-              <>
-                <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                  {[
-                    { label: 'Found', val: gmailResults.length },
-                    { label: 'Invoiced', val: gmailResults.filter(r => r.status === 'invoiced').length },
-                    { label: 'Received', val: gmailResults.filter(r => r.status === 'received').length },
-                    { label: 'Total Value', val: fmtCAD(gmailResults.reduce((s, r) => s + (r.amount || 0), 0)) },
-                  ].map(s => (
-                    <div key={s.label} style={{ background: 'var(--bg)', borderRadius: 7, padding: '10px 14px', flex: 1 }}>
-                      <div style={{ fontSize: 9, fontFamily: 'var(--display)', letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase' }}>{s.label}</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--kk-green)', fontFamily: 'var(--display)' }}>{s.val}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="table-wrap">
-                  <table>
-                    <thead><tr><th>Date</th><th>Customer</th><th>Invoice #</th><th>Category</th><th>Status</th><th>Amount</th><th></th></tr></thead>
-                    <tbody>
-                      {gmailResults.map((row, i) => (
-                        <tr key={i} style={{ background: i % 2 === 0 ? '#fff' : 'var(--bg)' }}>
-                          <td style={{ color: 'var(--ink3)', fontSize: 11 }}>{row.date}</td>
-                          <td style={{ fontWeight: 600 }}>{row.customer}</td>
-                          <td style={{ fontFamily: 'var(--display)', fontSize: 10, color: 'var(--ink3)' }}>{row.invoice_number || '—'}</td>
-                          <td style={{ color: 'var(--ink3)', fontSize: 11 }}>{row.category}</td>
-                          <td>
-                            <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 9, fontFamily: 'var(--display)', letterSpacing: 1, fontWeight: 700, background: row.status === 'received' ? '#d4edda' : '#fff3cd', color: row.status === 'received' ? '#1a5c2a' : '#6b4c00' }}>
-                              {row.status === 'received' ? '✅ RECEIVED' : '📤 INVOICED'}
-                            </span>
-                          </td>
-                          <td style={{ fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--kk-green)' }}>
-                            {row.amount > 0 ? fmtCAD(row.amount) : <span style={{ color: 'var(--ink3)', fontWeight: 400, fontSize: 10 }}>In PDF</span>}
-                          </td>
-                          <td>
-                            {row.amount > 0 && (
-                              <button onClick={() => importGmailRow(row)} style={{ background: 'var(--kk-peach)', color: '#fff', border: 'none', borderRadius: 5, padding: '4px 10px', fontFamily: 'var(--display)', fontSize: 9, cursor: 'pointer' }}>+ ADD</button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--ink3)', marginTop: 8 }}>ℹ️ "In PDF" means the amount is in an attachment — open the email to verify, then add manually.</div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── LEDGER ── */}
       {activeTab === 'ledger' && (
         <div className="card">
@@ -865,12 +719,8 @@ Return ONLY a flat JSON array. No markdown.`
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
                 <div className="card-title" style={{ margin: 0 }}>Profit &amp; Loss <span style={{ color: 'var(--ink3)', fontWeight: 400 }}>— last {dateRange} days</span></div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button style={btnStyle(salesSource === 'orders')} onClick={() => setSalesSource('orders')}>Orders sales</button>
-                  <button style={btnStyle(salesSource === 'logged')} onClick={() => setSalesSource('logged')}>Logged revenue</button>
-                </div>
               </div>
-              <Line label="Sales" value={fmtCAD(pl.sales)} bold sub={salesSource === 'orders' ? 'orders dispatched up to today' : 'revenue entries (Gmail) — invoices and payments may both count'} />
+              <Line label="Sales" value={fmtCAD(pl.sales)} bold sub="orders dispatched up to today" />
               <Line label="Raw materials" value={'−' + fmtCAD(pl.rawMaterials)} sub={fmtPct(pct(pl.rawMaterials, pl.sales)) + ' of sales'} />
               <Line label="Packaging" value={'−' + fmtCAD(pl.packaging)} sub={fmtPct(pct(pl.packaging, pl.sales)) + ' of sales'} />
               <Line label="Labour (payroll + contractors)" value={'−' + fmtCAD(pl.labour)} sub={fmtPct(pct(pl.labour, pl.sales)) + ' of sales'} />

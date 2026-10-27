@@ -257,17 +257,81 @@ export default function Expenses() {
   const netResult = sales - totalExpenses - totalPayroll
 
   // ── Receipts (multi-file, editable before saving) ──
+  // Phone photos are huge (often 5-12 MB, sometimes HEIC) and the AI rejects anything over ~5 MB.
+  // So every photo is rotated upright, shrunk to 2000px and re-saved as a JPEG before it is sent.
+  const fileToBase64 = (file) => new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result).split(',')[1])
+    r.onerror = () => rej(new Error('Could not read the file'))
+    r.readAsDataURL(file)
+  })
+  const prepareImage = async (file) => {
+    const MAX = 2000
+    const lower = file.name.toLowerCase()
+    const isHeic = /heic|heif/.test(file.type) || /\.(heic|heif)$/.test(lower)
+    let bmp = null
+    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }) } catch { bmp = null }
+    if (!bmp) {
+      try {
+        bmp = await new Promise((res, rej) => {
+          const url = URL.createObjectURL(file)
+          const img = new Image()
+          img.onload = () => { URL.revokeObjectURL(url); res(img) }
+          img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('decode')) }
+          img.src = url
+        })
+      } catch { bmp = null }
+    }
+    if (!bmp) {
+      if (isHeic) throw new Error('This browser cannot open HEIC photos. On iPhone: Settings > Camera > Formats > Most Compatible, or share the photo as JPEG.')
+      if (file.size < 3.5 * 1024 * 1024 && /^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+        return { data: await fileToBase64(file), media_type: file.type }
+      }
+      throw new Error('Could not open this image. Try a JPG or PNG.')
+    }
+    const w0 = bmp.width, h0 = bmp.height
+    const scale = Math.min(1, MAX / Math.max(w0, h0))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(w0 * scale); canvas.height = Math.round(h0 * scale)
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height)
+    if (bmp.close) bmp.close()
+    return { data: canvas.toDataURL('image/jpeg', 0.88).split(',')[1], media_type: 'image/jpeg' }
+  }
+
+  const RECEIPT_PROMPT = () => `You are reading a receipt, invoice or bill for Konscious Kitchen, a food manufacturer (baked goods) in Toronto, Canada. Today is ${today()}. All amounts are Canadian dollars unless the document clearly says otherwise.
+
+The image may be a phone photo: crumpled, slightly rotated, dim, thermal-paper faded, or only part of a long receipt. Read carefully, rotate it mentally if needed, and use every part you can see.
+
+Fields:
+- "date": the transaction/invoice date as YYYY-MM-DD. Dates in Canada are usually DD/MM/YYYY or YYYY-MM-DD; use the context to decide. If the year is missing, assume the most recent matching date on or before today. If there is no date at all, use "${today()}".
+- "vendor": the store or supplier name (the business that was paid), not the card brand or the cashier.
+- "amount": the FINAL TOTAL actually paid, including tax and after discounts (look for TOTAL, AMOUNT DUE, BALANCE DUE, GRAND TOTAL, or the card/debit charge). Not the subtotal, not the amount tendered in cash, not the change. A number only, no currency symbol.
+- "description": a short plain summary of what was bought (e.g. "Almond flour 25kg, coconut oil 2 tubs"). For a long list, summarise the main items.
+- "category": the best fit from exactly this list: ${EXPENSE_CATEGORIES.join(', ')}. Hints: ingredients and food inputs = Raw Materials; boxes, bags, pouches, labels, tape = Packaging; gloves, cleaning, parchment, tools = Kitchen Supplies; courier, freight, delivery = Shipping / Logistics; ads, promotions, samples = Marketing; lab tests, permits, certifications = Lab / Compliance; rent, hydro, gas, water = Rent / Utilities; software, apps, subscriptions = Software / Subscriptions.
+- "notes": invoice or receipt number, plus the tax amount if shown (e.g. "Inv 10234 · HST 13.00").
+
+If a field is unreadable, use null (or "" for text). Never invent a number.
+
+Reply with ONLY one JSON object, no markdown, no commentary:
+{"date":"YYYY-MM-DD","vendor":"","amount":0,"description":"","category":"","notes":""}`
+
   const processReceiptFile = async (file) => {
     const id = Math.random().toString(36).slice(2)
     setReceipts(prev => [...prev, { id, name: file.name, state: 'reading', data: null }])
+    const fail = (msg) => setReceipts(prev => prev.map(r => r.id === id ? { ...r, state: 'error', error: msg } : r))
     try {
+      if (!process.env.REACT_APP_ANTHROPIC_KEY) return fail('The AI key (REACT_APP_ANTHROPIC_KEY) is not set in Vercel.')
       const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-      const base64 = await new Promise((res, rej) => {
-        const r = new FileReader()
-        r.onload = () => res(r.result.split(',')[1])
-        r.onerror = rej
-        r.readAsDataURL(file)
-      })
+      let block
+      if (isPDF) {
+        if (file.size > 20 * 1024 * 1024) return fail('PDF is over 20 MB.')
+        block = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: await fileToBase64(file) } }
+      } else {
+        const img = await prepareImage(file)
+        block = { type: 'image', source: { type: 'base64', media_type: img.media_type, data: img.data } }
+      }
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -278,29 +342,28 @@ export default function Expenses() {
         },
         body: JSON.stringify({
           model: 'claude-sonnet-4-5',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: [
-              isPDF
-                ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
-                : { type: 'image', source: { type: 'base64', media_type: file.type || 'image/jpeg', data: base64 } },
-              { type: 'text', text: `Extract expense details from this receipt/invoice for Konscious Kitchen, a Toronto CPG food brand. "amount" is the TOTAL paid including tax. Return ONLY valid JSON (no markdown):
-{"date":"YYYY-MM-DD","description":"what was purchased","amount":number,"vendor":"supplier name","category":"one of: ${EXPENSE_CATEGORIES.join(', ')}","notes":"invoice # or ref if present"}` },
-            ],
-          }],
+          max_tokens: 1500,
+          messages: [{ role: 'user', content: [block, { type: 'text', text: RECEIPT_PROMPT() }] }],
         }),
       })
-      const data = await resp.json()
+      const data = await resp.json().catch(() => ({}))
+      if (!resp.ok) return fail(data?.error?.message || `AI request failed (${resp.status})`)
       const text = data.content?.find(b => b.type === 'text')?.text || ''
-      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim())
+      const m = text.match(/\{[\s\S]*\}/)
+      if (!m) return fail('The AI did not return any details. Try a clearer photo.')
+      const parsed = JSON.parse(m[0])
+      const amt = typeof parsed.amount === 'string' ? parseFloat(parsed.amount.replace(/[^0-9.\-]/g, '')) : parsed.amount
       const d = {
-        date: parsed.date || today(), description: parsed.description || '', amount: parsed.amount ?? '',
-        vendor: parsed.vendor || '', category: EXPENSE_CATEGORIES.includes(parsed.category) ? parsed.category : '', notes: parsed.notes || '',
+        date: /^\d{4}-\d{2}-\d{2}$/.test(parsed.date || '') ? parsed.date : today(),
+        description: parsed.description || '',
+        amount: Number.isFinite(amt) ? amt : '',
+        vendor: parsed.vendor || '',
+        category: EXPENSE_CATEGORIES.includes(parsed.category) ? parsed.category : '',
+        notes: parsed.notes || '',
       }
       setReceipts(prev => prev.map(r => r.id === id ? { ...r, state: 'ready', data: d } : r))
-    } catch {
-      setReceipts(prev => prev.map(r => r.id === id ? { ...r, state: 'error' } : r))
+    } catch (e) {
+      fail(e?.message || 'Could not read this file.')
     }
   }
   const handleFiles = (files) => { Array.from(files || []).forEach(processReceiptFile) }
@@ -540,7 +603,7 @@ export default function Expenses() {
                   <span>{r.state === 'reading' ? '⏳ READING…' : r.state === 'error' ? '❌ COULD NOT READ' : '✅ EXTRACTED'} — {r.name}</span>
                   <button onClick={() => dropReceipt(r.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink3)' }}>✕</button>
                 </div>
-                {r.state === 'error' && <div style={{ fontSize: 12, color: 'var(--ink3)' }}>Try a clearer photo, or enter it on the Add tab.</div>}
+                {r.state === 'error' && <div style={{ fontSize: 12, color: 'var(--ink3)' }}>{r.error ? r.error + ' — ' : ''}Try again, or enter it on the Type One In tab.</div>}
                 {r.state === 'ready' && (
                   <>
                     {isDuplicate(r.data) && <div style={{ background: '#fff3cd', border: '1px solid #e0c36a', borderRadius: 6, padding: '6px 10px', fontSize: 11, color: '#6b4c00', marginBottom: 10 }}>⚠️ An expense with the same vendor, date and amount already exists — this may be a duplicate.</div>}

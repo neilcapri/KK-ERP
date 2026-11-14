@@ -1,5 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
+import { useSearchParams } from 'react-router-dom'
+import * as XLSX from 'xlsx-js-style'
+import { useAuth } from '../context/AuthContext'
+import { loadLapsedCustomers, summarize, BUCKETS } from '../lib/lapsedCustomers'
 
 function lastNMonths(n) {
   const end = new Date(), start = new Date()
@@ -280,9 +284,160 @@ function ProductReport() {
   )
 }
 
+// ── Lapsed Customers (admin only) ─────────────────────────────────────────────
+const TREND = {
+  up: { icon: '▲', label: 'Up', color: 'var(--kk-green)' },
+  down: { icon: '▼', label: 'Down', color: 'var(--red)' },
+  flat: { icon: '→', label: 'Steady', color: 'var(--ink3)' },
+  new: { icon: '★', label: 'New', color: 'var(--blue)' },
+}
+const trendText = (r) => !r.trend ? '—' : TREND[r.trend].label + (r.trendPct !== null && r.trend !== 'flat' ? ` ${r.trendPct > 0 ? '+' : ''}${r.trendPct.toFixed(0)}%` : '')
+
+function LapsedCustomersReport() {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [view, setView] = useState('lapsed')   // lapsed | b15 | b30 | overdue | never
+  const [zone, setZone] = useState('all')
+  const [search, setSearch] = useState('')
+  const [hideDormant, setHideDormant] = useState(true)
+
+  useEffect(() => {
+    loadLapsedCustomers()
+      .then(setRows)
+      .catch(e => setError(e.message || 'Could not load orders'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const summary = useMemo(() => summarize(rows), [rows])
+  const zones = useMemo(() => [...new Set(rows.map(r => r.zone).filter(Boolean))].sort(), [rows])
+
+  const filtered = useMemo(() => rows.filter(r => {
+    if (view === 'lapsed' && !(r.daysSince >= 15 || r.overdue)) return false
+    if (['b15', 'b30'].includes(view) && r.bucket?.key !== view) return false
+    if (view === 'overdue' && !r.overdue) return false
+    if (view === 'never' && !r.never) return false
+    if (hideDormant && view !== 'never' && r.daysSince > 180) return false
+    if (zone !== 'all' && r.zone !== zone) return false
+    if (search && !String(r.name).toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  }).sort((a, b) => (b.overdue - a.overdue) || (b.avgMonthly - a.avgMonthly) || ((b.daysSince ?? -1) - (a.daysSince ?? -1))), [rows, view, zone, search, hideDormant])
+
+  const monthlyAtRisk = filtered.reduce((s, r) => s + r.avgMonthly, 0)
+
+  function exportExcel() {
+    const header = ['Customer', 'Zone', 'Last order', 'Days since last order', 'Avg monthly order', 'Trend', 'Last 30 days', 'Usual pattern', 'Overdue']
+    const body = filtered.map(r => [r.name, r.zone, r.lastOrder || 'Never', r.daysSince ?? '', Number(r.avgMonthly.toFixed(2)), trendText(r),
+      Number(r.last30.toFixed(2)), r.usualGap ? `every ~${r.usualGap} days` : '', r.overdue ? 'Yes' : ''])
+    const ws = XLSX.utils.aoa_to_sheet([header, ...body])
+    ws['!cols'] = [32, 10, 12, 20, 18, 14, 14, 18, 9].map(w => ({ wch: w }))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Lapsed Customers')
+    XLSX.writeFile(wb, `KK_Lapsed_Customers_${new Date().toLocaleDateString('en-CA')}.xlsx`)
+  }
+
+  const chip = (key, label, count, color) => (
+    <button key={key} onClick={() => setView(key)}
+      style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid ' + (view === key ? 'var(--kk-green)' : 'var(--border)'), cursor: 'pointer', fontSize: 11, fontFamily: 'var(--display)', letterSpacing: 0.5, textTransform: 'uppercase',
+        background: view === key ? 'var(--kk-green)' : 'var(--surface)', color: view === key ? 'var(--kk-cream)' : (color || 'var(--ink3)') }}>
+      {label}{count !== undefined && <span style={{ marginLeft: 6, fontWeight: 700 }}>{count}</span>}
+    </button>
+  )
+  const sel = { padding: '7px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, background: 'var(--surface)', color: 'var(--ink)' }
+
+  if (loading) return <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Loading...</div>
+  if (error) return <div className="card" style={{ padding: 20, color: 'var(--red)' }}>{error}</div>
+
+  return (
+    <div>
+      <div className="grid4" style={{ marginBottom: 16 }}>
+        {BUCKETS.map(b => (
+          <div key={b.key} className="stat" style={{ borderTop: '3px solid ' + b.color, cursor: 'pointer' }} onClick={() => setView(b.key)}>
+            <div className="stat-label">No order {b.label}</div>
+            <div className="stat-value" style={{ color: b.color }}>{summary[b.key]}</div>
+            <div className="stat-sub">customers · tap to filter</div>
+          </div>
+        ))}
+        <div className="stat" style={{ borderTop: '3px solid var(--red)', cursor: 'pointer' }} onClick={() => setView('overdue')}>
+          <div className="stat-label">Overdue vs their pattern</div>
+          <div className="stat-value" style={{ color: 'var(--red)' }}>{summary.overdue}</div>
+          <div className="stat-sub">past 1.5× their usual gap</div>
+        </div>
+        <div className="stat" style={{ cursor: 'pointer' }} onClick={() => setView('never')}>
+          <div className="stat-label">Never ordered</div>
+          <div className="stat-value" style={{ color: 'var(--ink2)' }}>{summary.never}</div>
+          <div className="stat-sub">set up, no orders yet</div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+          {chip('lapsed', 'All (15+ days or overdue)')}
+          {BUCKETS.map(b => chip(b.key, b.label, summary[b.key], b.color))}
+          {chip('overdue', 'Overdue', summary.overdue, 'var(--red)')}
+          {chip('never', 'Never ordered', summary.never)}
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input placeholder="Search customer…" value={search} onChange={e => setSearch(e.target.value)} style={{ ...sel, width: 200 }} />
+          <select value={zone} onChange={e => setZone(e.target.value)} style={sel}>
+            <option value="all">All zones</option>
+            {zones.map(z => <option key={z} value={z}>{z}</option>)}
+          </select>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--ink3)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={hideDormant} onChange={e => setHideDormant(e.target.checked)} /> Hide dormant (180+ days)
+          </label>
+          <button onClick={exportExcel} className="btn btn-sm" style={{ marginLeft: 'auto' }}>⬇ Excel call list</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 10 }}>
+          {filtered.length} customer{filtered.length === 1 ? '' : 's'}
+          {view !== 'never' && <> · normally worth <strong style={{ color: 'var(--kk-green)' }}>{fmt(monthlyAtRisk)}</strong>/month combined</>}
+        </div>
+        {filtered.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Nobody in this list 🎉</div> : (
+          <div className="table-wrap"><table>
+            <thead><tr><th>Customer</th><th>Zone</th><th>Last order</th><th>Days since last order</th><th>Avg monthly order</th><th>Trend</th></tr></thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.id}>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>
+                      {r.name}
+                      {r.overdue && <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 10, fontSize: 9, fontFamily: 'var(--display)', letterSpacing: 1, background: '#fde8e8', color: '#c53030' }}>OVERDUE</span>}
+                    </div>
+                    {r.usualGap && <div style={{ fontSize: 10, color: 'var(--ink3)' }}>usually orders every ~{r.usualGap} days</div>}
+                  </td>
+                  <td style={{ color: 'var(--ink3)', fontSize: 11 }}>{r.zone || '—'}</td>
+                  <td style={{ fontSize: 11 }}>{r.lastOrder ? fmtDate(r.lastOrder) : 'Never'}</td>
+                  <td>
+                    {r.daysSince === null ? '—' : (
+                      <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700, background: r.bucket?.bg || 'var(--surface2)', color: r.bucket?.color || 'var(--ink2)' }}>{r.daysSince} days</span>
+                    )}
+                  </td>
+                  <td style={{ color: 'var(--kk-green)', fontWeight: 700 }}>{r.avgMonthly ? fmt(r.avgMonthly) : '—'}</td>
+                  <td title={r.prior30 !== null ? `Last 30 days ${fmt(r.last30)} vs usual ${fmt(r.prior30)} per 30 days` : ''}>
+                    {r.trend ? <span style={{ color: TREND[r.trend].color, fontWeight: 700, fontSize: 12 }}>{TREND[r.trend].icon} {trendText(r)}</span> : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        )}
+        <div style={{ fontSize: 10, color: 'var(--ink3)', marginTop: 12 }}>
+          Based on the date each order came in (drafts ignored). Pattern = typical days between a customer's last 10 orders (needs 3+ orders); overdue = more than 1.5× that gap.
+          Avg monthly order = order value over the last 6 months (or since their first order) per month. Trend = last 30 days vs their average 30 days in the 3 months before (±10% = steady). Hover a trend for the numbers.
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function Reports() {
-  const [tab, setTab] = useState('labour')
+  const { isAdmin } = useAuth()
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState(searchParams.get('tab') === 'lapsed' ? 'lapsed' : 'labour')
   const [products, setProducts] = useState({})
 
   useEffect(() => {
@@ -292,6 +447,7 @@ export default function Reports() {
   }, [])
 
   const tabs = [{ key: 'labour', label: '📊 Labour vs Production' }, { key: 'customer', label: '🏪 Customer Performance' }, { key: 'product', label: '📦 Product Performance' }]
+  if (isAdmin) tabs.push({ key: 'lapsed', label: '🔔 Lapsed Customers' })
 
   return (
     <div>
@@ -308,6 +464,7 @@ export default function Reports() {
         {tab === 'labour' && <LabourReport products={products} />}
         {tab === 'customer' && <CustomerReport />}
         {tab === 'product' && <ProductReport />}
+        {tab === 'lapsed' && isAdmin && <LapsedCustomersReport />}
       </div>
     </div>
   )

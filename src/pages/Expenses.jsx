@@ -32,6 +32,19 @@ function getStartDate(days) {
   return localISO(d)
 }
 
+// ── Week / month helpers (all local dates, weeks run Monday–Sunday) ──
+const BD_MONTHS = 12
+const BD_WEEKS = 13
+const parseISO = (s) => new Date(s + 'T00:00:00')
+const addDays = (iso, n) => { const d = parseISO(iso); d.setDate(d.getDate() + n); return localISO(d) }
+const mondayOf = (iso) => { const d = parseISO(iso); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return localISO(d) }
+const daysInMonthOf = (iso) => { const d = parseISO(iso); return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate() }
+const firstOfMonth = (offset = 0) => { const n = new Date(); return localISO(new Date(n.getFullYear(), n.getMonth() + offset, 1)) }
+const lastOfMonth = (iso) => { const d = parseISO(iso); return localISO(new Date(d.getFullYear(), d.getMonth() + 1, 0)) }
+const minISO = (a, b) => (a < b ? a : b)
+const fmtShort = (iso) => parseISO(iso).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+const fmtMonth = (iso) => parseISO(iso).toLocaleDateString('en-CA', { month: 'short', year: 'numeric' })
+
 const fmtCAD = (n) => '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const pct = (n, d) => (d > 0 ? (n / d) * 100 : null)
 const fmtPct = (v) => (v === null || v === undefined || isNaN(v) ? '—' : v.toFixed(1) + '%')
@@ -59,6 +72,7 @@ const TABS = [
   { id: 'add', label: '✏️ Type One In' },
   { id: 'payroll', label: '👥 Payroll' },
   { id: 'monthly', label: '📅 Monthly' },
+  { id: 'breakdown', label: '📆 Week / Month' },
   { id: 'ledger', label: '📋 Ledger' },
   { id: 'pnl', label: '📊 P&L & Export' },
 ]
@@ -105,6 +119,26 @@ function computePL(txs, sales, payroll) {
   return { sales, rawMaterials, packaging, payroll, contractors, labour, shipping, other, grossProfit, netProfit }
 }
 
+// Totals for one period [start, end]. fixedShare = how many months of the fixed monthly costs to count
+// (1 for a month / month-to-date, the day-weighted fraction for a week).
+function periodTotals(items, fixed, start, end, fixedShare) {
+  const inR = (d) => d >= start && d <= end
+  const cats = {}
+  items.exp.forEach(e => { if (inR(e.date)) cats[e.category] = (cats[e.category] || 0) + e.amount })
+  fixed.forEach(m => { const v = num(m.amount) * fixedShare; if (v) cats[m.category] = (cats[m.category] || 0) + v })
+  const payroll = items.pay.reduce((s, p) => s + (inR(p.date) ? p.amount : 0), 0)
+  const sales = items.sales.reduce((s, o) => s + (inR(o.date) ? o.amount : 0), 0)
+  const pl = computePL(Object.entries(cats).map(([category, amount]) => ({ type: 'expense', category, amount })), sales, payroll)
+  const total = pl.rawMaterials + pl.packaging + pl.labour + pl.shipping + pl.other
+  return { cats, payroll, sales, pl, total, net: sales - total }
+}
+
+const weekShare = (start, end) => {
+  let s = 0
+  for (let d = start; d <= end; d = addDays(d, 1)) s += 1 / daysInMonthOf(d)
+  return s
+}
+
 export default function Expenses() {
   const [activeTab, setActiveTab] = useState('receipt')
   const [dateRange, setDateRange] = useState(30)
@@ -121,6 +155,12 @@ export default function Expenses() {
   const [ledgerCat, setLedgerCat] = useState('all')
   const [ledgerSearch, setLedgerSearch] = useState('')
   const [includeSourcing, setIncludeSourcing] = useState(true)
+
+  // Week / Month breakdown — loads its own 12 months, independent of the range buttons
+  const [bd, setBd] = useState(null)
+  const [bdLoading, setBdLoading] = useState(false)
+  const [bdMode, setBdMode] = useState('week')
+  const [bdDetail, setBdDetail] = useState(false)
 
   const emptyForm = { date: today(), category: '', description: '', amount: '', vendor: '', notes: '' }
   const [form, setForm] = useState(emptyForm)
@@ -157,6 +197,23 @@ export default function Expenses() {
     setMonthly(mon.data || [])
     setTxLoading(false)
   }
+
+  async function loadBreakdown() {
+    setBdLoading(true)
+    const monthStart = firstOfMonth(-(BD_MONTHS - 1))
+    const weekStart = addDays(mondayOf(today()), -7 * (BD_WEEKS - 1))
+    const from = minISO(monthStart, weekStart)
+    const [tx, src, ord, time] = await Promise.all([
+      fetchAll(() => supabase.from('financial_transactions').select('id,date,type,category,amount').gte('date', from).order('date').order('id')),
+      fetchAll(() => supabase.from('sourcing').select('id,date,cost').gte('date', from).order('date').order('id')),
+      fetchAll(() => supabase.from('orders').select('id,dispatch_date,total_value').gte('dispatch_date', from).order('dispatch_date').order('id')),
+      fetchAll(() => supabase.from('time_entries').select('employee_id, hours_worked, clock_in').gte('clock_in', from + 'T00:00:00').order('clock_in')),
+    ])
+    setBd({ tx: tx.data || [], src: src.data || [], ord: ord.data || [], time: time.data || [] })
+    setBdLoading(false)
+  }
+  // Reload when the tab opens and after any save/delete (loadAll refreshes `transactions`)
+  useEffect(() => { if (activeTab === 'breakdown') loadBreakdown() }, [activeTab, transactions]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveTransaction(tx) {
     const clean = { ...tx, amount: num(tx.amount), type: 'expense' }
@@ -255,6 +312,102 @@ export default function Expenses() {
   const pl = useMemo(() => computePL(inRange, sales, totalPayroll), [inRange, sales, totalPayroll])
   const monthlyPerMonth = monthly.filter(m => m.active !== false).reduce((s, m) => s + num(m.amount), 0)
   const netResult = sales - totalExpenses - totalPayroll
+
+  // ── Week / Month breakdown ──
+  const bdItems = useMemo(() => {
+    if (!bd) return null
+    const rate = {}
+    employees.forEach(e => { rate[e.id] = num(e.hourly_rate) })
+    const exp = bd.tx.filter(t => t.type === 'expense').map(t => ({ date: String(t.date).slice(0, 10), category: t.category || 'Uncategorised', amount: num(t.amount) }))
+    if (includeSourcing) bd.src.forEach(s => { if (num(s.cost) > 0) exp.push({ date: String(s.date).slice(0, 10), category: 'Raw Materials', amount: num(s.cost) }) })
+    const pay = bd.time.map(t => ({ date: localISO(new Date(t.clock_in)), amount: num(t.hours_worked) * (rate[t.employee_id] || 0) }))
+    const salesList = bd.ord.filter(o => o.dispatch_date).map(o => ({ date: String(o.dispatch_date).slice(0, 10), amount: num(o.total_value) }))
+    return { exp, pay, sales: salesList }
+  }, [bd, employees, includeSourcing])
+
+  const activeFixed = useMemo(() => monthly.filter(m => m.active !== false), [monthly])
+
+  const bdMonthRows = useMemo(() => {
+    if (!bdItems) return []
+    const t = today()
+    return Array.from({ length: BD_MONTHS }, (_, i) => {
+      const start = firstOfMonth(-i)
+      const current = i === 0
+      const end = current ? t : lastOfMonth(start)
+      return { key: start, label: fmtMonth(start) + (current ? ' · MTD' : ''), start, end, current, ...periodTotals(bdItems, activeFixed, start, end, 1) }
+    })
+  }, [bdItems, activeFixed])
+
+  const bdWeekRows = useMemo(() => {
+    if (!bdItems) return []
+    const t = today()
+    const thisMon = mondayOf(t)
+    return Array.from({ length: BD_WEEKS }, (_, i) => {
+      const start = addDays(thisMon, -7 * i)
+      const fullEnd = addDays(start, 6)
+      const current = i === 0
+      const end = current ? t : fullEnd
+      return { key: start, label: `${fmtShort(start)} – ${fmtShort(fullEnd)}` + (current ? ' · WTD' : ''), start, end, current, ...periodTotals(bdItems, activeFixed, start, end, weekShare(start, end)) }
+    })
+  }, [bdItems, activeFixed])
+
+  // Same-point comparisons: this month vs last month to the same day; this week vs last week to the same weekday
+  const bdCompare = useMemo(() => {
+    if (!bdItems) return null
+    const t = today()
+    const lmStart = firstOfMonth(-1)
+    const lmEnd = addDays(lmStart, Math.min(parseISO(t).getDate(), daysInMonthOf(lmStart)) - 1)
+    const lastMonthSoFar = periodTotals(bdItems, activeFixed, lmStart, lmEnd, 1)
+    const lwStart = addDays(mondayOf(t), -7)
+    const lwEnd = addDays(t, -7)
+    const lastWeekSoFar = periodTotals(bdItems, activeFixed, lwStart, lwEnd, weekShare(lwStart, lwEnd))
+    return { lastMonthSoFar, lastWeekSoFar, lmEnd, lwEnd }
+  }, [bdItems, activeFixed])
+
+  const bdAverage = (rows) => {
+    const done = rows.filter(r => !r.current && (r.total > 0 || r.sales > 0))
+    if (done.length === 0) return null
+    const avg = (f) => done.reduce((s, r) => s + f(r), 0) / done.length
+    const cats = {}
+    done.forEach(r => Object.keys(r.cats).forEach(c => { cats[c] = (cats[c] || 0) + r.cats[c] / done.length }))
+    return {
+      n: done.length, cats, payroll: avg(r => r.payroll), sales: avg(r => r.sales), total: avg(r => r.total), net: avg(r => r.net),
+      pl: { rawMaterials: avg(r => r.pl.rawMaterials), packaging: avg(r => r.pl.packaging), labour: avg(r => r.pl.labour), shipping: avg(r => r.pl.shipping), other: avg(r => r.pl.other) },
+    }
+  }
+
+  const BD_SUMMARY_COLS = [
+    { label: 'Raw materials', get: r => r.pl.rawMaterials },
+    { label: 'Packaging', get: r => r.pl.packaging },
+    { label: 'Labour', get: r => r.pl.labour },
+    { label: 'Shipping', get: r => r.pl.shipping },
+    { label: 'Other', get: r => r.pl.other },
+  ]
+  const bdDetailCols = (rows) => {
+    const seen = new Set()
+    rows.forEach(r => Object.keys(r.cats).forEach(c => { if (r.cats[c]) seen.add(c) }))
+    const ordered = [...EXPENSE_CATEGORIES.filter(c => seen.has(c)), ...[...seen].filter(c => !EXPENSE_CATEGORIES.includes(c)).sort()]
+    return [
+      ...ordered.map(c => ({ label: c, get: r => r.cats[c] || 0 })),
+      { label: 'Payroll', get: r => r.payroll },
+    ]
+  }
+
+  function exportBreakdown() {
+    const wb = XLSX.utils.book_new()
+    const sheet = (name, rows, periodLabel) => {
+      const cols = bdDetailCols(rows)
+      const header = [periodLabel, 'From', 'To', ...cols.map(c => c.label), 'Total expenses', 'Raw materials', 'Packaging', 'Labour', 'Shipping', 'Other', 'Sales', 'Net']
+      const body = rows.slice().reverse().map(r => [r.label, r.start, r.end, ...cols.map(c => Number(c.get(r).toFixed(2))), Number(r.total.toFixed(2)),
+        ...[r.pl.rawMaterials, r.pl.packaging, r.pl.labour, r.pl.shipping, r.pl.other, r.sales, r.net].map(v => Number(v.toFixed(2)))])
+      const ws = XLSX.utils.aoa_to_sheet([header, ...body])
+      ws['!cols'] = header.map((h, i) => ({ wch: i === 0 ? 24 : Math.max(12, h.length + 2) }))
+      XLSX.utils.book_append_sheet(wb, ws, name)
+    }
+    sheet('Weekly', bdWeekRows, 'Week (Mon–Sun)')
+    sheet('Monthly', bdMonthRows, 'Month')
+    XLSX.writeFile(wb, `KK_Expenses_Week_Month_${today()}.xlsx`)
+  }
 
   // ── Receipts (multi-file, editable before saving) ──
   // Phone photos are huge (often 5-12 MB, sometimes HEIC) and the AI rejects anything over ~5 MB.
@@ -507,12 +660,125 @@ Reply with ONLY one JSON object, no markdown, no commentary:
             <button key={t.id} style={tabStyle(activeTab === t.id)} onClick={() => setActiveTab(t.id)}>{t.label}</button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {DATE_RANGES.map(r => (
-            <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>
-          ))}
-        </div>
+        {activeTab !== 'breakdown' && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            {DATE_RANGES.map(r => (
+              <button key={r.days} style={btnStyle(dateRange === r.days)} onClick={() => setDateRange(r.days)}>{r.label}</button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* ── WEEK / MONTH BREAKDOWN ── */}
+      {activeTab === 'breakdown' && (() => {
+        if (bdLoading && !bd) return <div className="card" style={{ color: 'var(--ink3)', fontSize: 12 }}>Loading…</div>
+        if (!bd) return null
+        const rows = bdMode === 'week' ? bdWeekRows : bdMonthRows
+        const avg = bdAverage(rows)
+        const cols = bdDetail ? bdDetailCols(rows) : BD_SUMMARY_COLS
+        const maxTotal = Math.max(1, ...rows.map(r => r.total))
+        const mtd = bdMonthRows[0]
+        const lastMonth = bdMonthRows[1]
+        const wtd = bdWeekRows[0]
+        const weekAvg = bdAverage(bdWeekRows)
+        const change = (now, then) => {
+          if (!then) return null
+          const d = (now - then) / then * 100
+          return <span style={{ color: d > 0 ? 'var(--red)' : 'var(--kk-green)' }}>{d > 0 ? '▲' : '▼'} {Math.abs(d).toFixed(0)}%</span>
+        }
+        const money = (v) => (v < 0 ? '−' : '') + fmtCAD(Math.abs(v))
+        const cell = { fontFamily: 'var(--display)', textAlign: 'right', whiteSpace: 'nowrap' }
+        return (
+          <div style={{ display: 'grid', gap: 20 }}>
+            <div className="grid4">
+              <div className="stat amber">
+                <div className="stat-label">Month to date</div>
+                <div className="stat-value">{fmtCAD(mtd.total)}</div>
+                <div className="stat-sub">vs {fmtCAD(bdCompare.lastMonthSoFar.total)} by {fmtShort(bdCompare.lmEnd)} {change(mtd.total, bdCompare.lastMonthSoFar.total)}</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">Last month</div>
+                <div className="stat-value" style={{ color: 'var(--kk-brown)' }}>{fmtCAD(lastMonth.total)}</div>
+                <div className="stat-sub">{fmtMonth(lastMonth.start)} · full month</div>
+              </div>
+              <div className="stat">
+                <div className="stat-label">This week so far</div>
+                <div className="stat-value" style={{ color: 'var(--kk-brown)' }}>{fmtCAD(wtd.total)}</div>
+                <div className="stat-sub">vs {fmtCAD(bdCompare.lastWeekSoFar.total)} same days last week {change(wtd.total, bdCompare.lastWeekSoFar.total)}</div>
+              </div>
+              <div className="stat green">
+                <div className="stat-label">Avg per week</div>
+                <div className="stat-value">{weekAvg ? fmtCAD(weekAvg.total) : '—'}</div>
+                <div className="stat-sub">{weekAvg ? `last ${weekAvg.n} complete week${weekAvg.n === 1 ? '' : 's'}` : 'no complete weeks yet'}</div>
+              </div>
+            </div>
+
+            <div className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div className="card-title" style={{ margin: 0 }}>
+                  Expenses by {bdMode === 'week' ? 'Week' : 'Month'}
+                  <span style={{ color: 'var(--ink3)', fontWeight: 400 }}> — last {bdMode === 'week' ? `${BD_WEEKS} weeks (Mon–Sun)` : `${BD_MONTHS} months`}{bdLoading ? ' · refreshing…' : ''}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button style={btnStyle(bdMode === 'week')} onClick={() => setBdMode('week')}>Weekly</button>
+                  <button style={btnStyle(bdMode === 'month')} onClick={() => setBdMode('month')}>Monthly</button>
+                  <button style={btnStyle(bdDetail)} onClick={() => setBdDetail(v => !v)}>{bdDetail ? 'All categories ✓' : 'All categories'}</button>
+                  <button style={btnStyle(false)} onClick={exportBreakdown}>⬇ Excel</button>
+                </div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--ink3)', marginBottom: 12, cursor: 'pointer' }}>
+                <input type="checkbox" checked={includeSourcing} onChange={e => setIncludeSourcing(e.target.checked)} />
+                Include ingredient purchases from Sourcing 🧺 as Raw Materials
+              </label>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{bdMode === 'week' ? 'Week' : 'Month'}</th>
+                      {cols.map(c => <th key={c.label} style={{ textAlign: 'right' }}>{c.label}</th>)}
+                      <th style={{ textAlign: 'right' }}>Total expenses</th>
+                      <th style={{ textAlign: 'right' }}>Sales</th>
+                      <th style={{ textAlign: 'right' }}>Net</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={r.key} style={{ background: r.current ? '#fdf1ec' : i % 2 === 0 ? '#fff' : 'var(--bg)' }}>
+                        <td style={{ fontWeight: r.current ? 700 : 500, whiteSpace: 'nowrap' }}>{r.label}</td>
+                        {cols.map(c => { const v = c.get(r); return <td key={c.label} style={{ ...cell, color: v ? 'var(--ink2)' : 'var(--ink3)' }}>{v ? fmtCAD(v) : '—'}</td> })}
+                        <td style={{ ...cell, fontWeight: 700, color: 'var(--kk-brown)', minWidth: 120 }}>
+                          {fmtCAD(r.total)}
+                          <div style={{ height: 3, background: 'var(--border)', borderRadius: 2, marginTop: 3 }}>
+                            <div style={{ height: '100%', width: (r.total / maxTotal * 100) + '%', background: 'var(--kk-peach)', borderRadius: 2, marginLeft: 'auto' }} />
+                          </div>
+                        </td>
+                        <td style={{ ...cell, color: 'var(--kk-green)' }}>{r.sales ? fmtCAD(r.sales) : '—'}</td>
+                        <td style={{ ...cell, fontWeight: 700, color: r.net < 0 ? 'var(--red)' : 'var(--kk-green)' }}>{money(r.net)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {avg && (
+                    <tfoot>
+                      <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface2)' }}>
+                        <td style={{ fontFamily: 'var(--display)', fontSize: 11, letterSpacing: 1, whiteSpace: 'nowrap' }}>AVG / {bdMode === 'week' ? 'WEEK' : 'MONTH'} <span style={{ color: 'var(--ink3)', fontSize: 9 }}>({avg.n} complete)</span></td>
+                        {cols.map(c => <td key={c.label} style={cell}>{fmtCAD(c.get(avg))}</td>)}
+                        <td style={{ ...cell, fontWeight: 700, color: 'var(--kk-brown)' }}>{fmtCAD(avg.total)}</td>
+                        <td style={{ ...cell, color: 'var(--kk-green)' }}>{fmtCAD(avg.sales)}</td>
+                        <td style={{ ...cell, fontWeight: 700, color: avg.net < 0 ? 'var(--red)' : 'var(--kk-green)' }}>{money(avg.net)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--ink3)', marginTop: 12 }}>
+                Totals include one-off expenses, payroll from time tracking, and fixed costs from the Monthly tab ({fmtCAD(activeFixed.reduce((s, m) => s + num(m.amount), 0))}/mo).
+                Fixed costs count in full for each month (including month to date); weeks get a day-weighted share. Labour = payroll + Contract / Freelance.
+                The average skips the current {bdMode === 'week' ? 'week' : 'month'} and any period with no activity.
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── ADD ── */}
       {activeTab === 'add' && (

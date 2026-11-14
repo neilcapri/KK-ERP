@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
 import LabourVsProduction from '../components/LabourVsProduction'
+import { loadLapsedCustomers, summarize, BUCKETS } from '../lib/lapsedCustomers'
 
 const ZONE_COLORS = {
   North:  { bg: '#E1F5EE', color: '#085041' },
@@ -42,6 +43,11 @@ function getWeekBounds() {
 export default function Dashboard() {
   const { profile, isAdmin, isKitchen } = useAuth()
   const navigate = useNavigate()
+  const [lapsed, setLapsed] = useState(null)
+  useEffect(() => {
+    if (!isAdmin) return
+    loadLapsedCustomers().then(rows => setLapsed(summarize(rows))).catch(() => setLapsed(null))
+  }, [isAdmin])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('performance')
 
@@ -282,6 +288,18 @@ export default function Dashboard() {
             <div className="stat-sub">dispatch tomorrow · tap to view</div>
           </div>
         </div>
+
+        {/* ── Lapsed customers (admin only) ── */}
+        {isAdmin && lapsed && (
+          <div className="card" style={{ marginBottom:16, padding:'12px 16px', cursor:'pointer', display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }} onClick={() => navigate('/reports?tab=lapsed')}>
+            <span style={{ fontFamily:'var(--display)', fontSize:11, letterSpacing:1, textTransform:'uppercase', color:'var(--ink)' }}>🔔 Customers not ordering</span>
+            {BUCKETS.map(b => (
+              <span key={b.key} style={{ padding:'3px 10px', borderRadius:12, fontSize:11, fontWeight:700, background:b.bg, color:b.color }}>{lapsed[b.key]} · {b.label}</span>
+            ))}
+            <span style={{ padding:'3px 10px', borderRadius:12, fontSize:11, fontWeight:700, background:'#fde8e8', color:'#c53030' }}>{lapsed.overdue} overdue vs pattern</span>
+            <span style={{ marginLeft:'auto', fontSize:11, color:'var(--ink3)' }}>tap to view list →</span>
+          </div>
+        )}
 
         {/* ── Tabs ── */}
         <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--border)', marginBottom:20 }}>

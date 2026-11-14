@@ -213,7 +213,7 @@ export default function Expenses() {
     setBdLoading(false)
   }
   // Reload when the tab opens and after any save/delete (loadAll refreshes `transactions`)
-  useEffect(() => { if (activeTab === 'breakdown') loadBreakdown() }, [activeTab, transactions]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (activeTab === 'breakdown') loadBreakdown() }, [activeTab, transactions])
 
   async function saveTransaction(tx) {
     const clean = { ...tx, amount: num(tx.amount), type: 'expense' }

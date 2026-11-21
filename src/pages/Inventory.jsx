@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { PACK_SIZE, loadProductConfig } from '../lib/productConfig'
+import { PACK_SIZE, TRAY_YIELD, LOG_YIELD, loadProductConfig } from '../lib/productConfig'
 
 // ── Finished Goods groupings ──────────────────────────────
 const FG_GROUPS = [
@@ -43,7 +43,17 @@ const RM_GROUPS = [
   { label: 'Other',              match: (r) => true },
 ]
 
-const TRAY_SIZE = { VPB:64, VPCAN:36, PNF:40, PVBRG:36, PVBR:12, VSCS:48, NALCOB:21, NBFB:21, HRCS:84, CMC:24, LMC:24, PRMC:24, TMC:24, CCB:17 }
+// Frozen stock is shown in the unit the kitchen actually stores it in: trays for
+// tray-baked products, logs for biscotti. Yields come from the products table
+// (tray_yield / log_yield) via lib/productConfig — this page used to keep its own
+// hard-coded tray list, which had no logs at all and was missing newer products
+// (e.g. Peppermint Brownie), so those showed in units.
+function frozenDisplay(code, units) {
+  const u = parseFloat(units) || 0
+  if (TRAY_YIELD[code]) return { qty: (u / TRAY_YIELD[code]).toFixed(1), label: 'trays' }
+  if (LOG_YIELD[code]) return { qty: (u / LOG_YIELD[code]).toFixed(1), label: 'logs' }
+  return { qty: u, label: 'units' }
+}
 const DATE_RANGES = [
   { label: '3 Months', days: 90 },
   { label: '6 Months', days: 180 },
@@ -642,9 +652,7 @@ export default function Inventory() {
                                   <td style={{ fontWeight: 500 }}>{p.name}</td>
                                   <td style={{ color: 'var(--blue)', fontWeight: 600 }}>{packedPacks} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>packs of {packSize} ({packedPacks * packSize} units)</span></td>
                                   <td style={{ color: 'var(--kk-green)', fontWeight: 600 }}>
-                                    {TRAY_SIZE[p.code]
-                                      ? <>{(frozenUnits / TRAY_SIZE[p.code]).toFixed(1)} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>trays</span></>
-                                      : <>{frozenUnits} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>units</span></>}
+                                    {(() => { const f = frozenDisplay(p.code, frozenUnits); return <>{f.qty} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>{f.label}{f.label !== 'units' ? ' (' + frozenUnits + ' units)' : ''}</span></> })()}
                                   </td>
                                   <td style={{ fontWeight: 600, color: 'var(--' + cls + ')' }}>{p.units}</td>
                                   <td><span className={'badge badge-' + cls}>{label}</span></td>
@@ -673,9 +681,9 @@ export default function Inventory() {
                               <div>
                                 <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Frozen</div>
                                 <div style={{ fontSize: 24, fontFamily: 'var(--display)', fontWeight: 800, color: 'var(--kk-green)', lineHeight: 1 }}>
-                                  {TRAY_SIZE[selectedProduct] ? (selectedProductData.freezer_units / TRAY_SIZE[selectedProduct]).toFixed(1) : (selectedProductData.freezer_units ?? 0)}
+                                  {frozenDisplay(selectedProduct, selectedProductData.freezer_units).qty}
                                 </div>
-                                <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{TRAY_SIZE[selectedProduct] ? 'trays' : 'units'}</div>
+                                <div style={{ fontSize: 10, color: 'var(--ink3)' }}>{frozenDisplay(selectedProduct, selectedProductData.freezer_units).label}</div>
                               </div>
                               <div>
                                 <div style={{ fontSize: 9, letterSpacing: 2, color: 'var(--ink3)', textTransform: 'uppercase', fontFamily: 'var(--mono)' }}>Total</div>

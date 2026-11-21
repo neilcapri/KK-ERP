@@ -108,15 +108,39 @@ The following are ALWAYS pack for Natures Emporium (in 6s):
 Return ONLY valid JSON:
 {"slips":[{"date":"May 11","customer":"BC Danforth","invoice":"4702","items":[{"code":"PBB","qty":6,"cases":1,"type":"pack","production_date":"May 08","note":""}],"flags":[]}]}`
 
+// Latest dispatch date we accept: today + 14 days (local ISO). Dispatches are
+// sometimes entered ahead of delivery, but anything further out is a typo.
+function maxDispatchDate() {
+  const d = new Date(); d.setDate(d.getDate() + 14)
+  return d.toLocaleDateString('en-CA')
+}
+
+// The AI slip reader sometimes returns a full ISO date with a misread year
+// (e.g. 2028-10-28 for 2026-10-28) — those used to be saved as-is and showed up
+// as "this week" in Inventory. Force the year to this year; if that lands more
+// than 14 days ahead (e.g. "Dec 30" read on Jan 2), use last year.
+function fixSlipYear(iso) {
+  const [, m, d] = iso.split('-')
+  const y = new Date().getFullYear()
+  const out = `${y}-${m}-${d}`
+  return out > maxDispatchDate() ? `${y - 1}-${m}-${d}` : out
+}
+
 function parseSlipDate(dateStr) {
-  if (!dateStr) return new Date().toISOString().split('T')[0]
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr
+  const todayStr = new Date().toLocaleDateString('en-CA')
+  if (!dateStr) return todayStr
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const y = parseInt(dateStr.slice(0, 4))
+    const curY = new Date().getFullYear()
+    if (dateStr <= maxDispatchDate() && (y === curY || y === curY - 1)) return dateStr
+    return fixSlipYear(dateStr)
+  }
   try {
     const year = new Date().getFullYear()
     const d = new Date(`${dateStr} ${year}`)
-    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0]
+    if (!isNaN(d.getTime())) return fixSlipYear(d.toLocaleDateString('en-CA'))
   } catch(e) {}
-  return new Date().toISOString().split('T')[0]
+  return todayStr
 }
 
 // ── Auto-packing logic ──────────────────────────────────────
@@ -496,6 +520,7 @@ export default function Dispatch() {
 
   async function saveManual() {
     if (!manForm.customer || !manLines.length) { alert('Add customer and at least one line.'); return }
+    if (manForm.date > maxDispatchDate()) { alert(`Dispatch date ${manForm.date} is more than 14 days ahead — check the year.`); return }
 
     // ── Duplicate check for manual entry too ──
     if (manForm.invoice) {
@@ -586,6 +611,7 @@ export default function Dispatch() {
 
   async function saveEdit() {
     if (!editForm.customer_name) { alert('Customer name required'); return }
+    if (editForm.date > maxDispatchDate()) { alert(`Dispatch date ${editForm.date} is more than 14 days ahead — check the year.`); return }
 
     // ── Duplicate check on edit — only if invoice number changed ──
     if (editForm.invoice_number && editForm.invoice_number !== editingDispatch.invoice_number) {
@@ -768,7 +794,7 @@ export default function Dispatch() {
               <div className="card-title">Manual Dispatch Entry</div>
               <div className="field"><label>Customer</label><input type="text" value={manForm.customer} onChange={e=>setManForm(f=>({...f,customer:e.target.value}))} placeholder="Customer name" /></div>
               <div className="field-row">
-                <div className="field" style={{margin:0}}><label>Date</label><input type="date" value={manForm.date} onChange={e=>setManForm(f=>({...f,date:e.target.value}))} /></div>
+                <div className="field" style={{margin:0}}><label>Date</label><input type="date" max={maxDispatchDate()} value={manForm.date} onChange={e=>setManForm(f=>({...f,date:e.target.value}))} /></div>
                 <div className="field" style={{margin:0}}><label>Invoice #</label><input type="text" value={manForm.invoice} onChange={e=>setManForm(f=>({...f,invoice:e.target.value}))} placeholder="4601" /></div>
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr auto',gap:8,marginBottom:12,alignItems:'flex-end'}}>
@@ -876,7 +902,7 @@ export default function Dispatch() {
               Original: {editingDispatch.customer_name} · Inv #{editingDispatch.invoice_number || '—'}
             </div>
             <div className="field-row">
-              <div className="field" style={{margin:0}}><label>Date</label><input type="date" value={editForm.date} onChange={e => setEditForm(f => ({...f, date: e.target.value}))} /></div>
+              <div className="field" style={{margin:0}}><label>Date</label><input type="date" max={maxDispatchDate()} value={editForm.date} onChange={e => setEditForm(f => ({...f, date: e.target.value}))} /></div>
               <div className="field" style={{margin:0}}><label>Invoice #</label><input type="text" value={editForm.invoice_number} onChange={e => setEditForm(f => ({...f, invoice_number: e.target.value}))} placeholder="e.g. 4664" /></div>
             </div>
             <div className="field"><label>Customer</label><input type="text" value={editForm.customer_name} onChange={e => setEditForm(f => ({...f, customer_name: e.target.value}))} /></div>

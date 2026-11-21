@@ -117,6 +117,12 @@ function getFridayISO(d = new Date()) {
   return fri.toLocaleDateString('en-CA')
 }
 
+// Latest date we accept as real: today + 14 days (local ISO).
+function maxDateISO() {
+  const d = new Date(); d.setDate(d.getDate() + 14)
+  return d.toLocaleDateString('en-CA')
+}
+
 export default function Inventory() {
   const { isAdmin, isKitchen } = useAuth()
   const [tab, setTab] = useState('fg')
@@ -195,12 +201,17 @@ export default function Inventory() {
     setHistoryLoading(true)
     const since = new Date(); since.setDate(since.getDate() - days)
     const sinceStr = since.toISOString().split('T')[0]
+    // Upper bound = today + 14 days (local). Dispatches are sometimes entered
+    // ahead of delivery (stock is deducted at save), so near-future rows must
+    // still count. Anything further out (e.g. 2028 instead of 2026) is a typo
+    // and must not leak into the history lists or the This Week totals.
+    const todayStr = maxDateISO()
     const [prod, disp, packed] = await Promise.all([
-      supabase.from('productions').select('*').eq('product_code', code).gte('date', sinceStr).order('date', { ascending: false }),
+      supabase.from('productions').select('*').eq('product_code', code).gte('date', sinceStr).lte('date', todayStr).order('date', { ascending: false }),
       supabase.from('dispatch_items').select('*, dispatches(date, customer_name, invoice_number)').eq('product_code', code),
-      supabase.from('packing_runs').select('*').eq('product_code', code).gte('date', sinceStr).order('date', { ascending: false }),
+      supabase.from('packing_runs').select('*').eq('product_code', code).gte('date', sinceStr).lte('date', todayStr).order('date', { ascending: false }),
     ])
-    const filteredDisp = (disp.data || []).filter(d => d.dispatches?.date >= sinceStr)
+    const filteredDisp = (disp.data || []).filter(d => d.dispatches?.date >= sinceStr && d.dispatches?.date <= todayStr)
     // Sort by the actual dispatch date (not row insert time) so the list reads
     // latest-date-on-top like Productions does — a slip entered late (e.g. from
     // a backlog of packing slips) used to jump to the top out of date order.
@@ -389,10 +400,12 @@ export default function Inventory() {
   // needs no new table. Also carries the actual per-entry rows (with customer
   // names on dispatches) so the week can be broken down, not just totalled.
   const weekMonday = getMondayISO()
+  const weekToday = maxDateISO()
+  const inWeek = (dt) => (dt || '') >= weekMonday && (dt || '') <= weekToday
   const weekSummary = selectedProduct ? (() => {
     const current = selectedProductData?.units ?? 0
-    const producedRows = productHistory.productions.filter(p => (p.date || '') >= weekMonday)
-    const dispatchRows = productHistory.dispatches.filter(d => (d.dispatches?.date || '') >= weekMonday)
+    const producedRows = productHistory.productions.filter(p => inWeek(p.date))
+    const dispatchRows = productHistory.dispatches.filter(d => inWeek(d.dispatches?.date))
     const produced = producedRows.reduce((s, p) => s + (parseFloat(p.output_units) || 0), 0)
     const dispatched = dispatchRows.reduce((s, d) => s + (parseFloat(d.units_dispatched) || 0), 0)
     const opening = current - produced + dispatched

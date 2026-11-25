@@ -22,10 +22,10 @@ const FG_GROUPS = [
 
 // ── WIP groupings ──────────────────────────────────────────
 const WIP_GROUPS = [
-  { label: '6 Inch',  match: (p) => /6in|6 inch|6"/.test(p.name) || /6$/.test(p.code) },
-  { label: '9 Inch',  match: (p) => /9in|9 inch/.test(p.name) },
-  { label: 'Tray',    match: (p) => /tray/i.test(p.name) || /TR$/.test(p.code) },
-  { label: 'Others',  match: (p) => true },
+  { label: '6 Inch Slabs',  match: (p) => /6in|6 inch|6"/.test(p.name) || /6$/.test(p.code) },
+  { label: '9 Inch Slabs',  match: (p) => /9in|9 inch|9"/.test(p.name) || /9$/.test(p.code) },
+  { label: 'Tray Slabs',    match: (p) => /tray/i.test(p.name) || /TR$/.test(p.code) },
+  { label: 'Frostings, Fillings & Bases', match: (p) => true },
 ]
 
 // ── RM groupings ───────────────────────────────────────────
@@ -349,7 +349,7 @@ export default function Inventory() {
     products.filter(p => !BULK_FG_EXCLUDE.has(p.code) && p.category !== 'WIP').map(p => p.category)
   )]
   const rmCategories = ['all', ...new Set(rms.map(r => r.category))]
-  const wipCategories = ['all', ...new Set(products.filter(p => p.category === 'WIP').map(p => p.name?.match(/frosting|jam|curd|cream|ganache/i) ? 'Batch (g)' : 'Cake Layer (ea)'))]
+  const wipCategories = ['all', ...new Set(products.filter(p => p.category === 'WIP').map(p => p.wip_unit === 'ea' ? 'Cake Slab (ea)' : 'Batch (g)'))]
 
   const filteredFG = products.filter(p => {
     if (BULK_FG_EXCLUDE.has(p.code) || p.category === 'WIP') return false
@@ -362,7 +362,7 @@ export default function Inventory() {
 
   const filteredWIP = products.filter(p => {
     if (p.category !== 'WIP') return false
-    const kind = p.wip_unit === 'ea' ? 'Cake Layer (ea)' : 'Batch (g)'
+    const kind = p.wip_unit === 'ea' ? 'Cake Slab (ea)' : 'Batch (g)'
     if (alertFilter && p.units > p.min_stock) return false
     if (catFilter !== 'all' && kind !== catFilter) return false
     if (search && !p.code.toLowerCase().includes(search.toLowerCase()) && !p.name.toLowerCase().includes(search.toLowerCase())) return false
@@ -457,7 +457,7 @@ export default function Inventory() {
         <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
           {[
             { key: 'fg', label: '📦 Finished Goods' },
-            { key: 'wip', label: '🧁 WIP' },
+            { key: 'wip', label: '🧁 Cake Slabs' },
             { key: 'pack', label: '📦 Packing' },
             { key: 'rm', label: '🌿 Raw Materials' },
           ].map(t => (
@@ -581,7 +581,7 @@ export default function Inventory() {
               </div>
             ) : tab === 'wip' ? (
               <div className="grid4" style={{ marginBottom: 16 }}>
-                <div className="stat blue"><div className="stat-label">WIP Items</div><div className="stat-value">{wipStats.items}</div></div>
+                <div className="stat blue"><div className="stat-label">Items</div><div className="stat-value">{wipStats.items}</div></div>
                 <div className="stat green"><div className="stat-label">Showing</div><div className="stat-value">{filteredWIP.length}</div></div>
                 <div className="stat amber" style={{cursor:'pointer'}} onClick={() => setAlertFilter(alertFilter === 'low' ? null : 'low')}><div className="stat-label">Low Stock</div><div className="stat-value">{wipStats.low}</div></div>
                 <div className="stat red" style={{cursor:'pointer'}} onClick={() => setAlertFilter(alertFilter === 'out' ? null : 'out')}><div className="stat-label">Out of Stock</div><div className="stat-value">{wipStats.out}</div></div>
@@ -606,7 +606,7 @@ export default function Inventory() {
               {(tab === 'fg' ? fgCategories : tab === 'wip' ? wipCategories : rmCategories).map(cat => (
                 <button key={cat} className={'filter-btn ' + (catFilter===cat?'active':'')} onClick={() => setCatFilter(cat)}>{cat === 'all' ? 'All' : cat}</button>
               ))}
-              <input className="search-input" placeholder={'Search ' + (tab==='fg'?'product':tab==='wip'?'WIP item':'material') + '...'} value={search} onChange={e => setSearch(e.target.value)} />
+              <input className="search-input" placeholder={'Search ' + (tab==='fg'?'product':tab==='wip'?'cake slab or frosting':'material') + '...'} value={search} onChange={e => setSearch(e.target.value)} />
             </div>
 
             {loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--ink3)' }}>Loading...</div> : (
@@ -803,13 +803,13 @@ export default function Inventory() {
                     <table>
                       <thead>
                         <tr>
-                          <th>Code</th><th>WIP Item</th><th>Stock</th><th>Type</th><th>Status</th>
+                          <th>Code</th><th>Item</th><th>Stock</th><th>Type</th><th>Status</th>
                           {(isAdmin || isKitchen) && <th></th>}
                         </tr>
                       </thead>
                       <tbody>
                         {filteredWIP.length === 0 && (
-                          <tr><td colSpan={6} style={{ fontSize: 12, color: 'var(--ink3)', padding: 24, textAlign: 'center' }}>No WIP items match this filter.</td></tr>
+                          <tr><td colSpan={6} style={{ fontSize: 12, color: 'var(--ink3)', padding: 24, textAlign: 'center' }}>No cake slabs or fillings match this filter.</td></tr>
                         )}
                         {(() => {
                           const usedCodes = new Set()
@@ -820,7 +820,7 @@ export default function Inventory() {
                             if (items.length > 0) groups.push({ label: grp.label, items })
                           })
                           const others = filteredWIP.filter(p => !usedCodes.has(p.code))
-                          if (others.length > 0) groups.push({ label: 'Others', items: others })
+                          if (others.length > 0) groups.push({ label: WIP_GROUPS[WIP_GROUPS.length-1].label, items: others })
                           return groups.map(grp => [
                             <tr key={grp.label + '-header'}>
                               <td colSpan={6} style={{ background:'var(--surface2)', padding:'10px 14px', fontSize:14, letterSpacing:'1px', textTransform:'uppercase', color:'var(--ink)', fontFamily:"'Hanken Grotesk', var(--display), sans-serif", fontWeight:800, borderTop:'3px solid var(--kk-green)' }}>
@@ -838,7 +838,7 @@ export default function Inventory() {
                                   <td><span className="code-tag">{p.code}</span></td>
                                   <td style={{ fontWeight: 500 }}>{p.name}</td>
                                   <td style={{ fontWeight: 600, color: 'var(--' + cls + ')' }}>{p.units?.toLocaleString()} <span style={{ fontWeight: 400, color: 'var(--ink3)', fontSize: 11 }}>{unitLabel}</span></td>
-                                  <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.wip_unit === 'ea' ? 'cake layer' : 'batch component'}</td>
+                                  <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{p.wip_unit === 'ea' ? 'cake slab' : 'batch component'}</td>
                                   <td><span className={'badge badge-' + cls}>{label}</span></td>
                                   {(isAdmin || isKitchen) && <td><button onClick={e => { e.stopPropagation(); setEditItem(p); setEditVal(String(p.units)); }} className="btn btn-secondary btn-sm">edit</button></td>}
                                 </tr>
@@ -1116,7 +1116,7 @@ export default function Inventory() {
                 </div>
               )
             })() : tab === 'wip' ? (
-              <div className="field"><label>New Stock ({editItem.wip_unit === 'ea' ? 'cake layers' : 'grams'})</label>
+              <div className="field"><label>New Stock ({editItem.wip_unit === 'ea' ? 'cake slabs' : 'grams'})</label>
                 <input type="number" value={editVal} onChange={e => setEditVal(e.target.value)} step={editItem.wip_unit === 'ea' ? '1' : '0.1'} style={{ fontSize: 20, textAlign: 'center' }} autoFocus />
               </div>
             ) : (() => {

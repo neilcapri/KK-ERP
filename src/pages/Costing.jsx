@@ -142,6 +142,30 @@ export default function Costing() {
     } catch(e) { return 0 }
   }
 
+  // Total weight of one unit's BOM, in grams. g/gms count as-is, kg ×1000,
+  // ml counted as grams (close enough for extracts/liquids), WIP slabs in 'ea'
+  // use their slab weight. Anything else in 'ea' (eggs, inclusions by count)
+  // can't be weighed and is listed in `skipped`.
+  function bomWeightFor(code) {
+    let grams = 0
+    const skipped = []
+    ;(bomByProduct[code] || []).forEach(b => {
+      const q = parseFloat(b.qty_per_unit) || 0
+      const u = (b.unit || '').toLowerCase().trim()
+      const wipCode = products.find(x => x.code.toLowerCase() === (b.rm_name || '').toLowerCase() && x.category === 'WIP')?.code
+      if (['g', 'gm', 'gms', 'gram', 'grams', 'ml'].includes(u)) grams += q
+      else if (u === 'kg' || u === 'l') grams += q * 1000
+      else if (u === 'ea' && wipCode && SLAB_WEIGHT_G[wipCode]) grams += q * SLAB_WEIGHT_G[wipCode]
+      else skipped.push(b.rm_name)
+    })
+    return { grams, skipped }
+  }
+
+  function fmtWeight(g) {
+    if (!(g > 0)) return '—'
+    return g >= 1000 ? (g / 1000).toFixed(2) + ' kg' : g.toFixed(1) + ' g'
+  }
+
   function rowFor(p) {
     const rmCost = rmCostFor(p.code)
     const packagingCost = p.packaging_cost_per_unit || 0
@@ -300,7 +324,7 @@ export default function Costing() {
             <table className="costing-table">
               <thead>
                 <tr>
-                  <th>Code</th><th>Product</th><th>Product Cost</th><th>Packaging /u</th>
+                  <th>Code</th><th>Product</th><th>BOM Wt /u</th><th>Product Cost</th><th>Packaging /u</th>
                   <th>Labour /u ({(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}%)</th>
                   <th>Total Cost</th><th>List Price /u</th>
                   <th>Gross Margin $</th><th>Gross Margin %</th>
@@ -316,6 +340,7 @@ export default function Costing() {
                     <tr key={p.code} style={flagged ? { background: 'rgba(200,60,60,0.06)' } : {}}>
                       <td><span className="code-tag" style={{ cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.code}</span></td>
                       <td style={{ fontWeight: 500, cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.name}</td>
+                      <td style={{ color: 'var(--ink3)', fontSize: 12 }}>{fmtWeight(bomWeightFor(p.code).grams)}</td>
                       <td style={{ color: 'var(--ink2)' }}>{fmt(r.rmCost)}</td>
                       <td>{isAdmin ? <input type="number" step="0.01" style={editInput} defaultValue={p.packaging_cost_per_unit || ''} onBlur={e => savePackagingCost(p.code, e.target.value)} /> : fmt(r.packagingCost)}</td>
                       <td style={{ color: 'var(--ink2)' }}>{r.labourCost === null ? '—' : fmt(r.labourCost)}</td>
@@ -358,7 +383,7 @@ export default function Costing() {
             <table className="costing-table">
               <thead>
                 <tr>
-                  <th>Code</th><th>Product</th><th>Product Cost</th>
+                  <th>Code</th><th>Product</th><th>BOM Wt /u</th><th>Product Cost</th>
                   <th>Labour /u ({(LABOUR_PCT_OF_PRICE * 100).toFixed(0)}%)</th>
                   <th>Total Cost</th><th>List Price /u</th>
                   <th>Gross Margin $</th><th>Gross Margin %</th>
@@ -379,6 +404,7 @@ export default function Costing() {
                     <tr key={p.code} style={flagged ? { background: 'rgba(200,60,60,0.06)' } : {}}>
                       <td><span className="code-tag" style={{ cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.code}</span></td>
                       <td style={{ fontWeight: 500, cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.name}</td>
+                      <td style={{ color: 'var(--ink3)', fontSize: 12 }}>{fmtWeight(bomWeightFor(p.code).grams)}</td>
                       <td style={{ color: 'var(--ink2)' }}>{fmt(rmCost)}</td>
                       <td style={{ color: 'var(--ink2)' }}>{labourCost === null ? '—' : fmt(labourCost)}</td>
                       <td style={{ fontFamily: 'var(--display)', fontSize: 13 }}>{fmt(totalCost)}</td>
@@ -430,7 +456,9 @@ export default function Costing() {
                   <th>Unit</th>
                   <th>Batch RM Cost</th>
                   <th>Batch Yield</th>
-                  <th>Cost /gm or /ea</th>
+                  <th>Cost /gm</th>
+                  <th>Slab Wt</th>
+                  <th>Cost /slab</th>
                   <th>BOM Items</th>
                 </tr>
               </thead>
@@ -440,6 +468,10 @@ export default function Costing() {
                   const bomItems = bomByProduct[p.code] || []
                   const yieldGms = bomItems.reduce((s, i) => s + (i.unit === 'ml' ? 0 : (parseFloat(i.qty_per_unit) || 0)), 0)
                   const costPerUnit = yieldGms > 0 ? batchCost / yieldGms : null
+                  // Cake slabs: BOM is stored per gram of finished slab, so the
+                  // "batch" columns only describe ~1 g. Show the real cost of one slab.
+                  const slabG = SLAB_WEIGHT_G[p.code]
+                  const costPerSlab = slabG && costPerUnit !== null ? costPerUnit * slabG : null
                   return (
                     <tr key={p.code}>
                       <td><span className="code-tag" style={{ cursor: 'pointer' }} onClick={() => setSelected(p.code)}>{p.code}</span></td>
@@ -450,6 +482,8 @@ export default function Costing() {
                       <td style={{ fontFamily: 'var(--display)', fontSize: 13, color: 'var(--kk-green)' }}>
                         {costPerUnit !== null ? '$' + costPerUnit.toFixed(4) + '/gm' : '—'}
                       </td>
+                      <td style={{ color: 'var(--ink3)', fontSize: 11 }}>{slabG ? fmtWeight(slabG) : '—'}</td>
+                      <td style={{ fontFamily: 'var(--display)', fontSize: 13, color: 'var(--kk-brown)' }}>{costPerSlab !== null ? fmt(costPerSlab) : '—'}</td>
                       <td style={{ fontSize: 11, color: 'var(--ink3)' }}>{bomItems.length > 0 ? `${bomItems.length} ingredients` : <span style={{ color: 'var(--red)' }}>No BOM</span>}</td>
                     </tr>
                   )
@@ -467,6 +501,11 @@ export default function Costing() {
         const r = rowFor(p)
         const bomItems = bomByProduct[p.code] || []
         const isWIP = p.category === 'WIP'
+        // Cake slabs store their BOM per 1 g of finished slab. Scale the popup
+        // up to one whole slab so quantities and costs read as real numbers.
+        const slabG = isWIP ? SLAB_WEIGHT_G[p.code] : null
+        const scale = slabG || 1
+        const fmtQty = q => { const n = (parseFloat(q) || 0) * scale; return n >= 10 ? n.toFixed(1) : n >= 1 ? n.toFixed(2) : n.toFixed(3) }
         return (
           <div className="modal-bg" onClick={() => setSelected(null)}>
             <div className="modal" onClick={e => e.stopPropagation()}>
@@ -477,7 +516,7 @@ export default function Costing() {
               </div>
 
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontFamily: 'var(--display)', fontSize: 11, letterSpacing: 1, color: 'var(--ink3)', marginBottom: 8 }}>RAW MATERIALS</div>
+                <div style={{ fontFamily: 'var(--display)', fontSize: 11, letterSpacing: 1, color: 'var(--ink3)', marginBottom: 8 }}>RAW MATERIALS{slabG ? ` — PER SLAB (${fmtWeight(slabG)})` : ''}</div>
                 {bomItems.length === 0
                   ? <div style={{ fontSize: 12, color: 'var(--ink3)' }}>No BOM defined</div>
                   : bomItems.map((b, i) => {
@@ -504,7 +543,8 @@ export default function Costing() {
                         else if (rm.unit === 'batch') cost = (b.qty_per_unit / 6000) * rm.price
                         else cost = (b.qty_per_unit / 1000) * rm.price
                       }
-                      const label = isWIPIngredient ? `${b.rm_name} (${b.qty_per_unit}${b.unit}) [WIP]` : `${b.rm_name} (${b.qty_per_unit}${b.unit})`
+                      cost = cost * scale
+                      const label = isWIPIngredient ? `${b.rm_name} (${fmtQty(b.qty_per_unit)} ${b.unit}) [WIP]` : `${b.rm_name} (${fmtQty(b.qty_per_unit)} ${b.unit})`
                       return (
                         <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
                           <span style={{ color: isWIPIngredient ? 'var(--kk-peach)' : 'inherit' }}>{label}</span>
@@ -513,14 +553,35 @@ export default function Costing() {
                       )
                     })
                 }
+                {bomItems.length > 0 && (() => {
+                  const w = bomWeightFor(p.code)
+                  const batchYield = parseFloat(p.tray_yield) > 0 ? { n: parseFloat(p.tray_yield), label: 'tray' }
+                    : parseFloat(p.log_yield) > 0 ? { n: parseFloat(p.log_yield), label: 'log' }
+                    : null
+                  return (
+                    <div style={{ marginTop: 8, padding: '8px 10px', background: 'var(--surface2)', borderRadius: 6, fontSize: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                        <span>BOM weight{slabG ? ' per slab' : isWIP ? '' : ' per unit'}</span><span>{fmtWeight(w.grams * scale)}</span>
+                      </div>
+                      {batchYield && !isWIP && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--ink2)', marginTop: 4 }}>
+                          <span>Per {batchYield.label} (× {batchYield.n})</span><span>{fmtWeight(w.grams * batchYield.n)}</span>
+                        </div>
+                      )}
+                      {w.skipped.length > 0 && (
+                        <div style={{ color: 'var(--ink3)', fontSize: 10, marginTop: 4 }}>Not weighed (counted in ea): {w.skipped.join(', ')}</div>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
 
               {isWIP ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
-                  <Row label="RM Cost" value={fmt(r.rmCost)} />
+                  {slabG && <Row label="RM Cost per gram" value={'$' + (r.rmCost / (bomWeightFor(p.code).grams || 1)).toFixed(4)} />}
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--display)', fontSize: 15 }}>
-                    <span>TOTAL RM COST</span>
-                    <span style={{ color: 'var(--kk-brown)' }}>{fmt(r.rmCost)}</span>
+                    <span>{slabG ? 'RM COST PER SLAB' : 'TOTAL RM COST'}</span>
+                    <span style={{ color: 'var(--kk-brown)' }}>{fmt(r.rmCost * scale)}</span>
                   </div>
                   <Row label="List Price" value={p.price_per_pack ? fmt(p.price_per_pack) : 'Not set yet'} />
                 </div>

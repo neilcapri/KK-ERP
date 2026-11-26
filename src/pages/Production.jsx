@@ -46,7 +46,21 @@ const CAKE_SLAB_OPTIONS = ['Chocolate', 'Vanilla', 'KLR']
 const CAKE_SIZE_OPTIONS = ['6', '9']
 const CAKE_LAYER_OPTIONS = ['2', '3', '4']
 const CAKE_FROSTING_OPTIONS = ['Chocolate', 'Vanilla Paleo', 'Vanilla Keto', 'Cream Cheese', 'Truffle Cream']
-const DEFAULT_CAKE_CONFIG = { slab: 'Chocolate', size: '6', layers: '2', frosting: 'Chocolate' }
+// Display names for frosting values (the stored value stays the same so old
+// production tags still parse). 'Vanilla Paleo' is the maple sugar frosting.
+const CAKE_FROSTING_LABELS = { Chocolate: 'Chocolate Ganache', 'Vanilla Paleo': 'Maple Sugar (Paleo Frosting)' }
+const CAKE_FILLING_OPTIONS = ['None', 'Strawberry Jam', 'Raspberry Jam', 'Hazelnut']
+// Named cakes — picking one pre-fills slab / filling / frosting. `frostings`
+// lists the allowed frostings; the first is the default.
+const CAKE_FLAVOURS = [
+  { name: 'Vanilla Strawberry',   slab: 'Vanilla',   filling: 'Strawberry Jam', frostings: ['Vanilla Paleo'] },
+  { name: 'Vanilla Raspberry',    slab: 'Vanilla',   filling: 'Raspberry Jam',  frostings: ['Vanilla Paleo'] },
+  { name: 'Chocolate Hazelnut',   slab: 'Chocolate', filling: 'Hazelnut',       frostings: ['Chocolate'] },
+  { name: 'Chocolate Raspberry',  slab: 'Chocolate', filling: 'Raspberry Jam',  frostings: ['Chocolate', 'Vanilla Paleo'] },
+  { name: 'Chocolate Strawberry', slab: 'Chocolate', filling: 'Strawberry Jam', frostings: ['Chocolate', 'Vanilla Paleo'] },
+  { name: 'Chocolate Truffle',    slab: 'Chocolate', filling: 'None',           frostings: ['Truffle Cream'] },
+]
+const DEFAULT_CAKE_CONFIG = { slab: 'Chocolate', size: '6', layers: '2', frosting: 'Chocolate', filling: 'None', flavour: '' }
 
 const CAKE_LAYER_WIP = {
   'Chocolate-6': 'WIPPCCKE6', 'Chocolate-9': 'WIPPCCKE9',
@@ -56,15 +70,23 @@ const CAKE_LAYER_WIP = {
   'KLR-6': 'WIPKLRCKE6',
 }
 const CAKE_FROSTING_WIP = {
-  Chocolate: 'Ganache', 'Vanilla Paleo': 'WIPPFROST', 'Vanilla Keto': 'WIPKFROST', 'Cream Cheese': 'WIPCRECHEFR', 'Truffle Cream': 'WIPTRCR',
+  Chocolate: 'WIPPGANACHE', 'Vanilla Paleo': 'WIPPFROST', 'Vanilla Keto': 'WIPKFROST', 'Cream Cheese': 'WIPCRECHEFR', 'Truffle Cream': 'WIPTRCR',
+}
+const CAKE_FILLING_WIP = {
+  'Strawberry Jam': 'WIPPSJAM', 'Raspberry Jam': 'WIPPRJAM', Hazelnut: 'WIPNotella',
 }
 
-// 6": 250g for 2 layers, +125g per layer beyond that. 9": 500g for 2 layers, +250g/layer beyond.
+// Frosting: 6" 250g, 9" 500g for 2 layers, plus half that per extra layer.
 function frostingGramsFor(size, layers) {
   const base = size === '9' ? 500 : 250
   const perExtra = size === '9' ? 250 : 125
   const extraLayers = Math.max(0, (parseInt(layers) || 2) - 2)
   return base + extraLayers * perExtra
+}
+
+// Filling (jam / hazelnut): 6" 150g, 9" 250g per cake.
+function fillingGramsFor(size) {
+  return size === '9' ? 250 : 150
 }
 
 // Returns the WIP components (code/qty/unit/label) a batch of `qty` custom
@@ -82,16 +104,23 @@ function customCakeWipNeeds(cfg, qty) {
   else needs.push({ code: null, qty: 0, unit: 'ea', label: cfg.slab + ' ' + cfg.size + '" Layer (no WIP code mapped)' })
   if (frostingCode) needs.push({ code: frostingCode, qty: frostingGramsFor(cfg.size, layers) * qty, unit: 'g', label: cfg.frosting + ' Frosting' })
   else needs.push({ code: null, qty: 0, unit: 'g', label: cfg.frosting + ' Frosting (no WIP code mapped)' })
+  if (cfg.filling && cfg.filling !== 'None') {
+    const fillingCode = CAKE_FILLING_WIP[cfg.filling]
+    if (fillingCode) needs.push({ code: fillingCode, qty: fillingGramsFor(cfg.size) * qty, unit: 'g', label: cfg.filling + ' Filling' })
+    else needs.push({ code: null, qty: 0, unit: 'g', label: cfg.filling + ' Filling (no WIP code mapped)' })
+  }
   return needs
 }
 
 function buildCakeTag(cfg) {
-  return '[CAKE:' + cfg.slab + '|' + cfg.size + '|' + cfg.layers + '|' + cfg.frosting + ']'
+  // filling + flavour were added 2026-11; older tags have only 4 fields and
+  // still parse (filling defaults to None).
+  return '[CAKE:' + cfg.slab + '|' + cfg.size + '|' + cfg.layers + '|' + cfg.frosting + '|' + (cfg.filling || 'None') + '|' + (cfg.flavour || '') + ']'
 }
 function parseCakeTag(notes) {
-  const m = /^\[CAKE:([^|]+)\|([^|]+)\|([^|]+)\|([^\]]+)\]/.exec(notes || '')
+  const m = /^\[CAKE:([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)(?:\|([^|\]]*))?(?:\|([^|\]]*))?\]/.exec(notes || '')
   if (!m) return null
-  return { slab: m[1], size: m[2], layers: m[3], frosting: m[4] }
+  return { slab: m[1], size: m[2], layers: m[3], frosting: m[4], filling: m[5] || 'None', flavour: m[6] || '' }
 }
 
 // Case/whitespace-insensitive raw material lookup — BOM.rm_name is free text and can
@@ -362,6 +391,17 @@ export default function Production() {
 
   // Updates one cake-config dropdown and immediately re-checks WIP stock
   // against the merged selection (not the stale pre-update state).
+  function applyCakeFlavour(name) {
+    const f = CAKE_FLAVOURS.find(x => x.name === name)
+    const merged = f
+      ? { ...cakeConfig, flavour: f.name, slab: f.slab, filling: f.filling, frosting: f.frostings[0] }
+      : { ...cakeConfig, flavour: '' }
+    setCakeConfig(merged)
+    if (form.code === CUSTOM_CAKE_CODE && form.outputUnits) {
+      checkRM(form.code, parseInt(form.outputUnits) || 0, merged).then(setRmWarnings)
+    }
+  }
+
   function updateCakeConfig(field, val) {
     const merged = { ...cakeConfig, [field]: val }
     setCakeConfig(merged)
@@ -477,7 +517,7 @@ export default function Production() {
         await supabase.from('products').update({ units: (wip.units || 0) - need.qty }).eq('code', need.code)
         wipCount++
       }
-      addLog('✓ ' + wipCount + ' WIP component(s) deducted for ' + totalOutput + ' custom cake(s) — ' + cakeConfig.slab + ' ' + cakeConfig.size + '" · ' + cakeConfig.layers + ' layers · ' + cakeConfig.frosting + ' frosting', 'ok')
+      addLog('✓ ' + wipCount + ' WIP component(s) deducted for ' + totalOutput + ' custom cake(s) — ' + cakeConfig.slab + ' ' + cakeConfig.size + '" · ' + cakeConfig.layers + ' layers · ' + cakeConfig.frosting + ' frosting' + (cakeConfig.filling && cakeConfig.filling !== 'None' ? ' · ' + cakeConfig.filling + ' filling' : ''), 'ok')
       if (missedWip.length) addLog('⚠️ Could not deduct: ' + missedWip.join(', ') + ' — check CAKE_LAYER_WIP/CAKE_FROSTING_WIP against the products table.', 'warn')
     } else {
       // Same grams-for-RM-only split as checkRM above: these 12 slab codes get
@@ -775,6 +815,13 @@ export default function Production() {
                   </div>
                   <div style={{ background: '#fff', border: '1px dashed var(--kk-peach)', borderRadius: 6, padding: 10, marginBottom: 14 }}>
                     <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--ink3)', marginBottom: 8 }}>What was actually baked</div>
+                    <div className="field" style={{ marginBottom: 8 }}>
+                      <label>Cake</label>
+                      <select style={selectStyle} value={cakeConfig.flavour || ''} onChange={e => applyCakeFlavour(e.target.value)}>
+                        <option value="">Custom (pick below)</option>
+                        {CAKE_FLAVOURS.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
+                      </select>
+                    </div>
                     <div className="field-row" style={{ marginBottom: 8 }}>
                       <div className="field" style={{margin:0}}>
                         <label>Slab</label>
@@ -799,9 +846,15 @@ export default function Production() {
                       <div className="field" style={{margin:0}}>
                         <label>Frosting</label>
                         <select style={selectStyle} value={cakeConfig.frosting} onChange={e => updateCakeConfig('frosting', e.target.value)}>
-                          {CAKE_FROSTING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                          {(CAKE_FLAVOURS.find(f => f.name === cakeConfig.flavour)?.frostings || CAKE_FROSTING_OPTIONS).map(o => <option key={o} value={o}>{CAKE_FROSTING_LABELS[o] || o}</option>)}
                         </select>
                       </div>
+                    </div>
+                    <div className="field" style={{ margin: '8px 0 0' }}>
+                      <label>Filling</label>
+                      <select style={selectStyle} value={cakeConfig.filling || 'None'} onChange={e => updateCakeConfig('filling', e.target.value)}>
+                        {CAKE_FILLING_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
                     </div>
                     {form.outputUnits > 0 && (() => {
                       const needs = customCakeWipNeeds(cakeConfig, parseInt(form.outputUnits) || 0)

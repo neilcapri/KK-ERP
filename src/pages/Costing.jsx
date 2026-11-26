@@ -72,13 +72,16 @@ export default function Costing() {
     setLoading(true)
     const [{ data: prods }, { data: bomRows }, { data: rms }] = await Promise.all([
       supabase.from('products').select('*').order('category').order('code'),
-      supabase.from('bom').select('product_code, rm_name, qty_per_unit, unit'),
+      supabase.from('bom').select('product_code, rm_name, wip_code, qty_per_unit, unit'),
       supabase.from('raw_materials').select('name, price_per_unit, unit'),
     ])
     const priceMap = {}
     ;(rms || []).forEach(r => { priceMap[r.name] = { price: r.price_per_unit || 0, unit: r.unit } })
     setProducts(prods || [])
-    setBom(bomRows || [])
+    // WIP lines can store the WIP code in either rm_name (older rows) or
+    // wip_code (component_type 'wip'). Costing keys everything off rm_name,
+    // so fold wip_code in here — otherwise those lines cost $0.
+    setBom((bomRows || []).map(b => ({ ...b, rm_name: b.rm_name || b.wip_code || '' })))
     setRmPriceMap(priceMap)
     setLoading(false)
   }
